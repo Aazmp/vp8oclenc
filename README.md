@@ -18,7 +18,7 @@ Intra coding is done in usual host code part.
 
 Has almost no error checking. 
 
-Command line options
+Command line options:
 
 -i <input file>     YUV4MPEG2 with 420 chroma sub-sampling
 -o <output file>    IVF file
