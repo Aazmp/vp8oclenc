@@ -22,27 +22,27 @@ Has almost no error checking.
 
 Command line options:
 
--i <input file>     YUV4MPEG2 with 420 chroma sub-sampling
+-i input file     YUV4MPEG2 with 420 chroma sub-sampling
 
--o <output file>    IVF file
+-o output file    IVF file
 
--g <value>          GOP size
+-g value          GOP size
 
--qi <value>         Constant quantizer INDEX for all I-frames (UV has qi minus 15)
+-qi value         Constant quantizer INDEX for all I-frames (UV has qi minus 15)
 
--qp <value>         Same for P-frames
+-qp value         Same for P-frames
 
--vx <value>         dX(rows) limit for MV search (in quarter pixel). Should be lower than 512
+-vx value         dX(rows) limit for MV search (in quarter pixel). Should be lower than 512
 
--vy <value>         dY(collumns) -//-
+-vy value         dY(collumns) -//-
 
--ll <value>         Loop filter level (0 - disabled)
+-ll value         Loop filter level (0 - disabled)
 
--ls <value>         Loop filter sharpness
+-ls value         Loop filter sharpness
 
--w <value>          Number of GPU device threads (the more the better)
+-w value          Number of GPU device threads (the more the better)
 
--t <value>          Number of CPU device(!) threads (also the number of partitions)
+-t value          Number of CPU device(!) threads (also the number of partitions)
 
 If input_file is set as @
 it will be set to stdin
