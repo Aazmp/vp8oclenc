@@ -50,4 +50,4 @@ Command line options:
 If input_file is set as @
 it will be set to stdin
 
-... sorry for bad English
+... sorry for bad English and bad programming
