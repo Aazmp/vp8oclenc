@@ -14,7 +14,7 @@ CL_DEVICE_TYPE_CPU - for coefficient partitions boolean coding.
 CL_DEVICE_TYPE_GPU - for motion vector search and transform for inter-frames.
 Also GPU does simple "simple" loop filter, but it does only harm (may be because of errors in code).
 
-Launched only on AMD+AMD.
+Launched only on AMD+AMD+Win7.
 
 Intra coding is done in usual host code part.
 
