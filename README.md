@@ -11,6 +11,8 @@ Simple and not effective. Just a toy project.
 Used (and copied :)) sources: 
 http://www.webmproject.org/; http://multimedia.cx/eggs/category/vp8/;
 
+pure C. Cpp just as extension to make Visual Studio compile not in C89....
+
 Uses OpenCL:
 CL_DEVICE_TYPE_CPU - for coefficient partitions boolean coding.
 
