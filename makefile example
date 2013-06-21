@@ -1,0 +1,4 @@
+# for amd app sdk on windows
+
+all:
+  g++ vp8enc.cpp entropy_host.cpp -L"C:/Program Files (x86)/AMD APP/lib/x86" -lOpenCL -o vp8oclenc
