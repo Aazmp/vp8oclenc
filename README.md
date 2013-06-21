@@ -37,9 +37,9 @@ Command line options:
 
 -qp value = Same for P-frames
 
--vx value = dX(rows) limit for MV search (in quarter pixel). Should be lower than 512
+-vx value = dX(collumns) limit for MV search (in quarter pixel). Should be lower than 512
 
--vy value = dY(collumns) -//-
+-vy value = dY(rows) -//-
 
 -ll value = Loop filter level (0 - disabled)
 
