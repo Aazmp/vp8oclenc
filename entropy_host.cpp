@@ -236,7 +236,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	else above_left_edata = &imaginary_edata;
 	// we begin at spot, where dixie.c decoder calls find near mvs
 	// but we do an encoder
-	//there only two types of macroblocks: SPLITMV (real ones), ZEROMV (imaginary blocks above the frame and to the left)
+	//there only two types of macroblocks: SPLITMV (real ones), INTRA-like (imaginary blocks above the frame and to the left)
 	// for each macroblock there is a list of three vectors mv[3] (above, left, above_left),
 	// and "weights" cnt[4];
 	/* "The first three entries in the return value cnt are (in order)
@@ -255,8 +255,8 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	// process above // above mb's reference always not CURRENT (mb itself not intra)
 	// BUT:
 	//spec says that above and to the left of frame there are blocks with 0x0 vectors
-	// it is a lie
-	// there are INTRA blocks (technically there are no vectors) according to simple_decoder debug
+	// on block-level they are
+	// but on MB-level they are INTRA blocks (technically there are no vectors) according to simple_decoder
 
 	if (mb_row > 0) 
 	{
@@ -312,7 +312,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	// Use near_mvs[CNT_BEST] to store the "best" MV. Note that this storage shares the same address as near_mvs[CNT_ZEROZERO].
 	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
 	// since we never use NEARMV or NEARESTMV modes, we need only cnt[0] (BEST)
-	// this position equals end of dixie.c function find_near_mvs with best_mv in mb_mv_list[0];
+	// this position equals end of spec_example encoder function find_near_mvs with best_mv in mb_mv_list[0];
 	//also we have cnt[] array as index-set for probabilities array
 	Prob mv_ref_p[4];
 	mv_ref_p[0] = vp8_mode_contexts[cnt[0]][0]; // vp8_mode_contexts[6][4]
@@ -335,7 +335,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	int32_t b_num;
 	for (b_num = 0; b_num < 4; ++b_num)
 	{
-		// b_num being part number and block number
+		// b_num being part number and 8x8 block number
 		union mv left_mv, above_mv, this_mv;
 		int32_t b_col, b_row;
 		b_row = b_num / 2; b_col = b_num % 2;
@@ -402,7 +402,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		}
 
 	}
-	// according to spec vector [16] is set as base (we have 4th on that place)
+	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
 	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
@@ -585,7 +585,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	mv_ref_p[3] = vp8_mode_contexts[cnt[3]][3];
 
 	// encode SPLITMV mode
-	// -		we count only now
+	// -		we count probs only now
 	// encode sub_mv_mode
 	// -
 	
@@ -642,7 +642,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 		}
 
 	}
-	// according to spec vector [16] is set as base (we have 4th on that place)
+	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
 	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
