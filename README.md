@@ -53,3 +53,18 @@ If input_file is set as @
 it will be set to stdin
 
 ... sorry for bad English and bad programming
+
+P.S. 
+No benchmarks, because there is no need in them :)
+Quality of material can't compete with any good encoder of any standard.
+It's just bad now)
+No adaptive quant even on frame level.
+No skipping macroblocks.
+Simple filter instead of Normal (also implemented in very simple way... and may be broken)
+Fixed GOP size, only one reference frame - last one.
+Simple interpolation filter.
+Fixed size of blocks for ME - 8x8
+MV search - full search (but for GPU it's no that bad)
+Encoding is very straightforward, no crafty methods at all.
+Just a toy :)
+
