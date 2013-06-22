@@ -6,89 +6,7 @@ typedef struct {
     int vector_y[4];
 } macroblock;
 
-__kernel void luma_interpolate_Hx4( __global uchar *const src_frame, //0
-  								__global uchar *const dst_frame, //1
-									const int width, //2
-									const int height) //3
-{
-	if (get_global_id(0) > (height-1)) return;
-
-	__private uchar4 UC4;
-	__private uchar16 UC16;
-	
-	int i, ind;
-	int width_x4 = width*4;
-	uchar right;
-	
-	ind = (get_global_id(0) + 1)*width - 1;
-	right  = src_frame[ind];
-	
-	for (i = width-4; i >= 0; i -= 4)
-	{
-		ind = get_global_id(0)*width + i;
-		UC4 = vload4(0, src_frame + ind);
-		
-		UC16.s0 = UC4.s0;
-		UC16.s1 = (uchar)(mad24((int)UC4.s0, 3, (int)UC4.s1 + 2)/4);
-		UC16.s2 = (uchar)(((int)UC4.s0 + (int)UC4.s1 + 1)/2);
-		UC16.s3 = (uchar)(mad24((int)UC4.s1, 3, (int)UC4.s0 + 2)/4);
-		UC16.s4 = UC4.s1;
-		UC16.s5 = (uchar)(mad24((int)UC4.s1, 3, (int)UC4.s2 + 2)/4);
-		UC16.s6 = (uchar)(((int)UC4.s1 + (int)UC4.s2 + 1)/2);
-		UC16.s7 = (uchar)(mad24((int)UC4.s2, 3, (int)UC4.s1 + 2)/4);
-		UC16.s8 = UC4.s2;
-		UC16.s9 = (uchar)(mad24((int)UC4.s2, 3, (int)UC4.s3 + 2)/4);
-		UC16.sA = (uchar)(((int)UC4.s2 + (int)UC4.s3 + 1)/2);
-		UC16.sB = (uchar)(mad24((int)UC4.s3, 3, (int)UC4.s2 + 2)/4);
-		UC16.sC = UC4.s3;
-		UC16.sD = (uchar)(mad24((int)UC4.s3, 3, (int)right + 2)/4);
-		UC16.sE = (uchar)(((int)UC4.s3 + (int)right + 1)/2);
-		UC16.sF = (uchar)(mad24((int)right, 3, (int)UC4.s3 + 2)/4);
-		
-		ind = get_global_id(0)*width_x4 + (i*4);
-		vstore16(UC16, 0, dst_frame + ind);
-		
-		right = UC4.s0;
-	}
-	return;	
-}
-
-__kernel void luma_interpolate_Vx4( __global uchar *const frame, //0
-									const int width, //1
-									const int height) //2
-{
-	if (get_global_id(0) > (width-1)) return;
-
-	__private uchar4 UC0, UC1, UC2, UC3, below;
-
-	int width_x4 = width*4;
-	int i, ind;
-	
-	ind = (height-1)*width_x4 + (get_global_id(0)*4);
-	below = vload4(0, frame + ind);
-	
-	for (i = height-1; i >= 0; --i)
-	{
-		ind = i*width_x4 + (get_global_id(0)*4);
-		UC0 = vload4(0, frame + ind);
-		
-		UC1 = convert_uchar4(mad24(convert_int4(UC0), 3, convert_int4(below) + 2)/4);
-		UC2 = convert_uchar4((convert_int4(UC0) + convert_int4(below) + 1)/2);
-		UC3 = convert_uchar4(mad24(convert_int4(below), 3, convert_int4(UC0) + 2)/4);
-
-		ind = (i*4)*width_x4 + (get_global_id(0)*4);
-		vstore4(UC0, 0, frame + ind); ind += width_x4;
-		vstore4(UC1, 0, frame + ind); ind += width_x4;
-		vstore4(UC2, 0, frame + ind); ind += width_x4;
-		vstore4(UC3, 0, frame + ind);
-		
-		below = UC0;
-	}
-	return;	
-}
-
-
-void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) 
+void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) //Hadamard
 {
 	int4 L0, L1, L2, L3;
 	L0 = *__L0 + *__L3;	//a1 = (ip[0] + ip[3]);
@@ -182,105 +100,6 @@ void weight_SSD(int4 * const L0, int4 * const L1, int4 * const L2, int4 * const 
 	*L0 = mad24(*L0, *L0, mad24(*L1, *L1, mad24(*L2, *L2, mul24(*L3, *L3))));
 	(*L0).x += (*L0).y + (*L0).z + (*L0).w;
 }
-
-/*
-void weight_toyRD(int4 * const Line0, int4 * const Line1, int4 * const Line2, int4 * const Line3, const int * const dc_q, const int * const ac_q) // bad results
-{
-	private const uchar bit_weights[32] = { 0, 1, 3, 4, 4, 5, 5, 6,
-											6, 6, 6, 8,	8, 8, 8, 9, 
-											8, 8, 8, 9, 9, 9, 9, 9,
-											9, 9, 9, 9, 9, 9, 9, 10};
-	
-	private int4 LineA; 
-	
-	LineA = *Line0; 
-	*Line0 = (LineA + *Line3) >> 3;	
-	*Line3 = (LineA - *Line3); 
-	LineA = *Line1; 
-	*Line1 = (LineA + *Line2) >> 3;	
-	*Line2 = (LineA - *Line2); 
-	
-	LineA = *Line2; 
-	
-	*Line2 = *Line0 - *Line1;
-	*Line0 = *Line0 + *Line1; 
-				
-	*Line1 = (mad24(LineA, 2217, mad24(*Line3, 5352, 1813))) >> 9;
-	*Line3 = (mad24(*Line3, 2217, mad24(LineA, -5352, 938))) >> 9;
-	
-	//--
-	
-	LineA.x = (*Line0).x + (*Line0).w;
-	LineA.y = (*Line1).x + (*Line1).w;
-	LineA.z = (*Line2).x + (*Line2).w;
-	LineA.w = (*Line3).x + (*Line3).w;
-	
-	(*Line0).w = (*Line0).x - (*Line0).w;
-	(*Line1).w = (*Line1).x - (*Line1).w;
-	(*Line2).w = (*Line2).x - (*Line2).w;
-	(*Line3).w = (*Line3).x - (*Line3).w;
-	
-	(*Line0).x = (*Line0).y + (*Line0).z;
-	(*Line1).x = (*Line1).y + (*Line1).z;
-	(*Line2).x = (*Line2).y + (*Line2).z;
-	(*Line3).x = (*Line3).y + (*Line3).z;
-	
-	(*Line0).z = (*Line0).y - (*Line0).z;
-	(*Line1).z = (*Line1).y - (*Line1).z;
-	(*Line2).z = (*Line2).y - (*Line2).z;
-	(*Line3).z = (*Line3).y - (*Line3).z;
-		
-	//--
-	
-	(*Line0).y = ((mad24((*Line0).z, 554, mad24((*Line0).w, 1338, 3000))) /16384) + ((*Line0).w != 0);
-	(*Line1).y = ((mad24((*Line1).z, 554, mad24((*Line1).w, 1338, 3000))) /16384) + ((*Line1).w != 0);
-	(*Line2).y = ((mad24((*Line2).z, 554, mad24((*Line2).w, 1338, 3000))) /16384) + ((*Line2).w != 0);
-	(*Line3).y = ((mad24((*Line3).z, 554, mad24((*Line3).w, 1338, 3000))) /16384) + ((*Line3).w != 0);
-	
-	(*Line0).w = (mad24((*Line0).w, 554, mad24((*Line0).z, -1338, 12750))) >> 14;
-	(*Line1).w = (mad24((*Line1).w, 554, mad24((*Line1).z, -1338, 12750))) >> 14;
-	(*Line2).w = (mad24((*Line2).w, 554, mad24((*Line2).z, -1338, 12750))) >> 14;
-	(*Line3).w = (mad24((*Line3).w, 554, mad24((*Line3).z, -1338, 12750))) >> 14;
-	
-	(*Line0).z = ((LineA.x - (*Line0).x + 7) >> 4);
-	(*Line1).z = ((LineA.y - (*Line1).x + 7) >> 4);
-	(*Line2).z = ((LineA.z - (*Line2).x + 7) >> 4);
-	(*Line3).z = ((LineA.w - (*Line3).x + 7) >> 4);
-	
-	(*Line0).x = ((LineA.x + (*Line0).x + 7) >> 4);
-	(*Line1).x = ((LineA.y + (*Line1).x + 7) >> 4);
-	(*Line2).x = ((LineA.z + (*Line2).x + 7) >> 4);
-	(*Line3).x = ((LineA.w + (*Line3).x + 7) >> 4);
-	
-	*Line0 = convert_int4(abs(*Line0));	
-	*Line1 = convert_int4(abs(*Line1));
-	*Line2 = convert_int4(abs(*Line2));	
-	*Line3 = convert_int4(abs(*Line3));
-	
-	LineA = (*Line0 % (int4)(*dc_q, *ac_q, *ac_q, *ac_q)) + (*Line1 % *ac_q) + (*Line2 % *ac_q) + (*Line3 % *ac_q);
-	LineA.x += LineA.y + LineA.z + LineA.w;
-	
-	LineA.x /= 2;
-	
-	*Line0 /= (int4)(*dc_q, *ac_q, *ac_q, *ac_q); 
-	*Line1 /= *ac_q; *Line2 /= *ac_q; *Line3 /= *ac_q;
-	
-	*Line0 = select(*Line0,31,*Line0>=31);
-	*Line1 = select(*Line1,31,*Line1>=31);
-	*Line2 = select(*Line2,31,*Line2>=31);
-	*Line3 = select(*Line3,31,*Line3>=31);
-		
-	(*Line0).x = bit_weights[(*Line0).x]; (*Line0).y = bit_weights[(*Line0).y]; (*Line0).z = bit_weights[(*Line0).z]; (*Line0).w = bit_weights[(*Line0).w];
-	(*Line1).x = bit_weights[(*Line1).x]; (*Line1).y = bit_weights[(*Line1).y]; (*Line0).z = bit_weights[(*Line1).z]; (*Line1).w = bit_weights[(*Line1).w];
-	(*Line2).x = bit_weights[(*Line2).x]; (*Line2).y = bit_weights[(*Line2).y]; (*Line0).z = bit_weights[(*Line2).z]; (*Line2).w = bit_weights[(*Line2).w];
-	(*Line3).x = bit_weights[(*Line3).x]; (*Line3).y = bit_weights[(*Line3).y]; (*Line0).z = bit_weights[(*Line3).z]; (*Line3).w = bit_weights[(*Line3).w];
-	
-	*Line0 += (*Line1) + (*Line2) + (*Line3);
-	(*Line0).x += (*Line0).y + (*Line0).z + (*Line0).w + LineA.x;
-	
-	return ;
-}
-*/
 
 void DCT_and_quant(int4 Line0, int4 Line1, int4 Line2, int4 Line3, // <- input differences
 					int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3, const int dc_q, const int ac_q) // -> output DCT Lines
@@ -993,10 +812,11 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 									int ac_q, //8
 									int block_place) //9
 {  
-	__private int chroma_block_num;                                                       
+	__private int chroma_block_num;
+	__private int chroma_width_x8 = chroma_width*8;
 	chroma_block_num = first_block_offset + get_global_id(0); 
 	
-	__private int cx, cy;
+	__private int cx, cy, px, py;
 	cx = (chroma_block_num % (chroma_width/4))*4;
 	cy = (chroma_block_num / (chroma_width/4))*4; 
 
@@ -1026,135 +846,29 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 	
 	block_in_mb += block_place; // 16 for U, 20 for V
 
-	__private int ddx, ddy, nddx, nddy;
-	ddy = (int)(abs(vector.y)&7); // values indicating fractional part
-	ddx = (int)(abs(vector.x)&7); // in 8th-pel
-	
-	ddy = (vector.y < 0) ? (8 - ddy) : ddy;
-	ddx = (vector.x < 0) ? (8 - ddx) : ddx;
-	nddx = 8 - ddx;
-	nddy = 8 - ddy;
-
-	vector.x = (((vector.x < 0)&&((ddx&7)>0)) ? (vector.x - 8): vector.x);
-	vector.y = (((vector.y < 0)&&((ddy&7)>0)) ? (vector.y - 8): vector.y);
-	vector /= 8;
-	
 	__private int4 PredictorLine0, PredictorLine1, 
-					PredictorLine2, PredictorLine3, ExtraLine; 
+					PredictorLine2, PredictorLine3; 
 
-	__private int extra_collumn[5];
-	
-	__private int px0, px1, px2, px3, px4, py0, py1, py2, py3, py4;
-	
-	
-	px0 = cx + (int)vector.x;
-	py0 = cy + (int)vector.y;
-	px0 = (px0 < 0) ? 0 : px0;
-	px1 = (px0 < -1) ? 0 : px0 + 1;
-	px2 = (px0 < -2) ? 0 : px0 + 2;
-	px3 = (px0 < -3) ? 0 : px0 + 3;
-	px4 = (px0 < -4) ? 0 : px0 + 4;
-	px0 = (px0 >= chroma_width) ? (chroma_width - 1) : px0;
-	px1 = (px1 >= chroma_width) ? (chroma_width - 1) : px1;
-	px2 = (px2 >= chroma_width) ? (chroma_width - 1) : px2;
-	px3 = (px3 >= chroma_width) ? (chroma_width - 1) : px3;
-	px4 = (px4 >= chroma_width) ? (chroma_width - 1) : px4;	
-	
-	py0 = (py0 < 0) ? 0 : py0;
-	py1 = (py0 < -1) ? 0 : py0 + 1;
-	py2 = (py0 < -2) ? 0 : py0 + 2;
-	py3 = (py0 < -3) ? 0 : py0 + 3;
-	py4 = (py0 < -4) ? 0 : py0 + 4;
-	py0 = (py0 >= chroma_height) ? (chroma_height - 1) : py0;
-	py1 = (py1 >= chroma_height) ? (chroma_height - 1) : py1;
-	py2 = (py2 >= chroma_height) ? (chroma_height - 1) : py2;
-	py3 = (py3 >= chroma_height) ? (chroma_height - 1) : py3;
-	py4 = (py4 >= chroma_height) ? (chroma_height - 1) : py4;
-	
-	PredictorLine0.x = prev_frame[py0*chroma_width + px0]; 
-	PredictorLine0.y = prev_frame[py0*chroma_width + px1];
-	PredictorLine0.z = prev_frame[py0*chroma_width + px2];
-	PredictorLine0.w = prev_frame[py0*chroma_width + px3];
-	PredictorLine1.x = prev_frame[py1*chroma_width + px0];
-	PredictorLine1.y = prev_frame[py1*chroma_width + px1];
-	PredictorLine1.z = prev_frame[py1*chroma_width + px2];
-	PredictorLine1.w = prev_frame[py1*chroma_width + px3];
-	PredictorLine2.x = prev_frame[py2*chroma_width + px0]; 
-	PredictorLine2.y = prev_frame[py2*chroma_width + px1];
-	PredictorLine2.z = prev_frame[py2*chroma_width + px2];
-	PredictorLine2.w = prev_frame[py2*chroma_width + px3];
-	PredictorLine3.x = prev_frame[py3*chroma_width + px0]; 
-	PredictorLine3.y = prev_frame[py3*chroma_width + px1];
-	PredictorLine3.z = prev_frame[py3*chroma_width + px2];
-	PredictorLine3.w = prev_frame[py3*chroma_width + px3];
-	
-	extra_collumn[0] = 0; 
-	extra_collumn[1] = 0;
-	extra_collumn[2] = 0;
-	extra_collumn[3] = 0;
-	extra_collumn[4] = 0;
-	
-	if ((ddx&7) != 0)
-	{
-		extra_collumn[0] = prev_frame[py0*chroma_width + px4];
-		extra_collumn[1] = prev_frame[py1*chroma_width + px4];
-		extra_collumn[2] = prev_frame[py2*chroma_width + px4];
-		extra_collumn[3] = prev_frame[py3*chroma_width + px4];
-		extra_collumn[4] = prev_frame[py4*chroma_width + px4];
-	}
-	if ((ddy&7) != 0)
-	{
-		ExtraLine.x = prev_frame[py4*chroma_width + px0]; 
-		ExtraLine.y = prev_frame[py4*chroma_width + px1];
-		ExtraLine.z = prev_frame[py4*chroma_width + px2];
-		ExtraLine.w = prev_frame[py4*chroma_width + px3];
+	px = (cx*8) + (int)vector.x;
+	py = (cy*8) + (int)vector.y;
 
-		PredictorLine0 = PredictorLine0*nddy + PredictorLine1*ddy;
-			PredictorLine0 += 4;
-				PredictorLine0 >>= 3;
-		PredictorLine1 = PredictorLine1*nddy + PredictorLine2*ddy;
-			PredictorLine1 += 4;
-				PredictorLine1 >>= 3;
-		PredictorLine2 = PredictorLine2*nddy + PredictorLine3*ddy;
-			PredictorLine2 += 4;
-				PredictorLine2 >>= 3;
-		PredictorLine3 = PredictorLine3*nddy + ExtraLine*ddy;
-			PredictorLine3 += 4;
-				PredictorLine3 >>= 3;
-		extra_collumn[0] = extra_collumn[0]*nddy + extra_collumn[1]*ddy + 4; 
-			extra_collumn[0] >>= 3;
-		extra_collumn[1] = extra_collumn[1]*nddy + extra_collumn[2]*ddy + 4;
-			extra_collumn[1] >>= 3;
-		extra_collumn[2] = extra_collumn[2]*nddy + extra_collumn[3]*ddy + 4;
-			extra_collumn[2] >>= 3;
-		extra_collumn[3] = extra_collumn[3]*nddy + extra_collumn[4]*ddy + 4;
-			extra_collumn[3] >>= 3;
-	}
-	if ((ddx&7) != 0)
-	{
-		PredictorLine0.x = PredictorLine0.x*nddx + PredictorLine0.y*ddx + 4;
-			PredictorLine1.x = PredictorLine1.x*nddx + PredictorLine1.y*ddx + 4;
-				PredictorLine2.x = PredictorLine2.x*nddx + PredictorLine2.y*ddx + 4;
-					PredictorLine3.x = PredictorLine3.x*nddx + PredictorLine3.y*ddx + 4;
-		PredictorLine0.y = PredictorLine0.y*nddx + PredictorLine0.z*ddx + 4;
-			PredictorLine1.y = PredictorLine1.y*nddx + PredictorLine1.z*ddx + 4;
-				PredictorLine2.y = PredictorLine2.y*nddx + PredictorLine2.z*ddx + 4;
-					PredictorLine3.y = PredictorLine3.y*nddx + PredictorLine3.z*ddx + 4;
-		PredictorLine0.z = PredictorLine0.z*nddx + PredictorLine0.w*ddx + 4;
-			PredictorLine1.z = PredictorLine1.z*nddx + PredictorLine1.w*ddx + 4;
-				PredictorLine2.z = PredictorLine2.z*nddx + PredictorLine2.w*ddx + 4;
-					PredictorLine3.z = PredictorLine3.z*nddx + PredictorLine3.w*ddx + 4;
-		PredictorLine0.w = PredictorLine0.w*nddx + extra_collumn[0]*ddx + 4;
-			PredictorLine1.w = PredictorLine1.w*nddx + extra_collumn[1]*ddx + 4;
-				PredictorLine2.w = PredictorLine2.w*nddx + extra_collumn[2]*ddx + 4;
-					PredictorLine3.w = PredictorLine3.w*nddx + extra_collumn[3]*ddx + 4;
-					
-		PredictorLine0 >>= 3;
-		PredictorLine1 >>= 3;
-		PredictorLine2 >>= 3;
-		PredictorLine3 >>= 3;
-	}
-
+	PredictorLine0.x = prev_frame[py*chroma_width_x8 + px]; 
+	PredictorLine0.y = prev_frame[py*chroma_width_x8 + px + 8];
+	PredictorLine0.z = prev_frame[py*chroma_width_x8 + px + 16];
+	PredictorLine0.w = prev_frame[py*chroma_width_x8 + px + 24];
+	PredictorLine1.x = prev_frame[(py + 8)*chroma_width_x8 + px];
+	PredictorLine1.y = prev_frame[(py + 8)*chroma_width_x8 + px + 8];
+	PredictorLine1.z = prev_frame[(py + 8)*chroma_width_x8 + px + 16];
+	PredictorLine1.w = prev_frame[(py + 8)*chroma_width_x8 + px + 24];
+	PredictorLine2.x = prev_frame[(py + 16)*chroma_width_x8 + px]; 
+	PredictorLine2.y = prev_frame[(py + 16)*chroma_width_x8 + px + 8];
+	PredictorLine2.z = prev_frame[(py + 16)*chroma_width_x8 + px + 16];
+	PredictorLine2.w = prev_frame[(py + 16)*chroma_width_x8 + px + 24];
+	PredictorLine3.x = prev_frame[(py + 24)*chroma_width_x8 + px]; 
+	PredictorLine3.y = prev_frame[(py + 24)*chroma_width_x8 + px + 8];
+	PredictorLine3.z = prev_frame[(py + 24)*chroma_width_x8 + px + 16];
+	PredictorLine3.w = prev_frame[(py + 24)*chroma_width_x8 + px + 24];
+	
 	__private int4 BestDiffLine0, BestDiffLine1, BestDiffLine2, BestDiffLine3;
 	__private int4 DiffLine0=0, DiffLine1=1, DiffLine2=2, DiffLine3=3;
 
@@ -1264,13 +978,13 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 														// temp2 = (ip[3] * sinpi8sqrt2)>>16;
 														// d1 = temp1 + temp2;
 
-	BestDiffLine0 = 1*(((DiffLine0 + DiffLine3 + 4) >> 3) + PredictorLine0);
+	BestDiffLine0 = (((DiffLine0 + DiffLine3 + 4) >> 3) + PredictorLine0);
 														// op[0] = ((a1 + d1 + 4) >> 3) + pred[0,i]
-	BestDiffLine1 = 1*(((DiffLine1 + DiffLine2 + 4) >> 3) + PredictorLine1);
+	BestDiffLine1 = (((DiffLine1 + DiffLine2 + 4) >> 3) + PredictorLine1);
 														// op[1] = ((b1 + c1 + 4) >> 3) + pred[1,i]
-	BestDiffLine2 = 1*(((DiffLine1 - DiffLine2 + 4) >> 3) + PredictorLine2);
+	BestDiffLine2 = (((DiffLine1 - DiffLine2 + 4) >> 3) + PredictorLine2);
 														// op[2] = ((b1 - c1 + 4) >> 3) + pred[2,i]
-	BestDiffLine3 = 1*(((DiffLine0 - DiffLine3 + 4) >> 3) + PredictorLine3);
+	BestDiffLine3 = (((DiffLine0 - DiffLine3 + 4) >> 3) + PredictorLine3);
 														// op[3] = ((a1 - d1 + 4) >> 3) + pred[3,i]
 	
 	*(__global uchar4*)(&recon_frame[ci00]) = (convert_uchar4_sat(BestDiffLine0));
@@ -1282,11 +996,11 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void filter_MB_col_H( 	__global uchar * const frame,
-								const int width,
-								const int mbedge_limit,
-								const int sub_bedge_limit,
-								const int mb_col)
+		void simple_loop_filter_MBH(__global uchar * const frame,
+									const int width,
+									const int mbedge_limit,
+									const int sub_bedge_limit,
+									const int mb_col)
 {
 	int x, y, i, nf;
 	uchar4 L, R;
@@ -1304,13 +1018,13 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	
 		//macroblock edge filtering
 		// flag for Need Filtering
-		nf = ((abs(L.w - R.x) * 2 + abs(L.z - R.y)/2) <= mbedge_limit) ? 1 : 0;
+		nf = ((abs((int)L.w - (int)R.x) * 2 + abs((int)L.z - (int)R.y)/2) <= mbedge_limit) ? 1 : 0;
 		// filtering
 		// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
-		a = ((L.z - 128) - (R.y - 128)); 
+		a = (((int)L.z - 128) - ((int)R.y - 128)); 
 		a = (a < -128) ? -128 : a;
 		a = (a > 127) ? 127 : a;
-		a = mad24(((R.x - 128) - (L.w - 128)), 3, a);
+		a = mad24((((int)R.x - 128) - ((int)L.w - 128)), 3, a);
 		a = (a < -128) ? -128 : a;
 		a = (a > 127) ? 127 : a;
 		// zeroing if no filtering needed
@@ -1326,9 +1040,9 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 		a = (a > 127) ? 127 : a;
 		a >>= 3;
 		// Q0 = s2u(q0 - a)
-		R.x = ((R.x - 128) - a) + 128;
+		R.x = (uchar)((((int)R.x - 128) - a) + 128);
 		// P0 = s2u(p0 + b)
-		L.w = ((L.w - 128) + b) + 128;
+		L.w = (uchar)((((int)L.w - 128) + b) + 128);
 		vstore4(L, 0, frame + i - 4);
 		vstore4(R, 0, frame + i);		
 	}
@@ -1338,12 +1052,12 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	L = R;
 	i += 4;
 	R = vload4(0, frame + i);
-	nf = ((abs(L.w - R.x) * 2 + abs(L.z - R.y)/2) <= sub_bedge_limit) ? 1 : 0;
+	nf = ((abs((int)L.w - (int)R.x) * 2 + abs((int)L.z - (int)R.y)/2) <= sub_bedge_limit) ? 1 : 0;
 	// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
-	a = ((L.z - 128) - (R.y - 128)); 
+	a = (((int)L.z - 128) - ((int)R.y - 128)); 
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
-	a = mad24(((R.x - 128) - (L.w - 128)), 3, a);
+	a = mad24((((int)R.x - 128) - ((int)L.w - 128)), 3, a);
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
 	a *= nf;
@@ -1358,21 +1072,21 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	a = (a > 127) ? 127 : a;
 	a >>= 3;
 	// Q0 = s2u(q0 - a)
-	R.x = ((R.x - 128) - a) + 128;
+	R.x = (uchar)((((int)R.x - 128) - a) + 128);
 	// P0 = s2u(p0 + b)
-	L.w = ((L.w - 128) + b) + 128;
+	L.w = (uchar)((((int)L.w - 128) + b) + 128);
 	vstore4(L, 0, frame + i - 4);
 	vstore4(R, 0, frame + i);
 	
 	L = R;
 	i += 4;
 	R = vload4(0, frame + i);
-	nf = ((abs(L.w - R.x) * 2 + abs(L.z - R.y)/2) <= sub_bedge_limit) ? 1 : 0;
+	nf = ((abs((int)L.w - (int)R.x) * 2 + abs((int)L.z - (int)R.y)/2) <= sub_bedge_limit) ? 1 : 0;
 	// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
-	a = ((L.z - 128) - (R.y - 128)); 
+	a = (((int)L.z - 128) - ((int)R.y - 128)); 
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
-	a = mad24(((R.x - 128) - (L.w - 128)), 3, a);
+	a = mad24((((int)R.x - 128) - ((int)L.w - 128)), 3, a);
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
 	a *= nf;
@@ -1387,21 +1101,21 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	a = (a > 127) ? 127 : a;
 	a >>= 3;
 	// Q0 = s2u(q0 - a)
-	R.x = ((R.x - 128) - a) + 128;
+	R.x = (uchar)((((int)R.x - 128) - a) + 128);
 	// P0 = s2u(p0 + b)
-	L.w = ((L.w - 128) + b) + 128;
+	L.w = (uchar)((((int)L.w - 128) + b) + 128);
 	vstore4(L, 0, frame + i - 4);
 	vstore4(R, 0, frame + i);
 	
 	L = R;
 	i += 4;
 	R = vload4(0, frame + i);
-	nf = ((abs(L.w - R.x) * 2 + abs(L.z - R.y)/2) <= sub_bedge_limit) ? 1 : 0;
+	nf = ((abs((int)L.w - (int)R.x) * 2 + abs((int)L.z - (int)R.y)/2) <= sub_bedge_limit) ? 1 : 0;
 	// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
-	a = ((L.z - 128) - (R.y - 128)); 
+	a = (((int)L.z - 128) - ((int)R.y - 128)); 
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
-	a = mad24(((R.x - 128) - (L.w - 128)), 3, a);
+	a = mad24((((int)R.x - 128) - ((int)L.w - 128)), 3, a);
 	a = (a < -128) ? -128 : a;
 	a = (a > 127) ? 127 : a;
 	a *= nf;
@@ -1416,9 +1130,9 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	a = (a > 127) ? 127 : a;
 	a >>= 3;
 	// Q0 = s2u(q0 - a)
-	R.x = (uchar)(((R.x - 128) - a) + 128);
+	R.x = (uchar)((((int)R.x - 128) - a) + 128);
 	// P0 = s2u(p0 + b)
-	L.w = (uchar)(((L.w - 128) + b) + 128);
+	L.w = (uchar)((((int)L.w - 128) + b) + 128);
 	vstore4(L, 0, frame + i - 4);
 	vstore4(R, 0, frame + i);
 	
@@ -1426,11 +1140,11 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void filter_MB_col_V( 	__global uchar * const frame,
-								const int width,
-								const int mbedge_limit,
-								const int sub_bedge_limit,
-								const int mb_col)
+		void simple_loop_filter_MBV(__global uchar * const frame,
+									const int width,
+									const int mbedge_limit,
+									const int sub_bedge_limit,
+									const int mb_col)
 {
 	int x, y, i;
 	uchar4 U2, U3, D0, D1; 
@@ -1441,13 +1155,12 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	
 	i = y*width + x;
 	
-	D0 = vload4(0, frame + i); i += width;
-	D1 = vload4(0, frame + i); i += width;
-	i -= width*2;
-	
 	if ( y > 0) 
 	{
-		i -= width*2;
+		D0 = vload4(0, frame + i); i += width;
+		D1 = vload4(0, frame + i); i += width;
+		i -= width*4;
+	
 		U2 = vload4(0, frame + i); i += width;
 		U3 = vload4(0, frame + i); i += width;
 		
@@ -1599,6 +1312,1158 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	return;	
 }
 
+__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
+		void normal_loop_filter_MBH(__global uchar * const frame, //0
+									const int width, //1
+									const int mbedge_limit, //2
+									const int sub_bedge_limit, //3
+									const int interior_limit, //4
+									const int hev_threshold, //5
+									const int mb_size, //6
+									const int mb_col) //7
+{
+	int x, y, i;
+	uchar4 L, R;
+	int p3, p2, p1, p0, q0, q1, q2, q3;
+	int a, b, w;
+	int filter_yes;
+	int hev;
+	
+	y = get_global_id(0);
+	x = mb_col * mb_size;
+	
+	i = y*width + x;
+	
+	R = vload4(0, frame + i);
+	if ( x > 0) 
+	{
+		L = vload4(0, frame + i - 4);
+		p3 = (int)L.x - 128; p2 = (int)L.y - 128; p1 = (int)L.z - 128; p0 = (int)L.w - 128;
+		q0 = (int)R.x - 128; q1 = (int)R.y - 128; q2 = (int)R.z - 128; q3 = (int)R.y - 128;
+		filter_yes = ((int)abs(p3 - p2) <= interior_limit)
+						&& ((int)abs(p2 - p1) <= interior_limit)
+						&& ((int)abs(p1 - p0) <= interior_limit)
+						&& ((int)abs(q1 - q0) <= interior_limit)
+						&& ((int)abs(q2 - q1) <= interior_limit)
+						&& ((int)abs(q3 - q2) <= interior_limit)
+						&& ((int)abs(p0 - q0) * 2 + abs(p1 - q1) / 2  <= mbedge_limit);
+		hev = ((int)abs(p1 - p0) <= hev_threshold) && ((int)abs(q1 - q0) <= hev_threshold);
+		//w = clamp128(clamp128(p1 - q1) + 3*(q0 - p0));
+		w = p1 - q1;
+		w = (w < -128) ? -128 : w;
+		w = (w > 127) ? 127 : w;
+		w = w +  mad24(q0-p0, 3, w);
+		w = (w < -128) ? -128 : w;
+		w = (w > 127) ? 127 : w;
+		//a = clamp128((27*w + 63) >> 7);
+		a = mad24(w, 27, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;
+		R.x = (uchar)((q0 - a) + 128); L.w = (uchar)((p0 + a) + 128);
+		//a = clamp128((18*w + 63) >> 7);
+		a = mad24(w, 18, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;
+		R.y = (uchar)((q1 - a) + 128); L.z = (uchar)((p1 + a) + 128);
+		//a = clamp128((9*w + 63) >> 7);
+		a = mad24(w, 9, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;			
+		R.z = (uchar)((q2 - a) + 128); L.y = (uchar)((p2 + a) + 128);
+		hev = !hev;
+		// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
+		a = (p1 - q1); 
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = mad24((q0 - p0), 3, a);
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a *= filter_yes*hev;
+		// b = clamp128(a+3) >> 3
+		b = a + 3;
+		b = (b < -128) ? -128 : b;
+		b = (b > 127) ? 127 : b;
+		b >>= 3;
+		// a = clamp128(a+4) >> 3
+		a = a + 4;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a >>= 3;
+		R.x = (uchar)((q0 - a) + 128);
+		L.w = (uchar)((p0 + b) + 128);
+		vstore4(L, 0, frame + i - 4);
+		vstore4(R, 0, frame + i);
+	}
+	
+	// and 3 more times for edges between blocks in MB
+	L = R;
+	i += 4;
+	R = vload4(0, frame + i);
+	p3 = (int)L.x - 128; p2 = (int)L.y - 128; p1 = (int)L.z - 128; p0 = (int)L.w - 128;
+	q0 = (int)R.x - 128; q1 = (int)R.y - 128; q2 = (int)R.z - 128; q3 = (int)R.y - 128;
+	filter_yes = ((int)abs(p3 - p2) <= interior_limit)
+					&& ((int)abs(p2 - p1) <= interior_limit)
+					&& ((int)abs(p1 - p0) <= interior_limit)
+					&& ((int)abs(q1 - q0) <= interior_limit)
+					&& ((int)abs(q2 - q1) <= interior_limit)
+					&& ((int)abs(q3 - q2) <= interior_limit)
+					&& ((int)abs(p0 - q0) * 2 + abs(p1 - q1) / 2  <= mbedge_limit);
+	hev = ((int)abs(p1 - p0) <= hev_threshold) && ((int)abs(q1 - q0) <= hev_threshold);
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = (!hev) ? (p1 - q1) : 0; 
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a = mad24((q0 - p0), 3, a);
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = (b < -128) ? -128 : b;
+	b = (b > 127) ? 127 : b;
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a >>= 3;
+	R.x = (uchar)((q0 - a) + 128);
+	L.w = (uchar)((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	R.y = (uchar)((q1 - a) + 128);
+	L.z = (uchar)((p1 + a) + 128);
+	vstore4(L, 0, frame + i - 4);
+	vstore4(R, 0, frame + i);
+	
+	if (mb_size < 16) return; // we were doing chroma
+	
+	L = R;
+	i += 4;
+	R = vload4(0, frame + i);
+	p3 = (int)L.x - 128; p2 = (int)L.y - 128; p1 = (int)L.z - 128; p0 = (int)L.w - 128;
+	q0 = (int)R.x - 128; q1 = (int)R.y - 128; q2 = (int)R.z - 128; q3 = (int)R.y - 128;
+	filter_yes = ((int)abs(p3 - p2) <= interior_limit)
+					&& ((int)abs(p2 - p1) <= interior_limit)
+					&& ((int)abs(p1 - p0) <= interior_limit)
+					&& ((int)abs(q1 - q0) <= interior_limit)
+					&& ((int)abs(q2 - q1) <= interior_limit)
+					&& ((int)abs(q3 - q2) <= interior_limit)
+					&& ((int)abs(p0 - q0) * 2 + abs(p1 - q1) / 2  <= mbedge_limit);
+	hev = ((int)abs(p1 - p0) <= hev_threshold) && ((int)abs(q1 - q0) <= hev_threshold);
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = (!hev) ? (p1 - q1) : 0; 
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a = mad24((q0 - p0), 3, a);
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = (b < -128) ? -128 : b;
+	b = (b > 127) ? 127 : b;
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a >>= 3;
+	R.x = (uchar)((q0 - a) + 128);
+	L.w = (uchar)((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	R.y = (uchar)((q1 - a) + 128);
+	L.z = (uchar)((p1 + a) + 128);
+	vstore4(L, 0, frame + i - 4);
+	vstore4(R, 0, frame + i);
+	
+	L = R;
+	i += 4;
+	R = vload4(0, frame + i);
+	p3 = (int)L.x - 128; p2 = (int)L.y - 128; p1 = (int)L.z - 128; p0 = (int)L.w - 128;
+	q0 = (int)R.x - 128; q1 = (int)R.y - 128; q2 = (int)R.z - 128; q3 = (int)R.y - 128;
+	filter_yes = ((int)abs(p3 - p2) <= interior_limit)
+					&& ((int)abs(p2 - p1) <= interior_limit)
+					&& ((int)abs(p1 - p0) <= interior_limit)
+					&& ((int)abs(q1 - q0) <= interior_limit)
+					&& ((int)abs(q2 - q1) <= interior_limit)
+					&& ((int)abs(q3 - q2) <= interior_limit)
+					&& ((int)abs(p0 - q0) * 2 + abs(p1 - q1) / 2  <= mbedge_limit);
+	hev = ((int)abs(p1 - p0) <= hev_threshold) && ((int)abs(q1 - q0) <= hev_threshold);
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = (!hev) ? (p1 - q1) : 0; 
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a = mad24((q0 - p0), 3, a);
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = (b < -128) ? -128 : b;
+	b = (b > 127) ? 127 : b;
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = (a < -128) ? -128 : a;
+	a = (a > 127) ? 127 : a;
+	a >>= 3;
+	R.x = (uchar)((q0 - a) + 128);
+	L.w = (uchar)((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	R.y = (uchar)((q1 - a) + 128);
+	L.z = (uchar)((p1 + a) + 128);
+	vstore4(L, 0, frame + i - 4);
+	vstore4(R, 0, frame + i);
+	
+	return;	
+}
+
+__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
+		void normal_loop_filter_MBV(__global uchar * const frame, //0
+									const int width, //1
+									const int mbedge_limit, //2
+									const int sub_bedge_limit, //3
+									const int interior_limit, //4
+									const int hev_threshold, //5
+									const int mb_size, //6
+									const int mb_col) //7
+{
+	int x, y, i;
+	// these in usual forward order (U1 lower than U0):
+	uchar4 U0, U1, U2, U3, /*edge*/ D0, D1, D2, D3;
+	// these in vp8spec order:
+	int4 p3, p2, p1, p0, /*edge*/ q0, q1, q2, q3;
+	int4 a, b, w;
+	int4 filter_yes;
+	int4 hev;
+	
+	y = (get_global_id(0)/(mb_size/4))*mb_size;
+	x = mad24((int)mb_col, mb_size, (int)(get_global_id(0)%(mb_size/4))*4);
+	
+	i = y*width + x;
+	
+	D0 = vload4(0, frame + i); i+= width;
+	D1 = vload4(0, frame + i); i+= width;
+	D2 = vload4(0, frame + i); i+= width;
+	D3 = vload4(0, frame + i); i+= width;
+	i -= width*4;
+	
+	if ( y > 0) 
+	{
+		i -= width*4;
+		U0 = vload4(0, frame + i); i+= width;
+		U1 = vload4(0, frame + i); i+= width;
+		U2 = vload4(0, frame + i); i+= width;
+		U3 = vload4(0, frame + i); i+= width;
+	
+		p3 = convert_int4(U0) - 128;
+		p2 = convert_int4(U1) - 128;
+		p1 = convert_int4(U2) - 128;
+		p0 = convert_int4(U3) - 128;
+		q0 = convert_int4(D0) - 128;
+		q1 = convert_int4(D1) - 128;
+		q2 = convert_int4(D2) - 128;
+		q3 = convert_int4(D3) - 128;
+		
+		filter_yes = (convert_int4(abs(p3 - p2)) <= interior_limit)
+						&& (convert_int4(abs(p2 - p1)) <= interior_limit)
+						&& (convert_int4(abs(p1 - p0)) <= interior_limit)
+						&& (convert_int4(abs(q1 - q0)) <= interior_limit)
+						&& (convert_int4(abs(q2 - q1)) <= interior_limit)
+						&& (convert_int4(abs(q3 - q2)) <= interior_limit)
+						&& ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  <= mbedge_limit);
+		hev = (convert_int4(abs(p1 - p0)) <= hev_threshold) && (convert_int4(abs(q1 - q0)) <= hev_threshold);
+		filter_yes = convert_int4(abs(filter_yes)); hev = convert_int4(abs(hev));
+		
+		//w = clamp128(clamp128(p1 - q1) + 3*(q0 - p0));
+		w = p1 - q1;
+		w = (w < -128) ? -128 : w;
+		w = (w > 127) ? 127 : w;
+		w = w +  mad24(q0-p0, 3, w);
+		w = (w < -128) ? -128 : w;
+		w = (w > 127) ? 127 : w;
+		//a = clamp128((27*w + 63) >> 7);
+		a = mad24(w, 27, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;
+		D0 = convert_uchar4((q0 - a) + 128); U3 = convert_uchar4((p0 + a) + 128);
+		//a = clamp128((18*w + 63) >> 7);
+		a = mad24(w, 18, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;
+		D1 = convert_uchar4((q1 - a) + 128); U2 = convert_uchar4((p1 + a) + 128);
+		//a = clamp128((9*w + 63) >> 7);
+		a = mad24(w, 9, 63) >> 7;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = a*filter_yes*hev;			
+		D2 = convert_uchar4((q2 - a) + 128); U1 = convert_uchar4((p2 + a) + 128);
+
+		hev = 1 - hev;
+		// a = clamp128(clamp128(p1 - q1) + 3*(q0 - p0))
+		a = (p1 - q1); 
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a = mad24((q0 - p0), 3, a);
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a *= filter_yes*hev;
+		// b = clamp128(a+3) >> 3
+		b = a + 3;
+		b = (b < -128) ? -128 : b;
+		b = (b > 127) ? 127 : b;
+		b >>= 3;
+		// a = clamp128(a+4) >> 3
+		a = a + 4;
+		a = (a < -128) ? -128 : a;
+		a = (a > 127) ? 127 : a;
+		a >>= 3;
+		D0 = convert_uchar4((q0 - a) + 128); U3 = convert_uchar4((p0 + b) + 128);
+		vstore4(U1, 0, frame + i - 3*width);
+		vstore4(U2, 0, frame + i - 2*width);
+		vstore4(U3, 0, frame + i - width);
+		vstore4(D0, 0, frame + i);
+		vstore4(D1, 0, frame + i + width);
+		vstore4(D2, 0, frame + i + 2*width);
+	}
+	
+	// and 3 more times for edges between blocks in MB
+
+	i += width*4;
+	U0 = D0;
+	U1 = D1;
+	U2 = D2;
+	U3 = D3;
+	D0 = vload4(0, frame + i); i+= width;
+	D1 = vload4(0, frame + i); i+= width;
+	D2 = vload4(0, frame + i); i+= width;
+	D3 = vload4(0, frame + i); i+= width;
+	i -= width*4;
+	p3 = convert_int4(U0) - 128;
+	p2 = convert_int4(U1) - 128;
+	p1 = convert_int4(U2) - 128;
+	p0 = convert_int4(U3) - 128;
+	q0 = convert_int4(D0) - 128;
+	q1 = convert_int4(D1) - 128;
+	q2 = convert_int4(D2) - 128;
+	q3 = convert_int4(D3) - 128;
+	filter_yes = (convert_int4(abs(p3 - p2)) <= interior_limit)
+					&& (convert_int4(abs(p2 - p1)) <= interior_limit)
+					&& (convert_int4(abs(p1 - p0)) <= interior_limit)
+					&& (convert_int4(abs(q1 - q0)) <= interior_limit)
+					&& (convert_int4(abs(q2 - q1)) <= interior_limit)
+					&& (convert_int4(abs(q3 - q2)) <= interior_limit)
+					&& ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  <= mbedge_limit);
+	hev = (convert_int4(abs(p1 - p0)) <= hev_threshold) && (convert_int4(abs(q1 - q0)) <= hev_threshold);
+	filter_yes = convert_int4(abs(filter_yes)); hev = convert_int4(abs(hev));
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = select(0,p1-q1,hev==0);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a = mad24((q0 - p0), 3, a);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	D0 = convert_uchar4((q0 - a) + 128);
+	U3 = convert_uchar4((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	D1 = convert_uchar4((q1 - a) + 128);
+	U2 = convert_uchar4((p1 + a) + 128);
+	vstore4(U1, 0, frame + i - 3*width);
+	vstore4(U2, 0, frame + i - 2*width);
+	vstore4(U3, 0, frame + i - width);
+	vstore4(D0, 0, frame + i);
+	vstore4(D1, 0, frame + i + width);
+	vstore4(D2, 0, frame + i + 2*width);
+	
+	if (mb_size < 16) return; //we were doing chroma
+	
+	i += width*4;
+	U0 = D0;
+	U1 = D1;
+	U2 = D2;
+	U3 = D3;
+	D0 = vload4(0, frame + i); i+= width;
+	D1 = vload4(0, frame + i); i+= width;
+	D2 = vload4(0, frame + i); i+= width;
+	D3 = vload4(0, frame + i); i+= width;
+	i -= width*4;
+	p3 = convert_int4(U0) - 128;
+	p2 = convert_int4(U1) - 128;
+	p1 = convert_int4(U2) - 128;
+	p0 = convert_int4(U3) - 128;
+	q0 = convert_int4(D0) - 128;
+	q1 = convert_int4(D1) - 128;
+	q2 = convert_int4(D2) - 128;
+	q3 = convert_int4(D3) - 128;
+	filter_yes = (convert_int4(abs(p3 - p2)) <= interior_limit)
+					&& (convert_int4(abs(p2 - p1)) <= interior_limit)
+					&& (convert_int4(abs(p1 - p0)) <= interior_limit)
+					&& (convert_int4(abs(q1 - q0)) <= interior_limit)
+					&& (convert_int4(abs(q2 - q1)) <= interior_limit)
+					&& (convert_int4(abs(q3 - q2)) <= interior_limit)
+					&& ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  <= mbedge_limit);
+	hev = (convert_int4(abs(p1 - p0)) <= hev_threshold) && (convert_int4(abs(q1 - q0)) <= hev_threshold);
+	filter_yes = convert_int4(abs(filter_yes)); hev = convert_int4(abs(hev));
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = select(0,p1-q1,hev==0);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a = mad24((q0 - p0), 3, a);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	D0 = convert_uchar4((q0 - a) + 128);
+	U3 = convert_uchar4((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	D1 = convert_uchar4((q1 - a) + 128);
+	U2 = convert_uchar4((p1 + a) + 128);
+	vstore4(U1, 0, frame + i - 3*width);
+	vstore4(U2, 0, frame + i - 2*width);
+	vstore4(U3, 0, frame + i - width);
+	vstore4(D0, 0, frame + i);
+	vstore4(D1, 0, frame + i + width);
+	vstore4(D2, 0, frame + i + 2*width);
+	
+	i += width*4;
+	U0 = D0;
+	U1 = D1;
+	U2 = D2;
+	U3 = D3;
+	D0 = vload4(0, frame + i); i+= width;
+	D1 = vload4(0, frame + i); i+= width;
+	D2 = vload4(0, frame + i); i+= width;
+	D3 = vload4(0, frame + i); i+= width;
+	i -= width*4;
+	p3 = convert_int4(U0) - 128;
+	p2 = convert_int4(U1) - 128;
+	p1 = convert_int4(U2) - 128;
+	p0 = convert_int4(U3) - 128;
+	q0 = convert_int4(D0) - 128;
+	q1 = convert_int4(D1) - 128;
+	q2 = convert_int4(D2) - 128;
+	q3 = convert_int4(D3) - 128;
+	filter_yes = (convert_int4(abs(p3 - p2)) <= interior_limit)
+					&& (convert_int4(abs(p2 - p1)) <= interior_limit)
+					&& (convert_int4(abs(p1 - p0)) <= interior_limit)
+					&& (convert_int4(abs(q1 - q0)) <= interior_limit)
+					&& (convert_int4(abs(q2 - q1)) <= interior_limit)
+					&& (convert_int4(abs(q3 - q2)) <= interior_limit)
+					&& ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  <= mbedge_limit);
+	hev = (convert_int4(abs(p1 - p0)) <= hev_threshold) && (convert_int4(abs(q1 - q0)) <= hev_threshold);
+	filter_yes = convert_int4(abs(filter_yes)); hev = convert_int4(abs(hev));
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = select(0,p1-q1,hev==0);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a = mad24((q0 - p0), 3, a);
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a *= filter_yes;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	D0 = convert_uchar4((q0 - a) + 128);
+	U3 = convert_uchar4((p0 + b) + 128);
+	a = (a + 1) >> 1;
+	a *= hev;
+	D1 = convert_uchar4((q1 - a) + 128);
+	U2 = convert_uchar4((p1 + a) + 128);
+	vstore4(U1, 0, frame + i - 3*width);
+	vstore4(U2, 0, frame + i - 2*width);
+	vstore4(U3, 0, frame + i - width);
+	vstore4(D0, 0, frame + i);
+	vstore4(D1, 0, frame + i + width);
+	vstore4(D2, 0, frame + i + 2*width);	
+	
+	return;	
+}
+
+__kernel void luma_interpolate_Hx4( __global uchar *const src_frame, //0
+									__global uchar *const dst_frame, //1
+									const int width, //2
+									const int height) //3
+{
+	if (get_global_id(0) > (height-1)) return;
+	
+	//bicubic filter:
+	/*
+	const int filters [8] [6] = { // indexed by displacement
+								{ 0, 0, 128, 0, 0, 0 }, 
+								{ 0, -6, 123, 12, -1, 0 }, // 1/8 
+								{ 2, -11, 108, 36, -8, 1 }, // 1/4 
+								{ 0, -9, 93, 50, -6, 0 }, // 3/8 
+								{ 3, -16, 77, 77, -16, 3 }, // 1/2 is symmetric 
+								{ 0, -6, 50, 93, -9, 0 }, // 5/8 = reverse of 3/8 
+								{ 1, -8, 36, 108, -11, 2 }, // 3/4 = reverse of 1/4 
+								{ 0, -1, 12, 123, -6, 0 } // 7/8 = reverse of 1/8 
+								}; */
+
+	__private uchar4 M4, R4, L4;
+	__private uchar16 M16;
+	
+	int i, ind, buf;
+	int width_x4 = width*4;
+	
+	
+	ind = (get_global_id(0) + 1)*width - 4;
+	M4 = vload4(0, src_frame + ind);
+	R4.s0 = M4.s3;
+	R4.s1 = M4.s3;
+	R4.s2 = M4.s3;
+	
+	for (i = width-4; i >= 4; i -= 4)
+	{
+		ind = get_global_id(0)*width + i;
+		L4 = vload4(0, src_frame + ind - 4);
+		
+		M16.s0 = M4.s0;
+		buf = mad24((int)L4.s2,2,mad24((int)L4.s3,-11,mad24((int)M4.s0,108,mad24((int)M4.s1,36,mad24((int)M4.s2,-8, (int)M4.s3 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s1 = (uchar)buf;
+		buf = mad24((int)L4.s2,3,mad24((int)L4.s3,-16,mad24((int)M4.s0,77,mad24((int)M4.s1,77,mad24((int)M4.s2,-16, mad24((int)M4.s3,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s2 = (uchar)buf;
+		buf = ((int)L4.s2 + mad24((int)L4.s3,-8,mad24((int)M4.s0,36,mad24((int)M4.s1,108,mad24((int)M4.s2,-11, mad24((int)M4.s3,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s3 = (uchar)buf;
+		
+		M16.s4 = M4.s1;
+		buf = mad24((int)L4.s3,2,mad24((int)M4.s0,-11,mad24((int)M4.s1,108,mad24((int)M4.s2,36,mad24((int)M4.s3,-8, (int)R4.s0 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s5 = (uchar)buf;
+		buf = mad24((int)L4.s3,3,mad24((int)M4.s0,-16,mad24((int)M4.s1,77,mad24((int)M4.s2,77,mad24((int)M4.s3,-16, mad24((int)R4.s0,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s6 = (uchar)buf;
+		buf = ((int)L4.s3 + mad24((int)M4.s0,-8,mad24((int)M4.s1,36,mad24((int)M4.s2,108,mad24((int)M4.s3,-11, mad24((int)R4.s0,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s7 = (uchar)buf;
+		
+		M16.s8 = M4.s2;
+		buf = mad24((int)M4.s0,2,mad24((int)M4.s1,-11,mad24((int)M4.s2,108,mad24((int)M4.s3,36,mad24((int)R4.s0,-8, (int)R4.s1 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.s9 = (uchar)buf;
+		buf = mad24((int)M4.s0,3,mad24((int)M4.s1,-16,mad24((int)M4.s2,77,mad24((int)M4.s3,77,mad24((int)R4.s0,-16, mad24((int)R4.s1,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.sA = (uchar)buf;
+		buf = ((int)M4.s0 + mad24((int)M4.s1,-8,mad24((int)M4.s2,36,mad24((int)M4.s3,108,mad24((int)R4.s0,-11, mad24((int)R4.s1,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.sB = (uchar)buf;
+		
+		M16.sC = M4.s3;
+		buf = mad24((int)M4.s1,2,mad24((int)M4.s2,-11,mad24((int)M4.s3,108,mad24((int)R4.s0,36,mad24((int)R4.s1,-8, (int)R4.s2 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.sD = (uchar)buf;
+		buf = mad24((int)M4.s1,3,mad24((int)M4.s2,-16,mad24((int)M4.s3,77,mad24((int)R4.s0,77,mad24((int)R4.s1,-16, mad24((int)R4.s2,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.sE = (uchar)buf;
+		buf = ((int)M4.s1 + mad24((int)M4.s2,-8,mad24((int)M4.s3,36,mad24((int)R4.s0,108,mad24((int)R4.s1,-11, mad24((int)R4.s2,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16.sF = (uchar)buf;
+
+		ind = get_global_id(0)*width_x4 + (i*4);
+		vstore16(M16, 0, dst_frame + ind);
+		
+		R4 = M4;
+		M4 = L4;
+	}
+	
+	L4.s2 = M4.s0; L4.s3 = M4.s0;
+		
+	M16.s0 = M4.s0;
+	buf = mad24((int)L4.s2,2,mad24((int)L4.s3,-11,mad24((int)M4.s0,108,mad24((int)M4.s1,36,mad24((int)M4.s2,-8, (int)M4.s3 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s1 = (uchar)buf;
+	buf = mad24((int)L4.s2,3,mad24((int)L4.s3,-16,mad24((int)M4.s0,77,mad24((int)M4.s1,77,mad24((int)M4.s2,-16, mad24((int)M4.s3,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s2 = (uchar)buf;
+	buf = ((int)L4.s2 + mad24((int)L4.s3,-8,mad24((int)M4.s0,36,mad24((int)M4.s1,108,mad24((int)M4.s2,-11, mad24((int)M4.s3,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s3 = (uchar)buf;
+		
+	M16.s4 = M4.s1;
+	buf = mad24((int)L4.s3,2,mad24((int)M4.s0,-11,mad24((int)M4.s1,108,mad24((int)M4.s2,36,mad24((int)M4.s3,-8, (int)R4.s0 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s5 = (uchar)buf;
+	buf = mad24((int)L4.s3,3,mad24((int)M4.s0,-16,mad24((int)M4.s1,77,mad24((int)M4.s2,77,mad24((int)M4.s3,-16, mad24((int)R4.s0,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s6 = (uchar)buf;
+	buf = ((int)L4.s3 + mad24((int)M4.s0,-8,mad24((int)M4.s1,36,mad24((int)M4.s2,108,mad24((int)M4.s3,-11, mad24((int)R4.s0,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s7 = (uchar)buf;
+		
+	M16.s8 = M4.s2;
+	buf = mad24((int)M4.s0,2,mad24((int)M4.s1,-11,mad24((int)M4.s2,108,mad24((int)M4.s3,36,mad24((int)R4.s0,-8, (int)R4.s1 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.s9 = (uchar)buf;
+	buf = mad24((int)M4.s0,3,mad24((int)M4.s1,-16,mad24((int)M4.s2,77,mad24((int)M4.s3,77,mad24((int)R4.s0,-16, mad24((int)R4.s1,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.sA = (uchar)buf;
+	buf = ((int)M4.s0 + mad24((int)M4.s1,-8,mad24((int)M4.s2,36,mad24((int)M4.s3,108,mad24((int)R4.s0,-11, mad24((int)R4.s1,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.sB = (uchar)buf;
+		
+	M16.sC = M4.s3;
+	buf = mad24((int)M4.s1,2,mad24((int)M4.s2,-11,mad24((int)M4.s3,108,mad24((int)R4.s0,36,mad24((int)R4.s1,-8, (int)R4.s2 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.sD = (uchar)buf;
+	buf = mad24((int)M4.s1,3,mad24((int)M4.s2,-16,mad24((int)M4.s3,77,mad24((int)R4.s0,77,mad24((int)R4.s1,-16, mad24((int)R4.s2,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.sE = (uchar)buf;
+	buf = ((int)M4.s1 + mad24((int)M4.s2,-8,mad24((int)M4.s3,36,mad24((int)R4.s0,108,mad24((int)R4.s1,-11, mad24((int)R4.s2,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16.sF = (uchar)buf;
+
+	ind = get_global_id(0)*width_x4;
+	vstore16(M16, 0, dst_frame + ind);
+
+	return;	
+}
+
+__kernel void luma_interpolate_Vx4( __global uchar *const frame, //0
+									const int width, //1
+									const int height) //2
+{
+	if (get_global_id(0) > (width-1)) return;
+
+	__private uchar4 A0, A1, M0, M1, M2, M3, U0, U1, U2;
+	__private int4 buf;
+
+	int width_x4 = width*4;
+	int i, ind;
+	
+	ind = (height-1)*width_x4 + (get_global_id(0)*4);
+	M0 = vload4(0, frame + ind);
+	A1 = vload4(0, frame + ind - width_x4);
+	U0 = M0; U1 = M0; U2 = M0;
+	
+	for (i = height-1; i >= 2; --i)
+	{
+		ind = i*width_x4 + (get_global_id(0)*4);
+		A0 = vload4(0, frame + ind - width_x4*2);
+	
+		buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2)+64)))))/128;
+		M1 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+		M2 = convert_uchar4_sat(buf);
+		buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+		M3 = convert_uchar4_sat(buf);
+		
+		ind = (i*4)*width_x4 + (get_global_id(0)*4);
+		vstore4(M0, 0, frame + ind); ind += width_x4;
+		vstore4(M1, 0, frame + ind); ind += width_x4;
+		vstore4(M2, 0, frame + ind); ind += width_x4;
+		vstore4(M3, 0, frame + ind);
+		
+		U2 = U1;
+		U1 = U0;
+		U0 = M0;
+		M0 = A1;
+		A1 = A0;
+	}
+	
+	buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2)+64)))))/128;
+	M1 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+	M2 = convert_uchar4_sat(buf);
+	buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+	M3 = convert_uchar4_sat(buf);
+		
+	ind = 4*width_x4 + (get_global_id(0)*4);
+	vstore4(M0, 0, frame + ind); ind += width_x4;
+	vstore4(M1, 0, frame + ind); ind += width_x4;
+	vstore4(M2, 0, frame + ind); ind += width_x4;
+	vstore4(M3, 0, frame + ind);
+		
+	U2 = U1;
+	U1 = U0;
+	U0 = M0;
+	M0 = A1;
+	A1 = A0;
+	
+	buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2)+64)))))/128;
+	M1 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+	M2 = convert_uchar4_sat(buf);
+	buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+	M3 = convert_uchar4_sat(buf);
+		
+	ind = (get_global_id(0)*4);
+	vstore4(M0, 0, frame + ind); ind += width_x4;
+	vstore4(M1, 0, frame + ind); ind += width_x4;
+	vstore4(M2, 0, frame + ind); ind += width_x4;
+	vstore4(M3, 0, frame + ind);
+
+		
+	return;	
+}
+
+__kernel void chroma_interpolate_Hx8( 	__global uchar *const src_frame, //0
+										__global uchar *const dst_frame, //1
+										const int width, //2
+										const int height) //3
+{
+	if (get_global_id(0) > (height-1)) return;
+	
+	//bicubic filter:
+	/*
+	const int filters [8] [6] = { // indexed by displacement
+								{ 0, 0, 128, 0, 0, 0 }, 
+								{ 0, -6, 123, 12, -1, 0 }, // 1/8 
+								{ 2, -11, 108, 36, -8, 1 }, // 1/4 
+								{ 0, -9, 93, 50, -6, 0 }, // 3/8 
+								{ 3, -16, 77, 77, -16, 3 }, // 1/2 is symmetric 
+								{ 0, -6, 50, 93, -9, 0 }, // 5/8 = reverse of 3/8 
+								{ 1, -8, 36, 108, -11, 2 }, // 3/4 = reverse of 1/4 
+								{ 0, -1, 12, 123, -6, 0 } // 7/8 = reverse of 1/8 
+								}; */
+
+	__private uchar4 M4, R4, L4;
+	__private uchar16 M16l, M16h;
+	
+	int i, ind, buf;
+	int width_x8 = width*8;
+	
+	
+	ind = (get_global_id(0) + 1)*width - 4;
+	M4 = vload4(0, src_frame + ind);
+	R4.s0 = M4.s3;	R4.s1 = M4.s3;	R4.s2 = M4.s3;
+	
+	for (i = width-4; i >= 4; i -= 4)
+	{
+		ind = get_global_id(0)*width + i;
+		L4 = vload4(0, src_frame + ind - 4);
+		
+		M16l.s0 = M4.s0;
+		buf = mad24((int)L4.s3,-6,mad24((int)M4.s0,123,mad24((int)M4.s1,12,mad24((int)M4.s2,-1,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s1 = (uchar)buf;
+		buf = mad24((int)L4.s2,2,mad24((int)L4.s3,-11,mad24((int)M4.s0,108,mad24((int)M4.s1,36,mad24((int)M4.s2,-8, (int)M4.s3 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s2 = (uchar)buf;
+		buf = mad24((int)L4.s3,-9,mad24((int)M4.s0,93,mad24((int)M4.s1,50,mad24((int)M4.s2,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s3 = (uchar)buf;
+		buf = mad24((int)L4.s2,3,mad24((int)L4.s3,-16,mad24((int)M4.s0,77,mad24((int)M4.s1,77,mad24((int)M4.s2,-16, mad24((int)M4.s3,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s4 = (uchar)buf;
+		buf = mad24((int)L4.s3,-6,mad24((int)M4.s0,50,mad24((int)M4.s1,93,mad24((int)M4.s2,-9,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s5 = (uchar)buf;
+		buf = ((int)L4.s2 + mad24((int)L4.s3,-8,mad24((int)M4.s0,36,mad24((int)M4.s1,108,mad24((int)M4.s2,-11, mad24((int)M4.s3,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s6 = (uchar)buf;
+		buf = mad24((int)L4.s3,-1,mad24((int)M4.s0,12,mad24((int)M4.s1,123,mad24((int)M4.s2,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s7 = (uchar)buf;
+		
+		M16l.s8 = M4.s1;
+		buf = mad24((int)M4.s0,-6,mad24((int)M4.s1,123,mad24((int)M4.s2,12,mad24((int)M4.s3,-1,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.s9 = (uchar)buf;
+		buf = mad24((int)L4.s3,2,mad24((int)M4.s0,-11,mad24((int)M4.s1,108,mad24((int)M4.s2,36,mad24((int)M4.s3,-8, (int)R4.s0 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sA = (uchar)buf;
+		buf = mad24((int)M4.s0,-9,mad24((int)M4.s1,93,mad24((int)M4.s2,50,mad24((int)M4.s3,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sB = (uchar)buf;
+		buf = mad24((int)L4.s3,3,mad24((int)M4.s0,-16,mad24((int)M4.s1,77,mad24((int)M4.s2,77,mad24((int)M4.s3,-16, mad24((int)R4.s0,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sC = (uchar)buf;
+		buf = mad24((int)M4.s0,-6,mad24((int)M4.s1,50,mad24((int)M4.s2,93,mad24((int)M4.s3,-9,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sD = (uchar)buf;
+		buf = ((int)L4.s3 + mad24((int)M4.s0,-8,mad24((int)M4.s1,36,mad24((int)M4.s2,108,mad24((int)M4.s3,-11, mad24((int)R4.s0,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sE = (uchar)buf;
+		buf = mad24((int)M4.s0,-1,mad24((int)M4.s1,12,mad24((int)M4.s2,123,mad24((int)M4.s3,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16l.sF = (uchar)buf;
+		
+		M16h.s0 = M4.s2;
+		buf = mad24((int)M4.s1,-6,mad24((int)M4.s2,123,mad24((int)M4.s3,12,mad24((int)R4.s0,-1,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s1 = (uchar)buf;
+		buf = mad24((int)M4.s0,2,mad24((int)M4.s1,-11,mad24((int)M4.s2,108,mad24((int)M4.s3,36,mad24((int)R4.s0,-8, (int)R4.s1 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s2 = (uchar)buf;
+		buf = mad24((int)M4.s1,-9,mad24((int)M4.s2,93,mad24((int)M4.s3,50,mad24((int)R4.s0,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s3 = (uchar)buf;
+		buf = mad24((int)M4.s0,3,mad24((int)M4.s1,-16,mad24((int)M4.s2,77,mad24((int)M4.s3,77,mad24((int)R4.s0,-16, mad24((int)R4.s1,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s4 = (uchar)buf;
+		buf = mad24((int)M4.s1,-6,mad24((int)M4.s2,50,mad24((int)M4.s3,93,mad24((int)R4.s0,-9,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s5 = (uchar)buf;
+		buf = ((int)M4.s0 + mad24((int)M4.s1,-8,mad24((int)M4.s2,36,mad24((int)M4.s3,108,mad24((int)R4.s0,-11, mad24((int)R4.s1,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s6 = (uchar)buf;
+		buf = mad24((int)M4.s1,-1,mad24((int)M4.s2,12,mad24((int)M4.s3,123,mad24((int)R4.s0,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s7 = (uchar)buf;
+		
+		M16h.s8 = M4.s3;
+		buf = mad24((int)M4.s2,-6,mad24((int)M4.s3,123,mad24((int)R4.s0,12,mad24((int)R4.s1,-1,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.s9 = (uchar)buf;
+		buf = mad24((int)M4.s1,2,mad24((int)M4.s2,-11,mad24((int)M4.s3,108,mad24((int)R4.s0,36,mad24((int)R4.s1,-8, (int)R4.s2 + 64)))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sA = (uchar)buf;
+		buf = mad24((int)M4.s2,-9,mad24((int)M4.s3,93,mad24((int)R4.s0,50,mad24((int)R4.s1,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sB = (uchar)buf;
+		buf = mad24((int)M4.s1,3,mad24((int)M4.s2,-16,mad24((int)M4.s3,77,mad24((int)R4.s0,77,mad24((int)R4.s1,-16, mad24((int)R4.s2,3,64))))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sC = (uchar)buf;
+		buf = mad24((int)M4.s2,-6,mad24((int)M4.s3,50,mad24((int)R4.s0,93,mad24((int)R4.s1,-9,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sD = (uchar)buf;
+		buf = ((int)M4.s1 + mad24((int)M4.s2,-8,mad24((int)M4.s3,36,mad24((int)R4.s0,108,mad24((int)R4.s1,-11, mad24((int)R4.s2,2,64))))))/128;		
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sE = (uchar)buf;
+		buf = mad24((int)M4.s2,-1,mad24((int)M4.s3,12,mad24((int)R4.s0,123,mad24((int)R4.s1,-6,64))))/128;
+		buf = (buf < 0) ? 0 : buf; 
+		buf = (buf > 255) ? 255 : buf; 
+		M16h.sF = (uchar)buf;
+
+		ind = get_global_id(0)*width_x8 + (i*8);
+
+		vstore16(M16l, 0, dst_frame + ind);
+		vstore16(M16h, 0, dst_frame + ind + 16);
+		
+		R4 = M4;
+		M4 = L4;
+	}
+	
+	L4.s2 = M4.s0; L4.s3 = M4.s0;
+
+	M16l.s0 = M4.s0;
+	buf = mad24((int)L4.s3,-6,mad24((int)M4.s0,123,mad24((int)M4.s1,12,mad24((int)M4.s2,-1,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s1 = (uchar)buf;
+	buf = mad24((int)L4.s2,2,mad24((int)L4.s3,-11,mad24((int)M4.s0,108,mad24((int)M4.s1,36,mad24((int)M4.s2,-8, (int)M4.s3 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s2 = (uchar)buf;
+	buf = mad24((int)L4.s3,-9,mad24((int)M4.s0,93,mad24((int)M4.s1,50,mad24((int)M4.s2,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s3 = (uchar)buf;
+	buf = mad24((int)L4.s2,3,mad24((int)L4.s3,-16,mad24((int)M4.s0,77,mad24((int)M4.s1,77,mad24((int)M4.s2,-16, mad24((int)M4.s3,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s4 = (uchar)buf;
+	buf = mad24((int)L4.s3,-6,mad24((int)M4.s0,50,mad24((int)M4.s1,93,mad24((int)M4.s2,-9,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s5 = (uchar)buf;
+	buf = ((int)L4.s2 + mad24((int)L4.s3,-8,mad24((int)M4.s0,36,mad24((int)M4.s1,108,mad24((int)M4.s2,-11, mad24((int)M4.s3,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s6 = (uchar)buf;
+	buf = mad24((int)L4.s3,-1,mad24((int)M4.s0,12,mad24((int)M4.s1,123,mad24((int)M4.s2,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s7 = (uchar)buf;
+		
+	M16l.s8 = M4.s1;
+	buf = mad24((int)M4.s0,-6,mad24((int)M4.s1,123,mad24((int)M4.s2,12,mad24((int)M4.s3,-1,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.s9 = (uchar)buf;
+	buf = mad24((int)L4.s3,2,mad24((int)M4.s0,-11,mad24((int)M4.s1,108,mad24((int)M4.s2,36,mad24((int)M4.s3,-8, (int)R4.s0 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sA = (uchar)buf;
+	buf = mad24((int)M4.s0,-9,mad24((int)M4.s1,93,mad24((int)M4.s2,50,mad24((int)M4.s3,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sB = (uchar)buf;
+	buf = mad24((int)L4.s3,3,mad24((int)M4.s0,-16,mad24((int)M4.s1,77,mad24((int)M4.s2,77,mad24((int)M4.s3,-16, mad24((int)R4.s0,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sC = (uchar)buf;
+	buf = mad24((int)M4.s0,-6,mad24((int)M4.s1,50,mad24((int)M4.s2,93,mad24((int)M4.s3,-9,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sD = (uchar)buf;
+	buf = ((int)L4.s3 + mad24((int)M4.s0,-8,mad24((int)M4.s1,36,mad24((int)M4.s2,108,mad24((int)M4.s3,-11, mad24((int)R4.s0,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sE = (uchar)buf;
+	buf = mad24((int)M4.s0,-1,mad24((int)M4.s1,12,mad24((int)M4.s2,123,mad24((int)M4.s3,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16l.sF = (uchar)buf;
+		
+	M16h.s0 = M4.s2;
+	buf = mad24((int)M4.s1,-6,mad24((int)M4.s2,123,mad24((int)M4.s3,12,mad24((int)R4.s0,-1,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s1 = (uchar)buf;
+	buf = mad24((int)M4.s0,2,mad24((int)M4.s1,-11,mad24((int)M4.s2,108,mad24((int)M4.s3,36,mad24((int)R4.s0,-8, (int)R4.s1 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s2 = (uchar)buf;
+	buf = mad24((int)M4.s1,-9,mad24((int)M4.s2,93,mad24((int)M4.s3,50,mad24((int)R4.s0,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s3 = (uchar)buf;
+	buf = mad24((int)M4.s0,3,mad24((int)M4.s1,-16,mad24((int)M4.s2,77,mad24((int)M4.s3,77,mad24((int)R4.s0,-16, mad24((int)R4.s1,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s4 = (uchar)buf;
+	buf = mad24((int)M4.s1,-6,mad24((int)M4.s2,50,mad24((int)M4.s3,93,mad24((int)R4.s0,-9,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s5 = (uchar)buf;
+	buf = ((int)M4.s0 + mad24((int)M4.s1,-8,mad24((int)M4.s2,36,mad24((int)M4.s3,108,mad24((int)R4.s0,-11, mad24((int)R4.s1,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s6 = (uchar)buf;
+	buf = mad24((int)M4.s1,-1,mad24((int)M4.s2,12,mad24((int)M4.s3,123,mad24((int)R4.s0,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s7 = (uchar)buf;
+	
+	M16h.s8 = M4.s3;
+	buf = mad24((int)M4.s2,-6,mad24((int)M4.s3,123,mad24((int)R4.s0,12,mad24((int)R4.s1,-1,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.s9 = (uchar)buf;
+	buf = mad24((int)M4.s1,2,mad24((int)M4.s2,-11,mad24((int)M4.s3,108,mad24((int)R4.s0,36,mad24((int)R4.s1,-8, (int)R4.s2 + 64)))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sA = (uchar)buf;
+	buf = mad24((int)M4.s2,-9,mad24((int)M4.s3,93,mad24((int)R4.s0,50,mad24((int)R4.s1,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sB = (uchar)buf;
+	buf = mad24((int)M4.s1,3,mad24((int)M4.s2,-16,mad24((int)M4.s3,77,mad24((int)R4.s0,77,mad24((int)R4.s1,-16, mad24((int)R4.s2,3,64))))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sC = (uchar)buf;
+	buf = mad24((int)M4.s2,-6,mad24((int)M4.s3,50,mad24((int)R4.s0,93,mad24((int)R4.s1,-9,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sD = (uchar)buf;
+	buf = ((int)M4.s1 + mad24((int)M4.s2,-8,mad24((int)M4.s3,36,mad24((int)R4.s0,108,mad24((int)R4.s1,-11, mad24((int)R4.s2,2,64))))))/128;		
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sE = (uchar)buf;
+	buf = mad24((int)M4.s2,-1,mad24((int)M4.s3,12,mad24((int)R4.s0,123,mad24((int)R4.s1,-6,64))))/128;
+	buf = (buf < 0) ? 0 : buf; 
+	buf = (buf > 255) ? 255 : buf; 
+	M16h.sF = (uchar)buf;
+
+	ind = get_global_id(0)*width_x8;
+	vstore16(M16l, 0, dst_frame + ind);
+	vstore16(M16h, 0, dst_frame + ind + 16);
+
+	return;	
+}
+
+__kernel void chroma_interpolate_Vx8( __global uchar *const frame, //0
+									const int width, //1
+									const int height) //2
+{
+	__private uchar4 A0, A1, M0, M1, M2, M3, M4, M5, M6, M7, U0, U1, U2;
+	__private int4 buf;
+
+	int width_x8 = width*8;
+	int i, ind;
+	
+	ind = (height-1)*width_x8 + (get_global_id(0)*4);
+	M0 = vload4(0, frame + ind);
+	A1 = vload4(0, frame + ind - width_x8);
+	U0 = M0; U1 = M0; U2 = M0;
+	
+	for (i = height-1; i >= 2; --i)
+	{
+		ind = i*width_x8 + (get_global_id(0)*4);
+		A0 = vload4(0, frame + ind - width_x8*2);
+	
+		buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),123,mad24(convert_int4(U0),12,mad24(convert_int4(U1),-1,64))))/128;
+		M1 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2) + 64)))))/128;
+		M2 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A1),-9,mad24(convert_int4(M0),93,mad24(convert_int4(U0),50,mad24(convert_int4(U1),-6,64))))/128;
+		M3 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+		M4 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),50,mad24(convert_int4(U0),93,mad24(convert_int4(U1),-9,64))))/128;
+		M5 = convert_uchar4_sat(buf);
+		buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+		M6 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(A1),-1,mad24(convert_int4(M0),12,mad24(convert_int4(U0),123,mad24(convert_int4(U1),-6,64))))/128;
+		M7 = convert_uchar4_sat(buf);
+		
+		ind = (i*8)*width_x8 + (get_global_id(0)*4);
+		vstore4(M0, 0, frame + ind); ind += width_x8;
+		vstore4(M1, 0, frame + ind); ind += width_x8;
+		vstore4(M2, 0, frame + ind); ind += width_x8;
+		vstore4(M3, 0, frame + ind); ind += width_x8;
+		vstore4(M4, 0, frame + ind); ind += width_x8;
+		vstore4(M5, 0, frame + ind); ind += width_x8;
+		vstore4(M6, 0, frame + ind); ind += width_x8;
+		vstore4(M7, 0, frame + ind);
+		
+		U2 = U1;
+		U1 = U0;
+		U0 = M0;
+		M0 = A1;
+		A1 = A0;
+	}
+	
+	buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),123,mad24(convert_int4(U0),12,mad24(convert_int4(U1),-1,64))))/128;
+	M1 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2) + 64)))))/128;
+	M2 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-9,mad24(convert_int4(M0),93,mad24(convert_int4(U0),50,mad24(convert_int4(U1),-6,64))))/128;
+	M3 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+	M4 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),50,mad24(convert_int4(U0),93,mad24(convert_int4(U1),-9,64))))/128;
+	M5 = convert_uchar4_sat(buf);
+	buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+	M6 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-1,mad24(convert_int4(M0),12,mad24(convert_int4(U0),123,mad24(convert_int4(U1),-6,64))))/128;
+	M7 = convert_uchar4_sat(buf);
+		
+	ind = 8*width_x8 + (get_global_id(0)*4);
+	vstore4(M0, 0, frame + ind); ind += width_x8;
+	vstore4(M1, 0, frame + ind); ind += width_x8;
+	vstore4(M2, 0, frame + ind); ind += width_x8;
+	vstore4(M3, 0, frame + ind); ind += width_x8;
+	vstore4(M4, 0, frame + ind); ind += width_x8;
+	vstore4(M5, 0, frame + ind); ind += width_x8;
+	vstore4(M6, 0, frame + ind); ind += width_x8;
+	vstore4(M7, 0, frame + ind);
+		
+	U2 = U1;
+	U1 = U0;
+	U0 = M0;
+	M0 = A1;
+	A1 = A0;
+	
+	buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),123,mad24(convert_int4(U0),12,mad24(convert_int4(U1),-1,64))))/128;
+	M1 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),2,mad24(convert_int4(A1),-11,mad24(convert_int4(M0),108,mad24(convert_int4(U0),36,mad24(convert_int4(U1),-8, convert_int4(U2) + 64)))))/128;
+	M2 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-9,mad24(convert_int4(M0),93,mad24(convert_int4(U0),50,mad24(convert_int4(U1),-6,64))))/128;
+	M3 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A0),3,mad24(convert_int4(A1),-16,mad24(convert_int4(M0),77,mad24(convert_int4(U0),77,mad24(convert_int4(U1),-16, mad24(convert_int4(U2),3,64))))))/128;
+	M4 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-6,mad24(convert_int4(M0),50,mad24(convert_int4(U0),93,mad24(convert_int4(U1),-9,64))))/128;
+	M5 = convert_uchar4_sat(buf);
+	buf = (convert_int4(A0) + mad24(convert_int4(A1),-8,mad24(convert_int4(M0),36,mad24(convert_int4(U0),108,mad24(convert_int4(U1),-11, mad24(convert_int4(U2),2,64))))))/128;		
+	M6 = convert_uchar4_sat(buf);
+	buf = mad24(convert_int4(A1),-1,mad24(convert_int4(M0),12,mad24(convert_int4(U0),123,mad24(convert_int4(U1),-6,64))))/128;
+	M7 = convert_uchar4_sat(buf);
+		
+	ind = (get_global_id(0)*4);
+	vstore4(M0, 0, frame + ind); ind += width_x8;
+	vstore4(M1, 0, frame + ind); ind += width_x8;
+	vstore4(M2, 0, frame + ind); ind += width_x8;
+	vstore4(M3, 0, frame + ind); ind += width_x8;
+	vstore4(M4, 0, frame + ind); ind += width_x8;
+	vstore4(M5, 0, frame + ind); ind += width_x8;
+	vstore4(M6, 0, frame + ind); ind += width_x8;
+	vstore4(M7, 0, frame + ind);
+
+		
+	return;	
+}
 
 
 
