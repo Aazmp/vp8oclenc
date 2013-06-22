@@ -43,7 +43,7 @@ static const int16_t vp8_ac_qlookup[128] =
 #define GPUPATH "GPU_kernels.cl"
 
 union mv {
-  uint32_t raw;
+	uint32_t raw;
 	struct {
 		int16_t x, y;
 	} d;
@@ -80,8 +80,12 @@ struct deviceContext
 	cl_kernel num_div_denom;
 	cl_kernel luma_interpolate_Hx4;
 	cl_kernel luma_interpolate_Vx4;
-	cl_kernel filter_MB_col_H;
-	cl_kernel filter_MB_col_V;
+	cl_kernel chroma_interpolate_Hx8;
+	cl_kernel chroma_interpolate_Vx8;
+	cl_kernel simple_loop_filter_MBH;
+	cl_kernel simple_loop_filter_MBV;
+	cl_kernel normal_loop_filter_MBH;
+	cl_kernel normal_loop_filter_MBV;
     /* add kernels */
 
     // these are frame data padded to be devisible by 16 and converted to normalized int16
@@ -164,10 +168,13 @@ struct videoContext
     int32_t quantizer_uv_dc_p;
     int32_t quantizer_uv_ac_p;
 
+	int32_t loop_filter_type;
 	int32_t loop_filter_level;
 	int32_t loop_filter_sharpness;
 	int32_t mbedge_limit;
 	int32_t sub_bedge_limit;
+	int32_t interior_limit;
+	int32_t hev_threshold;
 
 	int32_t number_of_partitions;
 	int32_t partition_step;
@@ -229,7 +236,4 @@ struct times
 			interpolate,
 			all;
 };
-
-
-
 
