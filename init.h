@@ -1,14 +1,14 @@
 // string to print when "-h" option is met
 char small_help[] = "\n"
-  				"\t-i\t\t:\tinput file path\n"
+					"\t-i\t\t:\tinput file path\n"
 					"\t-u\t\t:\toutput file path\n"
 					"\t-qi\t\t:\tquantizer index, one for all intra-color planes\n"
 					"\t-qp\t\t:\tquantizer index, one for all inter-color planes\n"
 					"\t-g\t\t:\tGroup of Pictures size\n"
 					"\t-w\t\t:\tamount of work-items on gpu launched simutaneosly\n"
 					"\t-t\t\t:\tamount of partitions for boolean encoding (also threads launched at once)\n"
-					"\t-vx\t\t:\tmaximum distance for X vector search in qpel"
-					"\t-vy\t\t:\tmaximum distance for Y vector search in qpel";
+					"\t-vx\t\t:\tmaximum distance for X vector search"
+					"\t-vy\t\t:\tmaximum distance for Y vector search";
 
 int init_all()
 {
@@ -105,10 +105,18 @@ int init_all()
 		device.luma_interpolate_Hx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_interpolate_Vx4";
 		device.luma_interpolate_Vx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "filter_MB_col_H";
-		device.filter_MB_col_H = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "filter_MB_col_V";
-		device.filter_MB_col_V = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "chroma_interpolate_Hx8";
+		device.chroma_interpolate_Hx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "chroma_interpolate_Vx8";
+		device.chroma_interpolate_Vx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "simple_loop_filter_MBH";
+		device.simple_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "simple_loop_filter_MBV";
+		device.simple_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "normal_loop_filter_MBH";
+		device.normal_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "normal_loop_filter_MBV";
+		device.normal_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 	}
 	// CPU:
 	printf("reading CPU program...\n");
@@ -195,8 +203,8 @@ int init_all()
 		device.current_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.current_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.last_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 16*video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		device.last_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		device.last_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		device.last_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		device.last_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.reconstructed_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		device.reconstructed_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.reconstructed_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
@@ -208,20 +216,6 @@ int init_all()
 	device.third_context = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(uint8_t)*25*video.mb_count, NULL , &device.state_cpu);
 	device.coeff_probs = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(uint32_t), NULL , &device.state_cpu);
 	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(uint32_t), NULL , &device.state_cpu);
-
-	if (video.GOP_size > 1) {
-		uint8_t interior_limit = video.loop_filter_level;
-		if (video.loop_filter_sharpness) {
-			interior_limit >>= video.loop_filter_sharpness > 4 ? 2 : 1;
-			if (interior_limit > 9 - video.loop_filter_sharpness)
-				interior_limit = 9 - video.loop_filter_sharpness;
-		}
-		if (!interior_limit)
-			interior_limit = 1;
-
-		video.mbedge_limit = ((video.loop_filter_level + 2) * 2) + interior_limit;
-		video.sub_bedge_limit = (video.loop_filter_level * 2) + interior_limit;
-	}
 
 	if (video.GOP_size > 1) {
 	/*__kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
@@ -299,29 +293,62 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 1, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 2, sizeof(int32_t), &video.wrk_height);
 
-		/*__kernel void filter_MB_col_H(	__global uchar * const frame, //0
-											const int width, // 1
-											const int mbedge_limit, // 2
-											const int sub_edge_limit, // 3
-											const int mb_col) // 4 */
+		/*__kernel void chroma_interpolate_Hx8( 	__global uchar *const src_frame, //0
+										__global uchar *const dst_frame, //1
+										const int width, //2
+										const int height) //3*/
 
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_H, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_H, 1, sizeof(int32_t), &video.wrk_width);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_H, 2, sizeof(int32_t), &video.mbedge_limit);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_H, 3, sizeof(int32_t), &video.sub_bedge_limit);
-		// mb_col is incremented during launches
+		int32_t chroma_width = video.wrk_width/2;
+		int32_t chroma_height = video.wrk_height/2;
+		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 2, sizeof(int32_t), &chroma_width);
+		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 3, sizeof(int32_t), &chroma_height);
 
-		/*__kernel void filter_MB_col_V(	__global uchar * const frame, //0
-											const int width, // 1
-											const int mbedge_limit, // 2
-											const int sub_edge_limit, // 3
-											const int mb_col) // 4 */
+		/*__kernel void chroma_interpolate_Vx8( __global uchar *const frame, //0
+									const int width, //1
+									const int height) //2*/
+		
+		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 1, sizeof(int32_t), &chroma_width);
+		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 2, sizeof(int32_t), &chroma_height);
 
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_V, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_V, 1, sizeof(int32_t), &video.wrk_width);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_V, 2, sizeof(int32_t), &video.mbedge_limit);
-		device.state_gpu = clSetKernelArg(device.filter_MB_col_V, 3, sizeof(int32_t), &video.sub_bedge_limit);
-		// mb_col is incremented during launches
+
+		/*__kernel void simple_loop_filter_MBH(	__global uchar * const frame, //0
+												const int width, // 1
+												const int mbedge_limit, // 2
+												const int sub_edge_limit, // 3
+												const int mb_col) // 4 */
+
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 1, sizeof(int32_t), &video.wrk_width);
+		// mb_col is incremented during launches, filter parameters are set before launch
+
+		/*__kernel void simple_loop_filter_MBV(__global uchar * const frame, //0
+												const int width, // 1
+												const int mbedge_limit, // 2
+												const int sub_edge_limit, // 3
+												const int mb_col) // 4 */
+
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 1, sizeof(int32_t), &video.wrk_width);
+
+		/*__kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
+												const int width, //1
+												const int mbedge_limit, //2
+												const int sub_bedge_limit, //3
+												const int interior_limit, //4
+												const int hev_threshold, //5
+												const int mb_size, //6
+												const int mb_col) //7 */
+
+		// no params at init time
+
+		/*__kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
+												const int width, //1
+												const int mbedge_limit, //2
+												const int sub_bedge_limit, //3
+												const int interior_limit, //4
+												const int hev_threshold, //5
+												const int mb_size, //6
+												const int mb_col) //7 */
 
 		device.commandQueue_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
 	}
@@ -399,15 +426,19 @@ int string_to_value(char *str)
 
 int ParseArgs(int argc, char *argv[])
 {
-    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_vx = 0, f_vy = 0, f_ll = 0, f_ls = 0; 
-	int i;
+    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_vx = 0, f_vy = 0, f_lt = 0, f_ll = 0, f_ls = 0; 
+	int i,ii;
     i = 1;
     while (i < argc)
     {
+		ii = i;
         if (argv[i][0] == '-')
-        {  
+        {
 			if ((argv[i][1] == 'h') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
-				printf("%s", small_help);
+			{
+				printf("%s\n", small_help);
+				return -1;
+			}
             if ((argv[i][1] == 'i') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
             {
                 ++i;
@@ -601,6 +632,26 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
+			if ((argv[i][1] == 'l') && (argv[i][2] == 't') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+            {
+                ++i;
+                if (i < argc)
+                {
+					video.loop_filter_type = string_to_value(argv[i]);
+					if ((video.loop_filter_type < 0) || (video.loop_filter_type > 1))
+					{
+						printf ("wrong loop_filter_type! must be 0 - normal or 1 - simple;\n");
+						return -1;
+					} 
+                    f_lt = 1;
+					++i;
+                }
+                else
+                {
+                    printf ("no value for loop_filter_type;\n");
+                    return -1;
+                }
+            }
 			if ((argv[i][1] == 'l') && (argv[i][2] == 'l') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
             {
                 ++i;
@@ -609,7 +660,7 @@ int ParseArgs(int argc, char *argv[])
 					video.loop_filter_level = string_to_value(argv[i]);
 					if (video.loop_filter_level < 0)
 					{
-						printf ("wrong quantizer index format for loop_filter_level! must be an integer from 0 to 63;\n");
+						printf ("wrong format for loop_filter_level! must be an integer from 0 to 63;\n");
 						return -1;
 					} else 
 						video.loop_filter_level = (video.loop_filter_level > 63) ? 63 : video.loop_filter_level;
@@ -618,7 +669,7 @@ int ParseArgs(int argc, char *argv[])
                 }
                 else
                 {
-                    printf ("no value for quantizer;\n");
+                    printf ("no value for loop_filter_level;\n");
                     return -1;
                 }
             }
@@ -630,7 +681,7 @@ int ParseArgs(int argc, char *argv[])
 					video.loop_filter_sharpness = string_to_value(argv[i]);
 					if (video.loop_filter_sharpness < 0)
 					{
-						printf ("wrong quantizer index format for loop_filter_sharpness! must be an integer from 0 to 63;\n");
+						printf ("wrong format for loop_filter_sharpness! must be an integer from 0 to 63;\n");
 						return -1;
 					} else 
 						video.loop_filter_sharpness = (video.loop_filter_sharpness > 7) ? 7 : video.loop_filter_sharpness;
@@ -639,11 +690,16 @@ int ParseArgs(int argc, char *argv[])
                 }
                 else
                 {
-                    printf ("no value for quantizer;\n");
+                    printf ("no value for loop_filter_sharpness;\n");
                     return -1;
                 }
             }
 		}    
+		if (i == ii)
+		{
+			printf("unknown option %s\n",argv[i]);
+			return -1;
+		}
 	}
 
     if (f_i == 0)
@@ -701,15 +757,20 @@ int ParseArgs(int argc, char *argv[])
 		printf("no max Y vector length specified - set to 0;\n");
 		video.max_Y_vector_length = 0;
     }
+	if (f_lt == 0)
+    {
+		printf("no loop filter type is specified - set to 0 (no normal);\n");
+		video.loop_filter_type = 0;
+    }
 	if (f_ll == 0)
     {
 		printf("no loop filter level is specified - set to 0 (no filtering);\n");
-		video.max_Y_vector_length = 0;
+		video.loop_filter_level = 0;
     }
 	if (f_ls == 0)
     {
 		printf("no loop filter sharpness is specified - set to 0;\n");
-		video.max_Y_vector_length = 0;
+		video.loop_filter_sharpness = 0;
     }
     return 0;
 }
