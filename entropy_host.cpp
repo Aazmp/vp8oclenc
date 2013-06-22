@@ -9,7 +9,7 @@ extern struct videoContext video;
 extern struct hostFrameBuffers frames;
 
 typedef struct {
-  uint8_t *output; /* ptr to next byte to be written */
+	uint8_t *output; /* ptr to next byte to be written */
 	uint32_t range; /* 128 <= range <= 255 */
 	uint32_t bottom; /* minimum value of remaining output */
 	int32_t bit_count; /* # of shifts before an output byte is available */
@@ -146,8 +146,7 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
 		write_bool(vbe, mvc[0][IS_SHORT], 0); //according to spec-decoder flag '0' for a short range
 		encoding_symbol s_tmp;
 		s_tmp.bits = abs_v;
-		s_tmp.size = 3;// they all 000..111
-		
+		s_tmp.size = 3;// they all 000..111	
 		const Prob *const p = &(mvc[0][SHORT]);
 		tree_index i = 0;
 	    do
@@ -187,7 +186,6 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
 		encoding_symbol s_tmp;
 		s_tmp.bits = abs_v;
 		s_tmp.size = 3;// they all 000..111
-		//write_symbol(vbe, s_tmp, &(mvc[1][SHORT]), small_mvtree);
 		const Prob *const p = &(mvc[1][SHORT]);
 		tree_index i = 0;
 	    do
@@ -216,7 +214,7 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
     return;
 }
 
-void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) // mostly copied dixie.c from guide.pdf (converted to encoder)
+void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) // mostly copied from guide.pdf (converted to encoder)
 {
 	int32_t mb_row = mb_num / video.mb_width;
 	int32_t mb_col = mb_num % video.mb_width;
@@ -234,9 +232,9 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	else left_edata = &imaginary_edata;
 	if ((mb_col>0) && (mb_row>0)) above_left_edata = &(frames.e_data[mb_num-video.mb_width-1]);
 	else above_left_edata = &imaginary_edata;
-	// we begin at spot, where dixie.c decoder calls find near mvs
+	// we begin at spot, where spec decoder calls find near mvs
 	// but we do an encoder
-	//there only two types of macroblocks: SPLITMV (real ones), INTRA-like (imaginary blocks above the frame and to the left)
+	//there only two types of macroblocks: SPLITMV (real ones), INTRA_like (imaginary blocks above the frame and to the left)
 	// for each macroblock there is a list of three vectors mv[3] (above, left, above_left),
 	// and "weights" cnt[4];
 	/* "The first three entries in the return value cnt are (in order)
@@ -244,7 +242,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		The final value indicates the extent to which SPLITMV was used by the
 		neighboring macroblocks. The largest possible "weight" value in each
 		case is 5." */
-	// in reference decoder raw stands for putting X and Y component together as int32
+	// in reference decoder "raw" stands for putting X and Y component together as int32
 	union mv mb_mv_list[4];
 	int32_t cnt[4];
 	union mv *mb_mv = mb_mv_list;
@@ -252,12 +250,9 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	int32_t *cntx  = cnt;
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
 
-	// process above // above mb's reference always not CURRENT (mb itself not intra)
-	// BUT:
-	//spec says that above and to the left of frame there are blocks with 0x0 vectors
-	// on block-level they are
-	// but on MB-level they are INTRA blocks (technically there are no vectors) according to simple_decoder
-
+	// process above 
+	// if first row then above is INTRA-like and no action is taken, else above is SPLITMV (all we have)
+	// the same for other 2 processes
 	if (mb_row > 0) 
 	{
 		if (above_edata->base_mv.raw)
@@ -312,7 +307,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	// Use near_mvs[CNT_BEST] to store the "best" MV. Note that this storage shares the same address as near_mvs[CNT_ZEROZERO].
 	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
 	// since we never use NEARMV or NEARESTMV modes, we need only cnt[0] (BEST)
-	// this position equals end of spec_example encoder function find_near_mvs with best_mv in mb_mv_list[0];
+	// this position equals end of dixie.c function find_near_mvs with best_mv in mb_mv_list[0];
 	//also we have cnt[] array as index-set for probabilities array
 	Prob mv_ref_p[4];
 	mv_ref_p[0] = vp8_mode_contexts[cnt[0]][0]; // vp8_mode_contexts[6][4]
@@ -335,7 +330,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	int32_t b_num;
 	for (b_num = 0; b_num < 4; ++b_num)
 	{
-		// b_num being part number and 8x8 block number
+		// b_num being part number and block number
 		union mv left_mv, above_mv, this_mv;
 		int32_t b_col, b_row;
 		b_row = b_num / 2; b_col = b_num % 2;
@@ -406,7 +401,6 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	// that will be referenced by below, right and below_right macroblocks
 	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
-
 
 	return;
 }
@@ -510,8 +504,10 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, uint32_t num[2][MVPcount
 
 void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num) 
 {
+	// it looks similar to funtion where we encode vectors
+	// BUT
 	// we don't write anything here
-	// just count robs, so we need cnt and mv_list arrays
+	// just count probs
 	int32_t mb_row = mb_num / video.mb_width;
 	int32_t mb_col = mb_num % video.mb_width;
 	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
@@ -585,13 +581,14 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	mv_ref_p[3] = vp8_mode_contexts[cnt[3]][3];
 
 	// encode SPLITMV mode
-	// -		we count probs only now
+	// -		we count only now
 	// encode sub_mv_mode
 	// -
 	
 	int32_t b_num;
 	for (b_num = 0; b_num < 4; ++b_num)
 	{
+		// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
 		// b_num being part number and block number
 		union mv left_mv, above_mv, this_mv;
 		int32_t b_col, b_row;
@@ -630,7 +627,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 		int32_t ctx = 0;
 		if (lea&&lez) ctx = 4; 
 		else if (lea) ctx = 3;
-		else if (aez) ctx = 2; // it seems above ha higher priority here
+		else if (aez) ctx = 2;
 		else if (lez) ctx = 1;
 		if ((this_mv.raw != left_mv.raw) &&
 			(this_mv.raw != above_mv.raw) &&
@@ -656,7 +653,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// uncompressed first part(frame tag..) of frame header will be encoded last
 	// because it has size of 1st partition
 
-	//using functions taken from multimedia mike's encoder
+	//using functions taken from Multimedia Mike's encoder
 	//write_bool(encoder, prob, 1bit_value)
 		//encoded 1bit value with Prob probability
 	//write_flag(encoder, 1_bit_value)
@@ -668,7 +665,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	
 	vp8_bool_encoder *vbe = (vp8_bool_encoder*)malloc(sizeof(vp8_bool_encoder));
 	// start of encoding header
-	// at the start of every partition init
+	// at the start of every partition - init
 	int32_t bool_offset;
 	if (!frames.prev_is_key_frame) 
 		bool_offset = 3;
@@ -696,7 +693,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     /* end of update_segmentation() block	*/
 
 	/*  filter_type                                     | L(1)  | */
-    write_flag(vbe, 1); // simple
+	write_flag(vbe, video.loop_filter_type);
     /*  loop_filter_level                               | L(6)  | */
 	write_literal(vbe, video.loop_filter_level, 6);
     /*  sharpness_level                                 | L(3)  | */
@@ -705,7 +702,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	/*  start of mb_lf_adjustments() block */
     /*  loop_filter_adj_enable                          | L(1)  | */
     write_flag(vbe, 0); // do not adjust loop filter
-    /*  if (loop_filter_adj_enable)                     |       |
+    /*  if (loop_filter_adj_enable) ...                 |       |
     // but we do not adjust here						|		|
     /*  end of mb_lf_adjustments() block */
 
@@ -770,7 +767,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       refresh_entropy_probs                       | L(1)  | */
     // do not update coefficient probabilities
     // refresh_entropy_probs determines whether updated token probabilities are used only for this frame or until further update.
-    // Explanation found in google groups in webm:
+    // Explanation found in google.groups:
     //On a key frame, all probabilities are reset to default baseline probabilities, then on each subsequent frame,
     //these probabilities are combined with individual updates for use in coefficient decoding within the frame.
     //1. When refresh_entropy_probs flag is 1, the updated combined probabilities become the new baseline for next frame.
@@ -789,7 +786,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |           copy_buffer_to_golden                   | L(2)  | */// 0: no copying; 1: last -> golden; 2: altref -> golden
 		write_literal(vbe, 0, 2);
     /*      if (!refresh_alternate_frame)               |       |
-    |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: last -> altref; 2: golden -> altref
+    |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: lsat -> altref; 2: golden -> altref
 		write_literal(vbe, 0, 2);
     /*      sign_bias_golden                            | L(1)  |
     |       sign_bias_alternate                         | L(1)  |*/
@@ -900,7 +897,11 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			for (j = 0; j < 19; ++j) {
 				write_bool(vbe, vp8_mv_update_probs[i][j], 1);
 				new_mv_context[i][j] = (uint8_t)((num_mv_context[i][j] << 8) / denom_mv_context[i][j]);
+				// standard says that these probs are stored as 7 bit values (7 most significant of total 8)
+				// so we have to set LSB = 0;
 				new_mv_context[i][j] &= (~(0x1));
+				// spec decoder sets prob to 1 when pulls 0 from header
+				// but we'll clamp for safety to 2..254
 				new_mv_context[i][j] = ((new_mv_context[i][j] < 2) ? 2 : new_mv_context[i][j]);
 				new_mv_context[i][j] = ((new_mv_context[i][j] > 254) ? 254 : new_mv_context[i][j]);
 				write_literal(vbe, (new_mv_context[i][j]>>1), 7);
@@ -996,7 +997,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 				// all other blocks encoded with B_TM_PRED too
 				ctx1 = B_TM_PRED;
 				ctx2 = B_TM_PRED;
-				// imaginary blocks outside frame - B_DC_PRED
+				// but imaginary blocks outside frame - B_DC_PRED
 				if ( (mb_num < video.mb_width) && (b_num < 4) )
 					ctx1 = B_DC_PRED;
 				if ( ((mb_num % video.mb_width) == 0) && ((b_num & 0x3) == 0) )
@@ -1011,12 +1012,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			// and now TM_PRED as chroma (different bits value!!!);
 			s_tmp.bits = 7; //TM_PRED = "111"
 			s_tmp.size = 3;
-			// MM's encoder uses different probabilities, but token value the same
 			write_symbol(vbe, s_tmp, kf_uv_mode_prob, uv_mode_tree);
 		}
         /*  end of macroblock_header() block  */
     } // end of per macroblock cycle
 
+	// at the end of each partition - flush
 	flush_bool_encoder(vbe);
 	frames.encoded_frame_size = vbe->count + bool_offset;
 
@@ -1033,9 +1034,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
 	uint32_t buf;
 	buf = (frames.prev_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
-	buf |= (1 << 1); /* version 2 in bits 3-1 */
-	buf |= 0x10; /* this bit indicates the frame should be shown */
-	buf |= (vbe->count << 5); //puts only entropy part without uncompressed part
+	buf |= (0 << 1); /* version 0 in bits 3-1 */
+	// version 0 - bicubic interpolation
+	// version 1-2 - bilinear
+	// version 3 - no interpolation
+	// doesn't make difference for decoders loop filter
+	buf |= 0x10; /* this bit indicates that the frame should be shown */
+	buf |= (vbe->count << 5); 
 
 	partition[0] = (uint8_t)(buf & 0xff);
 	partition[1] = (uint8_t)((buf>>8) & 0xff);
