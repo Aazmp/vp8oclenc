@@ -41,6 +41,8 @@ Command line options:
 
 -vy value = dY(rows) -//-
 
+-lt value = filter type (0 - normal, 1 - simple)
+
 -ll value = Loop filter level (0 - disabled)
 
 -ls value = Loop filter sharpness
@@ -57,14 +59,12 @@ it will be set to stdin
 P.S. 
 No benchmarks, because there is no need in them :)
 Quality of material can't compete with any good encoder of any standard.
-It's just bad now)
+It's just bad now.
 No adaptive quant even on frame level.
 No skipping macroblocks.
-Simple filter instead of Normal (also implemented in very simple way... and may be broken)
 Fixed GOP size, only one reference frame - last one.
-Simple interpolation filter.
 Fixed size of blocks for ME - 8x8
-MV search - full search (but for GPU it's no that bad)
+MV search - full search (but for GPU it's not that bad)
 Encoding is very straightforward, no crafty methods at all.
 Just a toy :)
 
