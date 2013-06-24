@@ -75,7 +75,7 @@ void entropy_encode()
 	// start of encoding coefficients 
 	clSetKernelArg(device.encode_coefficients, 9, sizeof(int32_t), &frames.prev_is_key_frame);	
 	clEnqueueNDRangeKernel(device.commandQueue_cpu, device.encode_coefficients, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
-	clFlush(device.commandQueue_cpu); // we don't need result until gather_frame(), so no block now
+	clFlush(device.commandQueue_cpu); // we don't nedd result until gather_frame(), so no block now
 	t.bool_encode_coeffs += clock() - t.start; // this time means something only if encode_coefficients is blocking (followed by clFinish, not clFlush)
 
 	t.start = clock();
@@ -529,6 +529,8 @@ void intra_transform()
 {
 	t.start = clock();
 
+	frames.frames_until_key = video.GOP_size;
+
     video.quantizer_y_dc_i = vp8_dc_qlookup[video.quantizer_index_y_dc_i];
     video.quantizer_y_ac_i = vp8_ac_qlookup[video.quantizer_index_y_ac_i];
     video.quantizer_y2_dc_i = (vp8_dc_qlookup[video.quantizer_index_y2_dc_i]) << 1; // *2
@@ -557,132 +559,125 @@ void intra_transform()
 }
 
 
-void inter_transform()
+void do_loop_filter()
 {
-	clFinish(device.commandQueue_gpu);
-
-	if (video.loop_filter_level > 0) {
-		t.start = clock();
-
-		video.interior_limit = video.loop_filter_level;
-		if (video.loop_filter_sharpness) {
-			video.interior_limit >>= video.loop_filter_sharpness > 4 ? 2 : 1;
-			if (video.interior_limit > 9 - video.loop_filter_sharpness)
-				video.interior_limit = 9 - video.loop_filter_sharpness;
-		}
-		if (!video.interior_limit)
-			video.interior_limit = 1;
-
-		video.mbedge_limit = ((video.loop_filter_level + 2) * 2) + video.interior_limit;
-		video.sub_bedge_limit = (video.loop_filter_level * 2) + video.interior_limit;
-
-		if (video.loop_filter_type == 0) // normal
-		{
-			video.hev_threshold = 0;
-			if (frames.prev_is_key_frame) /* current frame is a key frame */
-			{
-				if (video.loop_filter_level >= 40)
-					video.hev_threshold = 2;
-				else if (video.loop_filter_level >= 15)
-					video.hev_threshold = 1;
-			}
-			else /* current frame is an interframe */
-			{
-				if (video.loop_filter_level >= 40)
-					video.hev_threshold = 3;
-				else if (video.loop_filter_level >= 20)
-					video.hev_threshold = 2;
-				else if (video.loop_filter_level >= 15)
-					video.hev_threshold = 1;
-			}
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 2, sizeof(int32_t), &video.mbedge_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 3, sizeof(int32_t), &video.sub_bedge_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 4, sizeof(int32_t), &video.interior_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 5, sizeof(int32_t), &video.hev_threshold);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 2, sizeof(int32_t), &video.mbedge_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 4, sizeof(int32_t), &video.interior_limit);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 5, sizeof(int32_t), &video.hev_threshold);
-			int32_t mb_col, mb_size, plane_width;
-			for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
-			{
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 7, sizeof(int32_t), &mb_col);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 7, sizeof(int32_t), &mb_col);
-				device.gpu_work_group_size_per_dim[0] = 64; 
-
-				device.gpu_work_items_per_dim[0] = video.mb_height*16;
-				mb_size = 16;
-				plane_width = video.wrk_width;
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				device.gpu_work_items_per_dim[0] = video.mb_height*8;
-				mb_size = 8;
-				plane_width = video.wrk_width/2;
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				clFinish(device.commandQueue_gpu);
-
-				device.gpu_work_items_per_dim[0] = video.mb_height*4;
-				mb_size = 16;
-				plane_width = video.wrk_width;
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				device.gpu_work_items_per_dim[0] = video.mb_height*2;
-				mb_size = 8;
-				plane_width = video.wrk_width/2;
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				clFinish(device.commandQueue_gpu);
-			}
-		}
-		else
-		{
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 2, sizeof(int32_t), &video.mbedge_limit);
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 3, sizeof(int32_t), &video.sub_bedge_limit);
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 2, sizeof(int32_t), &video.mbedge_limit);
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
-
-			int32_t mb_col;
-			for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
-			{
-				device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 4, sizeof(int32_t), &mb_col);
-				device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 4, sizeof(int32_t), &mb_col);
-				
-				device.gpu_work_items_per_dim[0] = video.mb_height*16;
-				device.gpu_work_group_size_per_dim[0] = 64; 
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-				clFinish(device.commandQueue_gpu);
-
-				device.gpu_work_items_per_dim[0] = video.mb_height*4;
-				device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-
-				clFinish(device.commandQueue_gpu);
-			}
-		}
-		t.loop_filter += clock() - t.start;
-	}
-
 	t.start = clock();
 
-		
+	video.interior_limit = video.loop_filter_level;
+	if (video.loop_filter_sharpness) {
+		video.interior_limit >>= video.loop_filter_sharpness > 4 ? 2 : 1;
+		if (video.interior_limit > 9 - video.loop_filter_sharpness)
+			video.interior_limit = 9 - video.loop_filter_sharpness;
+	}
+	if (!video.interior_limit)
+		video.interior_limit = 1;
 
-	// interpolate last frame buffer for luma(Y) with bilinear filter
-	// now it's done by averaging three pixels p0.1, p0.2, p0.3 between p0 and p1
-	// p0.1 == (p0*3 + p1*1 + 2) / 4
-	// p0.2 == (p0*2 + p1*2 + 2) / 4
-	// p0.3 == (p0*1 + p1*3 + 2) / 4
+	video.mbedge_limit = ((video.loop_filter_level + 2) * 2) + video.interior_limit;
+	video.sub_bedge_limit = (video.loop_filter_level * 2) + video.interior_limit;
+
+	if (video.loop_filter_type == 0) // normal
+	{
+		video.hev_threshold = 0;
+		if (frames.prev_is_key_frame) /* current frame is a key frame */
+		{
+			if (video.loop_filter_level >= 40)
+				video.hev_threshold = 2;
+			else if (video.loop_filter_level >= 15)
+				video.hev_threshold = 1;
+		}
+		else /* current frame is an interframe */
+		{
+			if (video.loop_filter_level >= 40)
+				video.hev_threshold = 3;
+			else if (video.loop_filter_level >= 20)
+				video.hev_threshold = 2;
+			else if (video.loop_filter_level >= 15)
+				video.hev_threshold = 1;
+		}
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 2, sizeof(int32_t), &video.mbedge_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 3, sizeof(int32_t), &video.sub_bedge_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 4, sizeof(int32_t), &video.interior_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 5, sizeof(int32_t), &video.hev_threshold);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 2, sizeof(int32_t), &video.mbedge_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 4, sizeof(int32_t), &video.interior_limit);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 5, sizeof(int32_t), &video.hev_threshold);
+		int32_t mb_col, mb_size, plane_width;
+		for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
+		{
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 7, sizeof(int32_t), &mb_col);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 7, sizeof(int32_t), &mb_col);
+			device.gpu_work_group_size_per_dim[0] = 64; 
+
+			device.gpu_work_items_per_dim[0] = video.mb_height*16;
+			mb_size = 16;
+			plane_width = video.wrk_width;
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.gpu_work_items_per_dim[0] = video.mb_height*8;
+			mb_size = 8;
+			plane_width = video.wrk_width/2;
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			clFinish(device.commandQueue_gpu);
+
+			device.gpu_work_items_per_dim[0] = video.mb_height*4;
+			mb_size = 16;
+			plane_width = video.wrk_width;
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.gpu_work_items_per_dim[0] = video.mb_height*2;
+			mb_size = 8;
+			plane_width = video.wrk_width/2;
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			clFinish(device.commandQueue_gpu);
+		}
+	}
+	else
+	{
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 2, sizeof(int32_t), &video.mbedge_limit);
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 3, sizeof(int32_t), &video.sub_bedge_limit);
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 2, sizeof(int32_t), &video.mbedge_limit);
+		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
+		int32_t mb_col;
+		for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
+		{
+			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 4, sizeof(int32_t), &mb_col);
+			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 4, sizeof(int32_t), &mb_col);
+			
+			device.gpu_work_items_per_dim[0] = video.mb_height*16;
+			device.gpu_work_group_size_per_dim[0] = 64; 
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			clFinish(device.commandQueue_gpu);
+
+			device.gpu_work_items_per_dim[0] = video.mb_height*4;
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+
+			clFinish(device.commandQueue_gpu);
+		}
+	}
+	t.loop_filter += clock() - t.start;
+	return;
+}
+
+void interpolate()
+{
+	t.start = clock();
+
+	// interpolate last frame buffer for luma(Y) with bicubic filter
 	// both HORIZONTALLY
 	device.gpu_work_items_per_dim[0] = video.wrk_height;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_interpolate_Hx4, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
@@ -703,16 +698,74 @@ void inter_transform()
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Vx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	
 	t.interpolate += clock() - t.start;
+}
+
+void correct_quant_indexes()
+{
+	// smoothing quant values in 3 steps frop P-frame to I-frame
+	if (frames.frames_until_key < 4)
+	{
+		video.quantizer_index_y_dc_p_c = (video.quantizer_index_y_dc_p + video.quantizer_index_y_dc_i*3 + 2)/4;
+		video.quantizer_index_y_ac_p_c = (video.quantizer_index_y_ac_p + video.quantizer_index_y_ac_i*3 + 2)/4;
+		video.quantizer_index_y2_dc_p_c = (video.quantizer_index_y2_dc_p + video.quantizer_index_y2_dc_i*3 + 2)/4;
+		video.quantizer_index_y2_ac_p_c = (video.quantizer_index_y2_ac_p + video.quantizer_index_y2_ac_i*3 + 2)/4;
+		video.quantizer_index_uv_dc_p_c = (video.quantizer_index_uv_dc_p + video.quantizer_index_uv_dc_i*3 + 2)/4;
+		video.quantizer_index_uv_ac_p_c = (video.quantizer_index_uv_ac_p + video.quantizer_index_uv_ac_i*3 + 2)/4;
+	} 
+	else if (frames.frames_until_key < 12)
+	{
+		video.quantizer_index_y_dc_p_c = (video.quantizer_index_y_dc_p + video.quantizer_index_y_dc_i + 1)/2;
+		video.quantizer_index_y_ac_p_c = (video.quantizer_index_y_ac_p + video.quantizer_index_y_ac_i + 1)/2;
+		video.quantizer_index_y2_dc_p_c = (video.quantizer_index_y2_dc_p + video.quantizer_index_y2_dc_i + 1)/2;
+		video.quantizer_index_y2_ac_p_c = (video.quantizer_index_y2_ac_p + video.quantizer_index_y2_ac_i + 1)/2;
+		video.quantizer_index_uv_dc_p_c = (video.quantizer_index_uv_dc_p + video.quantizer_index_uv_dc_i + 1)/2;
+		video.quantizer_index_uv_ac_p_c = (video.quantizer_index_uv_ac_p + video.quantizer_index_uv_ac_i + 1)/2;
+	} 
+	else if (frames.frames_until_key < 24)
+	{
+		video.quantizer_index_y_dc_p_c = (video.quantizer_index_y_dc_p*3 + video.quantizer_index_y_dc_i + 2)/4;
+		video.quantizer_index_y_ac_p_c = (video.quantizer_index_y_ac_p*3 + video.quantizer_index_y_ac_i + 2)/4;
+		video.quantizer_index_y2_dc_p_c = (video.quantizer_index_y2_dc_p*3 + video.quantizer_index_y2_dc_i + 2)/4;
+		video.quantizer_index_y2_ac_p_c = (video.quantizer_index_y2_ac_p*3 + video.quantizer_index_y2_ac_i + 2)/4;
+		video.quantizer_index_uv_dc_p_c = (video.quantizer_index_uv_dc_p*3 + video.quantizer_index_uv_dc_i + 2)/4;
+		video.quantizer_index_uv_ac_p_c = (video.quantizer_index_uv_ac_p*3 + video.quantizer_index_uv_ac_i + 2)/4;
+	} 
+	else 
+	{
+		video.quantizer_index_y_dc_p_c = video.quantizer_index_y_dc_p;
+		video.quantizer_index_y_ac_p_c = video.quantizer_index_y_ac_p;
+		video.quantizer_index_y2_dc_p_c = video.quantizer_index_y2_dc_p;
+		video.quantizer_index_y2_ac_p_c = video.quantizer_index_y2_ac_p;
+		video.quantizer_index_uv_dc_p_c = video.quantizer_index_uv_dc_p;
+		video.quantizer_index_uv_ac_p_c = video.quantizer_index_uv_ac_p;
+	} 
+	//check for delta for chroma (because they are lowered as much as possible)
+	video.quantizer_index_uv_dc_p_c = ((video.quantizer_index_y_ac_p_c - video.quantizer_index_uv_dc_p_c) > 15) 
+										? video.quantizer_index_y_ac_p_c - 15 
+										: video.quantizer_index_uv_dc_p_c;
+	video.quantizer_index_uv_ac_p_c = ((video.quantizer_index_y_ac_p_c - video.quantizer_index_uv_ac_p_c) > 15) 
+										? video.quantizer_index_y_ac_p_c - 15 
+										: video.quantizer_index_uv_ac_p_c;
+	return;
+}
+
+void inter_transform()
+{
+	clFinish(device.commandQueue_gpu);
+
+	if (video.loop_filter_level > 0) do_loop_filter();
+
+	interpolate();
 
 	clock_t start_i = clock();
 
 	// set quant for inter-frames
-    video.quantizer_y_dc_p = vp8_dc_qlookup[video.quantizer_index_y_dc_p];
-    video.quantizer_y_ac_p = vp8_ac_qlookup[video.quantizer_index_y_ac_p];
-	video.quantizer_y2_dc_p = (vp8_dc_qlookup[video.quantizer_index_y2_dc_p]) << 1; // *2
-    video.quantizer_y2_ac_p = 31 * (vp8_ac_qlookup[video.quantizer_index_y2_ac_p]) / 20; // *155/100
-    video.quantizer_uv_dc_p = vp8_dc_qlookup[video.quantizer_index_uv_dc_p];
-    video.quantizer_uv_ac_p = vp8_ac_qlookup[video.quantizer_index_uv_ac_p];
+    video.quantizer_y_dc_p = vp8_dc_qlookup[video.quantizer_index_y_dc_p_c];
+    video.quantizer_y_ac_p = vp8_ac_qlookup[video.quantizer_index_y_ac_p_c];
+	video.quantizer_y2_dc_p = (vp8_dc_qlookup[video.quantizer_index_y2_dc_p_c]) << 1; // *2
+    video.quantizer_y2_ac_p = 31 * (vp8_ac_qlookup[video.quantizer_index_y2_ac_p_c]) / 20; // *155/100
+    video.quantizer_uv_dc_p = vp8_dc_qlookup[video.quantizer_index_uv_dc_p_c];
+    video.quantizer_uv_ac_p = vp8_ac_qlookup[video.quantizer_index_uv_ac_p_c];
 
 	if (video.quantizer_y2_ac_p < 8)
         video.quantizer_y2_ac_p = 8;
@@ -827,12 +880,51 @@ void inter_transform()
 	}	
 
 	t.inter_transform += clock() - start_i;
-	
+
+	//count SSIM
+	clFinish(device.commandQueue_gpu);
+	device.gpu_work_items_per_dim[0] = video.mb_count;
+	device.gpu_work_group_size_per_dim[0] = 64;
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.count_SSIM, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	if (device.state_gpu != 0) printf("count SSIM error: %d\n", device.state_gpu);
+
 
     return;
 }
 
+int check_SSIM()
+{
+	frames.new_SSIM = 0;
+	float min = 2;
+	float max = -2;
+	int i;
+	for (i = 0; i < video.mb_count; ++i)
+	{
+		frames.new_SSIM += frames.transformed_blocks[i].SSIM;
+		min = (frames.transformed_blocks[i].SSIM < min) ? frames.transformed_blocks[i].SSIM : min;
+		max = (frames.transformed_blocks[i].SSIM > max) ? frames.transformed_blocks[i].SSIM : max;
+	}
+	frames.new_SSIM /= (float)video.mb_count;
+	printf("Frame %d => Avg SSIM = %f; Min SSIM = %f; Max SSIM = %f\n", frames.frame_number, frames.new_SSIM, min, max);
+	if (frames.new_SSIM < 0.85f)
+		return 1;
+	return 0;
+}
 
+int scene_change()
+{
+	// something more sophisticated is desirebale
+	int i,j,c,k=0;
+	for (i = 0; i < video.mb_count; ++i)
+	{
+		for(j = 16; j < 24; ++j)
+		{
+			if (frames.transformed_blocks[i].coeffs[j][0] > 0)
+				++k;
+		}
+	}
+	return (k > (video.mb_count*4)/4);
+}
 
 void finalize();
 
@@ -879,6 +971,7 @@ int main(int argc, char *argv[])
 	}
 
     intra_transform();
+	frames.last_SSIM = -1;
 	if (video.GOP_size > 1) {
 		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
 		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
@@ -890,26 +983,41 @@ int main(int argc, char *argv[])
     {
 		device.state_cpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.transformed_blocks_cpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
 		frames.prev_is_key_frame = frames.current_is_key_frame; // for entropy coding of previous frame;
-		frames.current_is_key_frame = !(frames.frame_number % video.GOP_size);
+		--frames.frames_until_key;
+		frames.current_is_key_frame = (frames.frames_until_key < 1);
         if (frames.current_is_key_frame)
         {
+			correct_quant_indexes();
 			entropy_encode(); // entropy coding of previous frame
             intra_transform(); 
+			frames.last_SSIM = -1;
 			
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-        }
+			if (video.GOP_size > 1) {
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+			}        
+		}
         else
         {
 			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
 			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
 			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
             
+			correct_quant_indexes();
 			inter_transform(); 
 			clFinish(device.commandQueue_gpu);
 			// copy transformed_blocks to host
 			device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.transformed_blocks_gpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+
+			if (scene_change() || check_SSIM()) 
+			{
+				intra_transform();
+				frames.current_is_key_frame = 1;
+				frames.last_SSIM = -1;
+				printf("key frame FORCED!\n");
+			} 
+			else frames.last_SSIM = frames.new_SSIM;
 			
 			// we will move reconstructed buffers to last while interpolating later in inter_transform();
 			clFinish(device.commandQueue_gpu);
