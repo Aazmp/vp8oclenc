@@ -117,6 +117,8 @@ int init_all()
 		device.normal_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "normal_loop_filter_MBV";
 		device.normal_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "count_SSIM";
+		device.count_SSIM = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 	}
 	// CPU:
 	printf("reading CPU program...\n");
@@ -350,6 +352,21 @@ int init_all()
 												const int mb_size, //6
 												const int mb_col) //7 */
 
+		// no params at init time
+
+		/*__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
+					void count_SSIM(__global uchar *current_frame, //0
+									__global uchar *recon_frame, //1
+									__global macroblock *MBs, //2
+									signed int width, //3
+									signed int mb_count)// 4*/
+
+		device.state_gpu = clSetKernelArg(device.count_SSIM, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.count_SSIM, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.count_SSIM, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.count_SSIM, 3, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.count_SSIM, 4, sizeof(int32_t), &video.mb_count);
+
 		device.commandQueue_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
 	}
 
@@ -531,7 +548,7 @@ int ParseArgs(int argc, char *argv[])
                 if (i < argc)
                 {
 					video.GOP_size = string_to_value(argv[i]);
-					if (video.GOP_size < 0)
+					if (video.GOP_size < 1)
 					{
 						printf ("wrong GOP format! must be an integer from 1 to even more;\n");
 						return -1;
