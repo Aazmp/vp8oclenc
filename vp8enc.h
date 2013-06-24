@@ -49,9 +49,10 @@ union mv {
 	} d;
 };
 typedef struct {
-    int16_t coeffs[25][16];
-    int32_t vector_x[4];
-    int32_t vector_y[4];
+    	int16_t coeffs[25][16];
+    	int32_t vector_x[4];
+    	int32_t vector_y[4];
+	float SSIM;
 } macroblock;
 typedef struct 
 {
@@ -61,17 +62,17 @@ typedef struct
 
 struct deviceContext
 {
-    cl_context context_gpu;
-    cl_context context_cpu;
-    cl_platform_id *platforms;
-    cl_device_id *device_cpu;
-    cl_device_id *device_gpu;
-    cl_program program_cpu;
-    cl_program program_gpu;
-    cl_command_queue commandQueue_cpu;
-    cl_command_queue commandQueue_gpu;
-    cl_int state_cpu;
-    cl_int state_gpu;
+    	cl_context context_gpu;
+    	cl_context context_cpu;
+    	cl_platform_id *platforms;
+    	cl_device_id *device_cpu;
+    	cl_device_id *device_gpu;
+    	cl_program program_cpu;
+    	cl_program program_gpu;
+    	cl_command_queue commandQueue_cpu;
+    	cl_command_queue commandQueue_gpu;
+    	cl_int state_cpu;
+    	cl_int state_gpu;
 	cl_kernel luma_search;
 	cl_kernel luma_transform;
 	cl_kernel chroma_transform;
@@ -86,25 +87,26 @@ struct deviceContext
 	cl_kernel simple_loop_filter_MBV;
 	cl_kernel normal_loop_filter_MBH;
 	cl_kernel normal_loop_filter_MBV;
+	cl_kernel count_SSIM;
     /* add kernels */
 
     // these are frame data padded to be devisible by 16 and converted to normalized int16
-    cl_mem current_frame_Y;
-    cl_mem current_frame_U;
-    cl_mem current_frame_V;
-    cl_mem last_frame_Y;
-    cl_mem last_frame_U;
-    cl_mem last_frame_V;
-    cl_mem reconstructed_frame_Y;
-    cl_mem reconstructed_frame_U;
-    cl_mem reconstructed_frame_V;
+    	cl_mem current_frame_Y;
+    	cl_mem current_frame_U;
+    	cl_mem current_frame_V;
+    	cl_mem last_frame_Y;
+    	cl_mem last_frame_U;
+    	cl_mem last_frame_V;
+    	cl_mem reconstructed_frame_Y;
+    	cl_mem reconstructed_frame_U;
+    	cl_mem reconstructed_frame_V;
 	cl_mem third_context;
 	cl_mem coeff_probs;
 	cl_mem coeff_probs_denom;
 
-    cl_mem transformed_blocks_cpu;
+    	cl_mem transformed_blocks_cpu;
 	cl_mem transformed_blocks_gpu;
-    cl_mem partitions;
+    	cl_mem partitions;
 	cl_mem partitions_sizes;
 
 	size_t gpu_work_items_limit;
@@ -117,56 +119,63 @@ struct deviceContext
 
 struct videoContext
 {
-    // size of input frame
-    int32_t src_width;
-    int32_t src_height;
-    int32_t src_frame_size_luma;
-    int32_t src_frame_size_chroma;
-    // size of output frame
-    int32_t dst_width;
-    int32_t dst_height;
-    int32_t dst_frame_size_luma;
-    int32_t dst_frame_size_chroma;
-    // size of padded frame
-    int32_t wrk_width;
-    int32_t wrk_height;
-    int32_t wrk_frame_size_luma;
-    int32_t wrk_frame_size_chroma;
+    	// size of input frame
+    	int32_t src_width;
+    	int32_t src_height;
+    	int32_t src_frame_size_luma;
+    	int32_t src_frame_size_chroma;
+    	// size of output frame
+    	int32_t dst_width;
+    	int32_t dst_height;
+    	int32_t dst_frame_size_luma;
+    	int32_t dst_frame_size_chroma;
+    	// size of padded frame
+    	int32_t wrk_width;
+    	int32_t wrk_height;
+    	int32_t wrk_frame_size_luma;
+    	int32_t wrk_frame_size_chroma;
 
-    int32_t mb_width;
-    int32_t mb_height;
-    int32_t mb_count;
-    int32_t GOP_size;
+    	int32_t mb_width;
+    	int32_t mb_height;
+    	int32_t mb_count;
+    	int32_t GOP_size;
 	int32_t max_X_vector_length;
 	int32_t max_Y_vector_length;
 
-    int32_t quantizer_index_y_dc_i;
-    int32_t quantizer_index_y_ac_i;
-    int32_t quantizer_index_y2_dc_i;
-    int32_t quantizer_index_y2_ac_i;
-    int32_t quantizer_index_uv_dc_i;
-    int32_t quantizer_index_uv_ac_i;
+    	int32_t quantizer_index_y_dc_i;
+    	int32_t quantizer_index_y_ac_i;
+    	int32_t quantizer_index_y2_dc_i;
+    	int32_t quantizer_index_y2_ac_i;
+    	int32_t quantizer_index_uv_dc_i;
+    	int32_t quantizer_index_uv_ac_i;
 
 	int32_t quantizer_index_y_dc_p;
-    int32_t quantizer_index_y_ac_p;
-    int32_t quantizer_index_y2_dc_p;
-    int32_t quantizer_index_y2_ac_p;
-    int32_t quantizer_index_uv_dc_p;
-    int32_t quantizer_index_uv_ac_p;
+    	int32_t quantizer_index_y_ac_p;
+    	int32_t quantizer_index_y2_dc_p;
+    	int32_t quantizer_index_y2_ac_p;
+    	int32_t quantizer_index_uv_dc_p;
+    	int32_t quantizer_index_uv_ac_p;
 
-    int32_t quantizer_y_dc_i;
-    int32_t quantizer_y_ac_i;
-    int32_t quantizer_y2_dc_i;
-    int32_t quantizer_y2_ac_i;
-    int32_t quantizer_uv_dc_i;
-    int32_t quantizer_uv_ac_i;
+	int32_t quantizer_index_y_dc_p_c;
+    	int32_t quantizer_index_y_ac_p_c;
+    	int32_t quantizer_index_y2_dc_p_c;
+    	int32_t quantizer_index_y2_ac_p_c;
+    	int32_t quantizer_index_uv_dc_p_c;
+    	int32_t quantizer_index_uv_ac_p_c;
+
+    	int32_t quantizer_y_dc_i;
+    	int32_t quantizer_y_ac_i;
+    	int32_t quantizer_y2_dc_i;
+    	int32_t quantizer_y2_ac_i;
+    	int32_t quantizer_uv_dc_i;
+    	int32_t quantizer_uv_ac_i;
 
 	int32_t quantizer_y_dc_p;
-    int32_t quantizer_y_ac_p;
-    int32_t quantizer_y2_dc_p;
-    int32_t quantizer_y2_ac_p;
-    int32_t quantizer_uv_dc_p;
-    int32_t quantizer_uv_ac_p;
+    	int32_t quantizer_y_ac_p;
+    	int32_t quantizer_y2_dc_p;
+    	int32_t quantizer_y2_ac_p;
+    	int32_t quantizer_uv_dc_p;
+    	int32_t quantizer_uv_ac_p; 
 
 	int32_t loop_filter_type;
 	int32_t loop_filter_level;
@@ -186,25 +195,28 @@ struct videoContext
 
 struct hostFrameBuffers
 {
-    int32_t frame_number;
-    int32_t input_pack_size;
-    uint8_t *input_pack; // allbytes for YUV in one
-    uint8_t *current_Y;
-    uint8_t *current_U;
-    uint8_t *current_V;
-    uint8_t *tmp_Y;
-    uint8_t *tmp_U;
-    uint8_t *tmp_V;
-    uint8_t *reconstructed_Y;
-    uint8_t *reconstructed_U;
-    uint8_t *reconstructed_V;
-    macroblock *transformed_blocks;
+    	int32_t frame_number;
+	int32_t frames_until_key;
+    	int32_t input_pack_size;
+    	uint8_t *input_pack; // allbytes for YUV in one
+    	uint8_t *current_Y;
+    	uint8_t *current_U;
+    	uint8_t *current_V;
+    	uint8_t *tmp_Y;
+    	uint8_t *tmp_U;
+    	uint8_t *tmp_V;
+    	uint8_t *reconstructed_Y;
+    	uint8_t *reconstructed_U;
+    	uint8_t *reconstructed_V;
+    	macroblock *transformed_blocks;
 	macroblock_extra_data *e_data;
-    uint8_t *encoded_frame;
+    	uint8_t *encoded_frame;
 	uint32_t encoded_frame_size;
-    uint8_t *current_frame_pos_in_pack;
-    int32_t current_is_key_frame;
+    	uint8_t *current_frame_pos_in_pack;
+    	int32_t current_is_key_frame;
 	int32_t prev_is_key_frame;
+	float new_SSIM;
+	float last_SSIM;
 	
 	int32_t partition_sizes[8];
 	uint8_t *partitions;
@@ -216,24 +228,24 @@ struct hostFrameBuffers
 
 struct fileContext
 {
-    FILE * handle;
-    char * path;
-    int cur_pos;
+    	FILE * handle;
+    	char * path;
+    	int cur_pos;
 };
 
 struct times 
 {
 	clock_t init,
-			start,
-			read, 
-			write,
-			count_probs,
-			bool_encode_header, 
-			bool_encode_coeffs,
-			inter_transform, 
-			intra_transform,
-			loop_filter,
-			interpolate,
-			all;
+		start,
+		read, 
+		write,
+		count_probs,
+		bool_encode_header, 
+		bool_encode_coeffs,
+		inter_transform, 
+		intra_transform,
+		loop_filter,
+		interpolate,
+		all;
 };
 
