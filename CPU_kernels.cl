@@ -14,6 +14,7 @@ typedef struct {
     int16_t coeffs[25][16];
     int32_t vector_x[4];
     int32_t vector_y[4];
+    float SSIM;
 } macroblock;
 
 typedef struct {
