@@ -4,32 +4,33 @@ typedef struct {
     short coeffs[25][16];
     int vector_x[4];
     int vector_y[4];
+	float SSIM;
 } macroblock;
 
 void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) //Hadamard
 {
 	int4 L0, L1, L2, L3;
 	L0 = *__L0 + *__L3;	//a1 = (ip[0] + ip[3]);
-    L1 = *__L1 + *__L2;	//b1 = (ip[1] + ip[2]);
-    L2 = *__L1 - *__L2;	//c1 = (ip[1] - ip[2]);
-    L3 = *__L0 - *__L3;	//d1 = (ip[0] - ip[3]);
+    	L1 = *__L1 + *__L2;	//b1 = (ip[1] + ip[2]);
+    	L2 = *__L1 - *__L2;	//c1 = (ip[1] - ip[2]);
+    	L3 = *__L0 - *__L3;	//d1 = (ip[0] - ip[3]);
 
-    *__L0 = L0 + L1;	//op[0] = a1 + b1;
-    *__L1 = L2 + L3;	//op[1] = c1 + d1;
+    	*__L0 = L0 + L1;	//op[0] = a1 + b1;
+    	*__L1 = L2 + L3;	//op[1] = c1 + d1;
 	*__L2 = L0 - L1;	//op[2] = a1 - b1;
-    *__L3 = L3 - L2;	//op[3] = d1 - c1;
+    	*__L3 = L3 - L2;	//op[3] = d1 - c1;
 	
 	L0.x = (*__L0).x + (*__L0).w;   //a1 = ip[0] + ip[3];
 	L1.x = (*__L1).x + (*__L1).w;	
 	L2.x = (*__L2).x + (*__L2).w;
 	L3.x = (*__L3).x + (*__L3).w;
 	
-    L0.y = (*__L0).y + (*__L0).z;   //b1 = ip[1] + ip[2];
+    	L0.y = (*__L0).y + (*__L0).z;   //b1 = ip[1] + ip[2];
 	L1.y = (*__L1).y + (*__L1).z;	
 	L2.y = (*__L2).y + (*__L2).z;
 	L3.y = (*__L3).y + (*__L3).z;   
 	
-    L0.z = (*__L0).y - (*__L0).z;   //c1 = ip[1] - ip[2];
+    	L0.z = (*__L0).y - (*__L0).z;   //c1 = ip[1] - ip[2];
 	L1.z = (*__L1).y - (*__L1).z;	
 	L2.z = (*__L2).y - (*__L2).z;
 	L3.z = (*__L3).y - (*__L3).z;
@@ -39,7 +40,7 @@ void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * cons
 	L2.w = (*__L2).x - (*__L2).w;
 	L3.w = (*__L3).x - (*__L3).w;
 
-    (*__L0).x = L0.x + L0.y;   //a2 = a1 + b1;
+    	(*__L0).x = L0.x + L0.y;   //a2 = a1 + b1;
 	(*__L1).x = L1.x + L1.y;
 	(*__L2).x = L2.x + L2.y;
 	(*__L3).x = L3.x + L3.y;
@@ -59,27 +60,27 @@ void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * cons
 	(*__L2).w = L2.w - L2.z;
 	(*__L3).w = L3.w - L3.z;
 
-    (*__L0).x += ((*__L0).x > 0);   //a2 += (a2 > 0);
+    	(*__L0).x += ((*__L0).x > 0);   //a2 += (a2 > 0);
 	(*__L1).x += ((*__L1).x > 0);
 	(*__L2).x += ((*__L2).x > 0);
 	(*__L3).x += ((*__L3).x > 0);
-    (*__L0).y += ((*__L0).y > 0);   //b2 += (b2 > 0);
+    	(*__L0).y += ((*__L0).y > 0);   //b2 += (b2 > 0);
 	(*__L1).y += ((*__L1).y > 0);
 	(*__L2).y += ((*__L2).y > 0);
 	(*__L3).y += ((*__L3).y > 0); 
-    (*__L0).z += ((*__L0).z > 0);   //c2 += (c2 > 0);
+    	(*__L0).z += ((*__L0).z > 0);   //c2 += (c2 > 0);
 	(*__L1).z += ((*__L1).z > 0);
 	(*__L2).z += ((*__L2).z > 0);
 	(*__L3).z += ((*__L3).z > 0);
-    (*__L0).w += ((*__L0).w > 0);   //d2 += (d2 > 0);
+    	(*__L0).w += ((*__L0).w > 0);   //d2 += (d2 > 0);
 	(*__L1).w += ((*__L1).w > 0);
 	(*__L2).w += ((*__L2).w > 0);
 	(*__L3).w += ((*__L3).w > 0);
 	
 	*__L0 >>= 1; //op[0] = ((a2) >> 1);
-    *__L1 >>= 1; //op[4] = ((b2) >> 1);
-    *__L2 >>= 1; //op[8] = ((c2) >> 1);
-    *__L3 >>= 1; //op[12] = ((d2) >> 1);
+    	*__L1 >>= 1; //op[4] = ((b2) >> 1);
+    	*__L2 >>= 1; //op[8] = ((c2) >> 1);
+    	*__L3 >>= 1; //op[12] = ((d2) >> 1);
 	
 	*__L0 = convert_int4(abs(*__L0));
 	*__L1 = convert_int4(abs(*__L1));
@@ -89,17 +90,11 @@ void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * cons
 	*__L0 += *__L1 + *__L2 + *__L3;
 	(*__L0).x += (*__L0).y + (*__L0).z + (*__L0).w;
 	
-	(*__L0).x *= 16;
+	(*__L0).x *= 1;
 	
 	return;
 }
 
-
-void weight_SSD(int4 * const L0, int4 * const L1, int4 * const L2, int4 * const L3, const int * const dc_q, const int * const ac_q) // best results, but why?
-{
-	*L0 = mad24(*L0, *L0, mad24(*L1, *L1, mad24(*L2, *L2, mul24(*L3, *L3))));
-	(*L0).x += (*L0).y + (*L0).z + (*L0).w;
-}
 
 void DCT_and_quant(int4 Line0, int4 Line1, int4 Line2, int4 Line3, // <- input differences
 					int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3, const int dc_q, const int ac_q) // -> output DCT Lines
@@ -208,16 +203,16 @@ void dequant_and_iDCT(int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3
 
 #define GROUP_SIZE_FOR_SEARCH 256
 __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
-		void luma_search( 	__global uchar *const current_frame, //0
-							__global uchar *const prev_frame, //1
-							__global macroblock *const MBs, //2
-							const signed int width, //3
-							const signed int height, //4
-							const signed int first_MBlock_offset, //5
-							const int deltaX, //6
-							const int deltaY,//7
-							const int dc_q, //8
-							const int ac_q) //9
+	void luma_search( 	__global uchar *const current_frame, //0
+				__global uchar *const prev_frame, //1
+				__global macroblock *const MBs, //2
+				const signed int width, //3
+				const signed int height, //4
+				const signed int first_MBlock_offset, //5
+				const int deltaX, //6
+				const int deltaY,//7
+				const int dc_q, //8
+				const int ac_q) //9
 {
 	// do not use <<>> instead of */ on signed integer
 	// even if operands are greater than 0
@@ -234,8 +229,8 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	__private int start_x, end_x, start_y, end_y; 
 	__private unsigned int MinDiff, Diff0, Diff1, Diff2, Diff3;	
 	__private int px, py;
-    __private int cx, cy;
-    __private int vector_x, vector_y;   
+    	__private int cx, cy;
+    	__private int vector_x, vector_y;   
 	__private int ci; 
 	__private int pi;   
 	__private int width_x4 = width*4;
@@ -255,13 +250,13 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	ci = cy*width + cx;
 
 	CL0 = vload8(0, current_frame + ci); ci += width;
-    CL1 = vload8(0, current_frame + ci); ci += width;
-    CL2 = vload8(0, current_frame + ci); ci += width;
-    CL3 = vload8(0, current_frame + ci); ci += width;
+    	CL1 = vload8(0, current_frame + ci); ci += width;
+    	CL2 = vload8(0, current_frame + ci); ci += width;
+    	CL3 = vload8(0, current_frame + ci); ci += width;
 	CL4 = vload8(0, current_frame + ci); ci += width;
-    CL5 = vload8(0, current_frame + ci); ci += width;
-    CL6 = vload8(0, current_frame + ci); ci += width;
-    CL7 = vload8(0, current_frame + ci); 
+    	CL5 = vload8(0, current_frame + ci); ci += width;
+    	CL6 = vload8(0, current_frame + ci); ci += width;
+    	CL7 = vload8(0, current_frame + ci); 
 
 	MinDiff = 0xffff;
 
@@ -337,10 +332,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
 			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff1 += DL0.x;
 
-			Diff2 = abs(px - cx);
-			Diff1 += (Diff2 > 8) ? 10 : ((Diff2 > 0) ? 3 : 0);
-			Diff2 = abs(py - cy);
-			Diff1 += (Diff2 > 8) ? 10 : ((Diff2 > 0) ? 3 : 0);
+			Diff1 += abs(cx - px) + abs(cy - py);
 			
 			if (Diff1 < MinDiff)
 			{  
@@ -473,9 +465,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
 			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 += DL0.x;
 			
-			Diff1 += 6;
-			Diff2 += 6;
-			Diff3 += 6;
+			Diff1 += abs(cx - px) + abs(cy - py);
 
 			if (Diff0 < MinDiff)
 			{  
@@ -513,13 +503,13 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	
 	
 __kernel void luma_transform( 	__global uchar *current_frame, //0
-								__global uchar *recon_frame, //1
-								__global uchar *prev_frame, //2
-								__global macroblock *MBs, //3
-								signed int width, //4
-								signed int first_MBlock_offset, //5
-								int dc_q, //6
-								int ac_q) //7
+				__global uchar *recon_frame, //1
+				__global uchar *prev_frame, //2
+				__global macroblock *MBs, //3
+				signed int width, //4
+				signed int first_MBlock_offset, //5
+				int dc_q, //6
+				int ac_q) //7
 	
 {
 	__private int4 DL0, DL1, DL2, DL3;
@@ -528,7 +518,7 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 					  DCTLine4, DCTLine5, DCTLine6, DCTLine7;
 	__private uchar4 CL, PL;
 	
-    __private int cx, cy, px, py, vector_x, vector_y;	
+   	__private int cx, cy, px, py, vector_x, vector_y;	
 	__private int ci, pi; 
 	__private int mb_num, b8x8_num, b4x4_in_mb,b8x8_in_mb;
 	__private int width_x4 = width<<2;		
@@ -801,16 +791,16 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	return;
 }
 
-__kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame (the one being encoded)
-									__global uchar *prev_frame, //1 reference frame for predictors
-									__global uchar *recon_frame, //2 reconstructed current frame after DCT-quant/dequant-iDCT
-									__global macroblock *MBs, //3 here it's an input
-									signed int chroma_width, //4 
-									signed int chroma_height, //5 
-									signed int first_block_offset, //6
-									int dc_q, //7
-									int ac_q, //8
-									int block_place) //9
+__kernel void chroma_transform( __global uchar *current_frame, //0 input frame (the one being encoded)
+				__global uchar *prev_frame, //1 reference frame for predictors
+				__global uchar *recon_frame, //2 reconstructed current frame after DCT-quant/dequant-iDCT
+				__global macroblock *MBs, //3 here it's an input
+				signed int chroma_width, //4 
+				signed int chroma_height, //5 
+				signed int first_block_offset, //6
+				int dc_q, //7
+				int ac_q, //8
+				int block_place) //9
 {  
 	__private int chroma_block_num;
 	__private int chroma_width_x8 = chroma_width*8;
@@ -827,10 +817,10 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 	ci30 = ci20+chroma_width; 
 
 	__private int4 CurrentLine0, CurrentLine1, CurrentLine2, CurrentLine3;
-    CurrentLine0 = convert_int4(vload4(0, current_frame + ci00));
-    CurrentLine1 = convert_int4(vload4(0, current_frame + ci10));
-    CurrentLine2 = convert_int4(vload4(0, current_frame + ci20));
-    CurrentLine3 = convert_int4(vload4(0, current_frame + ci30));
+    	CurrentLine0 = convert_int4(vload4(0, current_frame + ci00));
+    	CurrentLine1 = convert_int4(vload4(0, current_frame + ci10));
+    	CurrentLine2 = convert_int4(vload4(0, current_frame + ci20));
+    	CurrentLine3 = convert_int4(vload4(0, current_frame + ci30));
 
 	__private short2 vector;
 		
@@ -996,11 +986,11 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void simple_loop_filter_MBH(__global uchar * const frame,
-									const int width,
-									const int mbedge_limit,
-									const int sub_bedge_limit,
-									const int mb_col)
+	void simple_loop_filter_MBH(__global uchar * const frame,
+					const int width,
+					const int mbedge_limit,
+					const int sub_bedge_limit,
+					const int mb_col)
 {
 	int x, y, i, nf;
 	uchar4 L, R;
@@ -1140,11 +1130,11 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void simple_loop_filter_MBV(__global uchar * const frame,
-									const int width,
-									const int mbedge_limit,
-									const int sub_bedge_limit,
-									const int mb_col)
+	void simple_loop_filter_MBV(__global uchar * const frame,
+					const int width,
+					const int mbedge_limit,
+					const int sub_bedge_limit,
+					const int mb_col)
 {
 	int x, y, i;
 	uchar4 U2, U3, D0, D1; 
@@ -1313,14 +1303,14 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void normal_loop_filter_MBH(__global uchar * const frame, //0
-									const int width, //1
-									const int mbedge_limit, //2
-									const int sub_bedge_limit, //3
-									const int interior_limit, //4
-									const int hev_threshold, //5
-									const int mb_size, //6
-									const int mb_col) //7
+	void normal_loop_filter_MBH(__global uchar * const frame, //0
+					const int width, //1
+					const int mbedge_limit, //2
+					const int sub_bedge_limit, //3
+					const int interior_limit, //4
+					const int hev_threshold, //5
+					const int mb_size, //6
+					const int mb_col) //7
 {
 	int x, y, i;
 	uchar4 L, R;
@@ -1525,14 +1515,14 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void normal_loop_filter_MBV(__global uchar * const frame, //0
-									const int width, //1
-									const int mbedge_limit, //2
-									const int sub_bedge_limit, //3
-									const int interior_limit, //4
-									const int hev_threshold, //5
-									const int mb_size, //6
-									const int mb_col) //7
+	void normal_loop_filter_MBV(__global uchar * const frame, //0
+					const int width, //1
+					const int mbedge_limit, //2
+					const int sub_bedge_limit, //3
+					const int interior_limit, //4
+					const int hev_threshold, //5
+					const int mb_size, //6
+					const int mb_col) //7
 {
 	int x, y, i;
 	// these in usual forward order (U1 lower than U0):
@@ -1817,9 +1807,9 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 }
 
 __kernel void luma_interpolate_Hx4( __global uchar *const src_frame, //0
-									__global uchar *const dst_frame, //1
-									const int width, //2
-									const int height) //3
+					__global uchar *const dst_frame, //1
+					const int width, //2
+					const int height) //3
 {
 	if (get_global_id(0) > (height-1)) return;
 	
@@ -1982,8 +1972,8 @@ __kernel void luma_interpolate_Hx4( __global uchar *const src_frame, //0
 }
 
 __kernel void luma_interpolate_Vx4( __global uchar *const frame, //0
-									const int width, //1
-									const int height) //2
+					const int width, //1
+					const int height) //2
 {
 	if (get_global_id(0) > (width-1)) return;
 
@@ -2060,9 +2050,9 @@ __kernel void luma_interpolate_Vx4( __global uchar *const frame, //0
 }
 
 __kernel void chroma_interpolate_Hx8( 	__global uchar *const src_frame, //0
-										__global uchar *const dst_frame, //1
-										const int width, //2
-										const int height) //3
+					__global uchar *const dst_frame, //1
+					const int width, //2
+					const int height) //3
 {
 	if (get_global_id(0) > (height-1)) return;
 	
@@ -2354,8 +2344,8 @@ __kernel void chroma_interpolate_Hx8( 	__global uchar *const src_frame, //0
 }
 
 __kernel void chroma_interpolate_Vx8( __global uchar *const frame, //0
-									const int width, //1
-									const int height) //2
+					const int width, //1
+					const int height) //2
 {
 	__private uchar4 A0, A1, M0, M1, M2, M3, M4, M5, M6, M7, U0, U1, U2;
 	__private int4 buf;
@@ -2464,6 +2454,128 @@ __kernel void chroma_interpolate_Vx8( __global uchar *const frame, //0
 		
 	return;	
 }
+
+__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
+	void count_SSIM( 	__global uchar *frame1, //0
+				__global uchar *frame2, //1
+				__global macroblock *MBs, //2
+				signed int width, //3
+				signed int mb_count)// 4
+{
+	__private int mb_num, i;
+	__private uchar16 FL0, FL1, FL2, FL3, FL4, FL5, FL6, FL7, FL8, FL9, FL10, FL11, FL12, FL13, FL14, FL15;
+	__private uchar16 SL0, SL1, SL2, SL3, SL4, SL5, SL6, SL7, SL8, SL9, SL10, SL11, SL12, SL13, SL14, SL15;
+	__private float16 IL, IL1;
+	__private float M1, M2, D1, D2, C;
+	mb_num = get_global_id(0);
+	if (mb_num >= mb_count) return;
+	i = ((mb_num / (width/16))*16)*width + ((mb_num % (width/16))*16);
+	
+	FL0 = vload16(0, frame1 + i); i += width; IL = convert_float16(FL0);
+	FL1 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL1);
+	FL2 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL2);
+	FL3 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL3);
+	FL4 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL4);
+	FL5 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL5);
+	FL6 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL6);
+	FL7 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL7);
+	FL8 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL8);
+	FL9 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL9);
+	FL10 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL10);
+	FL11 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL11);
+	FL12 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL12);
+	FL13 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL13);
+	FL14 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL14);
+	FL15 = vload16(0, frame1 + i); i -= 15*width; IL += convert_float16(FL15);
+	M1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
+	IL = convert_float16(FL0) - M1; IL *= IL;
+	IL1 = convert_float16(FL1) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL2) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL3) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL4) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL5) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL6) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL7) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL8) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL9) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL10) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL11) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL12) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL13) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL14) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(FL15) - M1; IL = mad(IL1,IL1,IL);
+	D1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
+	
+	SL0 = vload16(0, frame2 + i); i += width; IL = convert_float16(SL0);
+	SL1 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL1);
+	SL2 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL2);
+	SL3 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL3);
+	SL4 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL4); 
+	SL5 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL5);
+	SL6 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL6);
+	SL7 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL7);
+	SL8 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL8);
+	SL9 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL9);
+	SL10 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL10);
+	SL11 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL11);
+	SL12 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL12);
+	SL13 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL13);
+	SL14 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL14);
+	SL15 = vload16(0, frame2 + i); IL += convert_float16(SL15);
+	M2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
+	IL = convert_float16(SL0) - M2; IL *= IL;
+	IL1 = convert_float16(SL1) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL2) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL3) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL4) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL5) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL6) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL7) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL8) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL9) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL10) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL11) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL12) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL13) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL14) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float16(SL15) - M2; IL = mad(IL1,IL1,IL);
+	D2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
+	
+	IL = (convert_float16(FL0) - M1)*(convert_float16(SL0) - M2);
+	IL += (convert_float16(FL1) - M1)*(convert_float16(SL1) - M2);
+	IL += (convert_float16(FL2) - M1)*(convert_float16(SL2) - M2);
+	IL += (convert_float16(FL3) - M1)*(convert_float16(SL3) - M2);
+	IL += (convert_float16(FL4) - M1)*(convert_float16(SL4) - M2);
+	IL += (convert_float16(FL5) - M1)*(convert_float16(SL5) - M2);
+	IL += (convert_float16(FL6) - M1)*(convert_float16(SL6) - M2);
+	IL += (convert_float16(FL7) - M1)*(convert_float16(SL7) - M2);
+	IL += (convert_float16(FL8) - M1)*(convert_float16(SL8) - M2);
+	IL += (convert_float16(FL9) - M1)*(convert_float16(SL9) - M2);
+	IL += (convert_float16(FL10) - M1)*(convert_float16(SL10) - M2);
+	IL += (convert_float16(FL11) - M1)*(convert_float16(SL11) - M2);
+	IL += (convert_float16(FL12) - M1)*(convert_float16(SL12) - M2);
+	IL += (convert_float16(FL13) - M1)*(convert_float16(SL13) - M2);
+	IL += (convert_float16(FL14) - M1)*(convert_float16(SL14) - M2);
+	IL += (convert_float16(FL15) - M1)*(convert_float16(SL15) - M2);
+	C = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
+	
+	const float c1 = 0.01f*0.01f*255*255;
+	const float c2 = 0.03f*0.03f*255*255;
+	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
+	
+	MBs[mb_num].SSIM = C;
+	
+	return;
+}
+
+
+
+
+
+
+
+
+
 
 
 
