@@ -2,6 +2,7 @@ vp8oclenc
 =========
 
 Chroma interpolation is broken... Trying to find out why...
+(artifacts moving edge BLACK|COLORED produce blue or red trace)
 
 
 Don't know what to write here...
