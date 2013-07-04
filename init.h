@@ -1,14 +1,19 @@
 // string to print when "-h" option is met
 char small_help[] = "\n"
-					"\t-i\t\t:\tinput file path\n"
-					"\t-u\t\t:\toutput file path\n"
-					"\t-qi\t\t:\tquantizer index, one for all intra-color planes\n"
-					"\t-qp\t\t:\tquantizer index, one for all inter-color planes\n"
-					"\t-g\t\t:\tGroup of Pictures size\n"
-					"\t-w\t\t:\tamount of work-items on gpu launched simutaneosly\n"
-					"\t-t\t\t:\tamount of partitions for boolean encoding (also threads launched at once)\n"
-					"\t-vx\t\t:\tmaximum distance for X vector search"
-					"\t-vy\t\t:\tmaximum distance for Y vector search";
+					"-i\t:\tinput file path\n"
+					"-o\t:\toutput file path\n"
+					"-qi\t:\tquantizer index, one for all intra-color planes\n"
+					"-qp\t:\tquantizer index, one for all inter-color planes\n"
+					"-g\t:\tGroup of Pictures size\n"
+					"-w\t:\tamount of work-items on gpu launched simutaneosly\n"
+					"-t\t:\tamount of partitions for boolean encoding (also threads launched at once)\n"
+					"-vx\t:\tmaximum distance for X vector search (in 1/4 pixels)\n"
+					"-vy\t:\tmaximum distance for Y vector search (in 1/4 pixels)\n"
+					"-lt\t:\tloop filter type (0 - normal; 1 - simple)\n"
+					"-ll\t:\tloop filter level (0 - disable)\n"
+					"-ls\t:\tloop filter sharpness\n"
+					"\n\n"
+					;
 
 int init_all()
 {
@@ -68,7 +73,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.2";
+		const char gpu_options[] = "-cl-std=CL1.0";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -101,13 +106,13 @@ int init_all()
 		device.luma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_transform";
 		device.chroma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_interpolate_Hx4";
+		{ char kernel_name[] = "luma_interpolate_Hx4_bl";
 		device.luma_interpolate_Hx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_interpolate_Vx4";
+		{ char kernel_name[] = "luma_interpolate_Vx4_bl";
 		device.luma_interpolate_Vx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "chroma_interpolate_Hx8";
+		{ char kernel_name[] = "chroma_interpolate_Hx8_bl";
 		device.chroma_interpolate_Hx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "chroma_interpolate_Vx8";
+		{ char kernel_name[] = "chroma_interpolate_Vx8_bl";
 		device.chroma_interpolate_Vx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "simple_loop_filter_MBH";
 		device.simple_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
@@ -190,6 +195,8 @@ int init_all()
 	video.partition_step = sizeof(int16_t)*800*(video.mb_count)/2;
 	frames.partitions = (uint8_t*)malloc(video.partition_step); 
 
+	frames.last_U = (uint8_t*)malloc(video.wrk_frame_size_chroma);
+	frames.last_V = (uint8_t*)malloc(video.wrk_frame_size_chroma);
     if (((video.src_height != video.dst_height) || (video.src_width != video.dst_width)) ||
         ((video.wrk_height != video.dst_height) || (video.wrk_width != video.dst_width)))
     {
@@ -199,6 +206,13 @@ int init_all()
         frames.current_U = (uint8_t*)malloc(video.wrk_frame_size_chroma);
         frames.current_V = (uint8_t*)malloc(video.wrk_frame_size_chroma);
     }
+	else 
+	{ // to avoid reading from unknown space (for example memcpy in get_yuv420_frame before first frame read)
+		// also could be done by checking if frame is first (done too, both for safety)
+		frames.current_U = frames.last_U;
+		frames.current_V = frames.last_V;
+	} // later these buffers are being reassigned
+
 
 	if (video.GOP_size > 1) {
 		device.current_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
@@ -268,46 +282,47 @@ int init_all()
 											int dc_q, - 7
 											int ac_q, - 8 
 											int block_place) - 9 */
-
+		
+		int32_t chroma_width = video.wrk_width/2;
+		int32_t chroma_height = video.wrk_height/2;
 		// first 3 params and block_place a switched between U and V when kernels are being launched
 		device.state_gpu = clSetKernelArg(device.chroma_transform, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		int32_t chroma_size = video.wrk_width/2;
-		device.state_gpu = clSetKernelArg(device.chroma_transform, 4, sizeof(int32_t), &chroma_size); // width
-		chroma_size = video.wrk_height/2;
-		device.state_gpu = clSetKernelArg(device.chroma_transform, 5, sizeof(int32_t), &chroma_size); // height
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 4, sizeof(int32_t), &chroma_width); // width
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 5, sizeof(int32_t), &chroma_height); // height
 		// first_block_offset will be variable on kernel launch
 
-		/*__kernel luma_interpolate_Hx4(	__global uchar *const src_frame, //0
-											__global uchar *const dst_frame, //1
-											const int width, //2
-											const int height) //3*/
+		/*__kernel luma_interpolate_Hx4(__global uchar *const src_frame, //0
+										__global uchar *const dst_frame, //1
+										const int width, //2
+										const int height) //3*/
 
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 1, sizeof(cl_mem), &device.last_frame_Y);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 2, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 3, sizeof(int32_t), &video.wrk_height);
 
-		/*__kernel luma_interpolate_Vx4(	__global uchar *const frame, //0
-											const int width, //1
-											const int height) //2*/
+		/*__kernel luma_interpolate_Vx4(__global uchar *const frame, //0
+										const int width, //1
+										const int height) //2*/
 
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 0, sizeof(cl_mem), &device.last_frame_Y);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 1, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 2, sizeof(int32_t), &video.wrk_height);
 
-		/*__kernel void chroma_interpolate_Hx8( 	__global uchar *const src_frame, //0
-										__global uchar *const dst_frame, //1
-										const int width, //2
-										const int height) //3*/
+		// interpolation functions have suffix "bc" for bicubic filter and "bl" for bilinear
+		// interface exactlyy the same
 
-		int32_t chroma_width = video.wrk_width/2;
-		int32_t chroma_height = video.wrk_height/2;
+		/*__kernel void chroma_interpolate_Hx8(	__global uchar *const src_frame, //0
+												__global uchar *const dst_frame, //1
+												const int width, //2
+												const int height) //3*/
+
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 2, sizeof(int32_t), &chroma_width);
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 3, sizeof(int32_t), &chroma_height);
 
 		/*__kernel void chroma_interpolate_Vx8( __global uchar *const frame, //0
-									const int width, //1
-									const int height) //2*/
+												const int width, //1
+												const int height) //2*/
 		
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 1, sizeof(int32_t), &chroma_width);
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 2, sizeof(int32_t), &chroma_height);
@@ -323,7 +338,7 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 1, sizeof(int32_t), &video.wrk_width);
 		// mb_col is incremented during launches, filter parameters are set before launch
 
-		/*__kernel void simple_loop_filter_MBV(__global uchar * const frame, //0
+		/*__kernel void simple_loop_filter_MBV(	__global uchar * const frame, //0
 												const int width, // 1
 												const int mbedge_limit, // 2
 												const int sub_edge_limit, // 3
@@ -332,7 +347,7 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 1, sizeof(int32_t), &video.wrk_width);
 
-		/*__kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
+		/*__kernel void normal_loop_filter_MBH(	__global uchar * const frame, //0
 												const int width, //1
 												const int mbedge_limit, //2
 												const int sub_bedge_limit, //3
@@ -343,7 +358,7 @@ int init_all()
 
 		// no params at init time
 
-		/*__kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
+		/*__kernel void normal_loop_filter_MBV(	__global uchar * const frame, //0
 												const int width, //1
 												const int mbedge_limit, //2
 												const int sub_bedge_limit, //3
