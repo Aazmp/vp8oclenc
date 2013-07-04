@@ -1,9 +1,16 @@
 vp8oclenc
 =========
 
-Chroma interpolation is broken... Trying to find out why...
-(artifacts moving edge BLACK|COLORED produce blue or red trace)
+upd:
+returned bilinear interpolation filter -> it work's
+bicubic filter in the code too -> luma seems to work, but chroma produces traces on moving black edge (with 1..7 fractal vector part)
 
+to enable bicubic filter: 
+1. change kernel string in clCreateKernel (suffix _bl for bilinear; _bc for bicubic) : init.h :: init_all()
+2. change version number (0 - bc; 1,2 - bl) in entropy_host.c::encode_header();
+
+
+main:
 
 Don't know what to write here...
 ...
@@ -14,48 +21,19 @@ Simple and not effective. Just a toy project.
 Used (and copied :)) sources: 
 http://www.webmproject.org/; http://multimedia.cx/eggs/category/vp8/;
 
-pure C. Cpp just as extension to make Visual Studio compile not in C89....
-
 Uses OpenCL:
 CL_DEVICE_TYPE_CPU - for coefficient partitions boolean coding.
 
-CL_DEVICE_TYPE_GPU - for motion vector search and transform for inter-frames.
-Also GPU does simple "simple" loop filter, but it does only harm (may be because of errors in code).
+CL_DEVICE_TYPE_GPU - for motion vector search, transform for inter-frames, interpolation and loop filters.
 
 Launched only on AMD+AMD+Win7.
 
 Intra coding is done in usual host code part.
-
 Has almost no error checking. 
 
-Command line options:
+  -h gives a list of options
 
--i input file = YUV4MPEG2 with 420 chroma sub-sampling
-
--o output file = IVF file
-
--g value = GOP size
-
--qi value = Constant quantizer INDEX for all I-frames (UV has qi minus 15)
-
--qp value = Same for P-frames
-
--vx value = dX(collumns) limit for MV search (in quarter pixel). Should be lower than 512
-
--vy value = dY(rows) -//-
-
--lt value = filter type (0 - normal, 1 - simple)
-
--ll value = Loop filter level (0 - disabled)
-
--ls value = Loop filter sharpness
-
--w value = Number of GPU device threads (the more the better)
-
--t value = Number of CPU device(!) threads (also the number of partitions)
-
-If input_file is set as @
-it will be set to stdin
+If input_file is set as @ it will be set to stdin
 
 ... sorry for bad English and bad programming
 
