@@ -1,6 +1,6 @@
 void gather_frame()
 {
-  t.start = clock();
+	t.start = clock();
 	// get info about partition sizes
 	device.state_cpu = clFinish(device.commandQueue_cpu);
 	device.state_cpu = clEnqueueReadBuffer(device.commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(int32_t), frames.partition_sizes, 0, NULL, NULL);
@@ -84,7 +84,7 @@ void write_output_header()
 	// 4-5 version (only 0 allowed)
 	byte = 0; fwrite(&byte, 1, 1, output_file.handle);
 			  fwrite(&byte, 1, 1, output_file.handle);
-	// 6-7 header length in bytes (it doesn't say which header, try 32)
+	// 6-7 header length in bytes 
 	byte = 32; fwrite(&byte, 1, 1, output_file.handle);
 	byte = 0; fwrite(&byte, 1, 1, output_file.handle);
 	// 9-11 "VP80"
@@ -131,6 +131,7 @@ void write_output_header()
 	fwrite(&byte, 1, 1, output_file.handle);
 	byte = (uint8_t)((frames.frame_number >> 24) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
+	--frames.frame_number;
 	// 28-32 not using
 	byte = 0;
 	fwrite(&byte, 1, 1, output_file.handle);
@@ -142,106 +143,113 @@ void write_output_header()
 
 int copy_with_padding()
 {
-    int i, j;
-    uint8_t *srcY, *srcU, *srcV, *dstY, *dstU, *dstV;
-    uint8_t ext_pixelY, ext_pixelU, ext_pixelV;
-    //first line copy
-    srcY = frames.tmp_Y;        srcU = frames.tmp_U;        srcV = frames.tmp_V;
-    dstY = frames.current_Y;    dstU = frames.current_U;    dstV = frames.current_V;
-    int wrk_width_chroma = video.wrk_width>>1;
-    int src_width_chroma = video.src_width>>1;
+    	int i, j;
+    	uint8_t *srcY, *srcU, *srcV, *dstY, *dstU, *dstV;
+    	uint8_t ext_pixelY, ext_pixelU, ext_pixelV;
+    	//first line copy
+    	srcY = frames.tmp_Y;        srcU = frames.tmp_U;        srcV = frames.tmp_V;
+    	dstY = frames.current_Y;    dstU = frames.current_U;    dstV = frames.current_V;
+    	int wrk_width_chroma = video.wrk_width>>1;
+    	int src_width_chroma = video.src_width>>1;
 	
 	for (i = 0; i < video.src_height; i+=2)
 	{
-        // two luma lines, one chroma and one chroma line at step
-	    memcpy(dstY, srcY, video.src_width);
+        	// two luma lines, one chroma and one chroma line at step
+	    	memcpy(dstY, srcY, video.src_width);
 		ext_pixelY = srcY[video.src_width-1];
-        for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
-	        dstY[j] = ext_pixelY;
+        	for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
+	        	dstY[j] = ext_pixelY;
 		srcY += video.src_width; // dst_width/height == src_width/height if this function called
-        dstY += video.wrk_width;
+        	dstY += video.wrk_width;
 
 		memcpy(dstY, srcY, video.src_width);
-        ext_pixelY = srcY[video.src_width-1];
-	    for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
-		    dstY[j] = ext_pixelY;
+        	ext_pixelY = srcY[video.src_width-1];
+	    	for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
+			dstY[j] = ext_pixelY;
 		srcY += video.src_width;
-        dstY += video.wrk_width;
+        	dstY += video.wrk_width;
 
 		memcpy(dstU, srcU, src_width_chroma);
 		ext_pixelU = srcU[src_width_chroma-1];
-        for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
-	        dstU[j] = ext_pixelU;
+        	for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
+	        	dstU[j] = ext_pixelU;
 		srcU += (src_width_chroma);
-        dstU += (wrk_width_chroma);
+        	dstU += (wrk_width_chroma);
 
-	    memcpy(dstV, srcV, src_width_chroma);
+	    	memcpy(dstV, srcV, src_width_chroma);
 		ext_pixelV = srcU[src_width_chroma-1];
 		for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
 			dstU[j] = ext_pixelV;
-        srcV += (src_width_chroma);
-	    dstV += (wrk_width_chroma);
+        	srcV += (src_width_chroma);
+	    	dstV += (wrk_width_chroma);
 	}
-    // now copy last line to all lower lines, so increment only for dst
+    	// now copy last line to all lower lines, so increment only for dst
 	srcY = dstY - video.wrk_width;
 	srcU = dstU - wrk_width_chroma;
 	srcV = dstV - wrk_width_chroma;
 
-    for (i = video.src_height; i < video.wrk_height; i+=2)
-    {
-        memcpy(dstY, srcY, video.wrk_width);
-        dstY += video.wrk_width;
-        memcpy(dstY, srcY, video.wrk_width);
-        dstY += video.wrk_width;
-        memcpy(dstU, srcU, wrk_width_chroma);
-        dstU += (wrk_width_chroma);
-        memcpy(dstV, srcV, wrk_width_chroma);
-        dstV += (wrk_width_chroma);
-    }
+    	for (i = video.src_height; i < video.wrk_height; i+=2)
+    	{
+        	memcpy(dstY, srcY, video.wrk_width);
+        	dstY += video.wrk_width;
+        	memcpy(dstY, srcY, video.wrk_width);
+        	dstY += video.wrk_width;
+        	memcpy(dstU, srcU, wrk_width_chroma);
+        	dstU += (wrk_width_chroma);
+        	memcpy(dstV, srcV, wrk_width_chroma);
+        	dstV += (wrk_width_chroma);
+    	}
 
-    return 1;
+    	return 1;
 }
 
 
 int get_yuv420_frame()
 {
-	t.start = clock();
-	{
-		int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1);
-		int i, j, fragment_size = src_frame_size_full;
-
-		i = fread(frames.input_pack, sizeof(uint8_t), (src_frame_size_full % fragment_size), input_file.handle);
-		while (i < src_frame_size_full)
-		{
-			j = fread(frames.input_pack + i, sizeof(uint8_t), fragment_size, input_file.handle);
-			if (j < fragment_size) 
-				return 0;
-			i += j;
-		}
-
-		frames.tmp_Y = frames.input_pack;
-		frames.tmp_U = frames.tmp_Y + video.src_frame_size_luma;
-		frames.tmp_V = frames.tmp_U + video.src_frame_size_chroma;
-
-		if ((video.src_height == video.dst_height) && (video.src_width == video.dst_width)) //== no resize
-		{
-			if ((video.wrk_height == video.dst_height) && (video.wrk_width == video.dst_width)) //== no padding
-			{
-				// then our buffers already continious, no need in paddings, just assign raw data to current
-				frames.current_Y = frames.tmp_Y;
-				frames.current_U = frames.tmp_U;
-				frames.current_V = frames.tmp_V;
-			}
-			else
-			{
-            // malloc for current_YUV was done at runtime
-            copy_with_padding(); //from tmp_yuv to current_yuv
-			}
-		}
-		char buf[6];
-		i = fread(buf, sizeof(uint8_t), 6, input_file.handle);
+	if (frames.frame_number > 0) {
+		memcpy(frames.last_U, frames.current_U, video.wrk_frame_size_chroma);
+		memcpy(frames.last_V, frames.current_V, video.wrk_frame_size_chroma);
 	}
 
+	t.start = clock();
+
+	int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1);
+	int i, j, fragment_size = src_frame_size_full;
+
+	i = fread(frames.input_pack, sizeof(uint8_t), (src_frame_size_full % fragment_size), input_file.handle);
+	while (i < src_frame_size_full)
+	{
+		j = fread(frames.input_pack + i, sizeof(uint8_t), fragment_size, input_file.handle);
+		if (j < fragment_size) 
+			return 0;
+		i += j;
+	}
+
+	frames.tmp_Y = frames.input_pack;
+	frames.tmp_U = frames.tmp_Y + video.src_frame_size_luma;
+	frames.tmp_V = frames.tmp_U + video.src_frame_size_chroma;
+
+	if ((video.src_height == video.dst_height) && (video.src_width == video.dst_width)) //== no resize
+	{
+		if ((video.wrk_height == video.dst_height) && (video.wrk_width == video.dst_width)) //== no padding
+		{
+			// then our buffers already continious, no need in paddings, just assign raw data to current
+			frames.current_Y = frames.tmp_Y;
+			frames.current_U = frames.tmp_U;
+			frames.current_V = frames.tmp_V;
+		}
+		else
+		{
+           // malloc for current_YUV was done at runtime
+           copy_with_padding(); //from tmp_yuv to current_yuv
+		}
+	}
+	char buf[6];
+	i = fread(buf, sizeof(uint8_t), 6, input_file.handle);
+	if ((i > 0) && ((buf[0] != 'F') || (buf[4] != 'E'))) {
+		printf("broken stream!\n");
+		return -1;
+	}
 
 	t.read += clock() - t.start;
 	return 1;
