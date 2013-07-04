@@ -222,6 +222,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	macroblock_extra_data imaginary_edata;
 
 	imaginary_edata.base_mv.raw = 0;
+	imaginary_edata.is_inter_mb = 0; 
 
 	mb_edata = &(frames.e_data[mb_num]);
 	mb_edata->base_mv.d.x = frames.transformed_blocks[mb_num].vector_x[3];
@@ -251,9 +252,9 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
 
 	// process above 
-	// if first row then above is INTRA-like and no action is taken, else above is SPLITMV (all we have)
+	// if above is INTRA-like then no action is taken, else above is SPLITMV (all we have)
 	// the same for other 2 processes
-	if (mb_row > 0) 
+	if (above_edata->is_inter_mb == 1)
 	{
 		if (above_edata->base_mv.raw)
 		{
@@ -264,7 +265,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	}
 
 	// process left
-	if (mb_col > 0)
+	if (left_edata->is_inter_mb == 1)
 	{
 		if (left_edata->base_mv.raw)
 		{
@@ -280,7 +281,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 	}
 
 	// process above_left
-	if ((mb_row > 0) && (mb_col > 0))
+	if (above_left_edata->is_inter_mb == 1)
 	{
 		if (above_left_edata->base_mv.raw)
 		{
@@ -298,7 +299,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		if (mb_mv->raw == mb_mv_list[1].raw)
 			cnt[1] += 1;
 	// cnt[CNT_SPLITMV] = ((above->base.y_mode == SPLITMV) + (left->base.y_mode == SPLITMV)) * 2 + (aboveleft->base.y_mode == SPLITMV);
-	cnt[3] = ((mb_row > 0) + (mb_col > 0))*2 + ((mb_row > 0) && (mb_col > 0)); // NO SPLITMV now 
+	cnt[3] = ((above_edata->is_inter_mb == 1) + (left_edata->is_inter_mb == 1))*2 + (above_left_edata->is_inter_mb == 1); 
 	if (cnt[2] > cnt[1])
 	{
 		int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
@@ -339,7 +340,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 			left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
 			left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
 		}
-		else if (mb_col > 0) {
+		else if (left_edata->is_inter_mb == 1) {
 			left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
 			left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
 		} 
@@ -351,7 +352,7 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 			above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
 			above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
 		}
-		else if (mb_row > 0) {
+		else if (above_edata->is_inter_mb == 1) {
 			above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
 			above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
 		} 
@@ -530,7 +531,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
 	int32_t *cntx  = cnt;
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
-	if (mb_row > 0) 
+	if (above_edata->is_inter_mb == 1)
 	{
 		if (above_edata->base_mv.raw)
 		{
@@ -539,7 +540,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 		}
 		*cntx += 2;
 	}
-	if (mb_col > 0)
+	if (left_edata->is_inter_mb == 1)
 	{
 		if (left_edata->base_mv.raw)
 		{
@@ -552,7 +553,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 		} 
 		else cnt[0] += 2;
 	}
-	if ((mb_row > 0) && (mb_col > 0))
+	if (above_left_edata->is_inter_mb == 1)
 	{
 		if (above_left_edata->base_mv.raw)
 		{
@@ -598,7 +599,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 			left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
 			left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
 		}
-		else if (mb_col > 0) {
+		else if (left_edata->is_inter_mb == 1) {
 			left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
 			left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
 		} 
@@ -610,7 +611,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 			above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
 			above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
 		}
-		else if (mb_row > 0) {
+		else if (above_edata->is_inter_mb == 1) {
 			above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
 			above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
 		} 
@@ -649,6 +650,8 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 void encode_header(uint8_t* partition) // return  size of encoded header
 {
 	int32_t prob_intra, prob_last;
+	const Prob *new_ymode_prob = ymode_prob;
+	const Prob *new_uv_mode_prob = uv_mode_prob;
 
 	// uncompressed first part(frame tag..) of frame header will be encoded last
 	// because it has size of 1st partition
@@ -754,12 +757,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_i - video.quantizer_index_y_ac_i); // C DC index delta
 		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_i - video.quantizer_index_y_ac_i); // C AC index delta
 	} else {
-		write_literal(vbe, video.quantizer_index_y_ac_p, 7); // Y AC quantizer index (full 7 bits)
-		write_quantizer_delta(vbe, video.quantizer_index_y_dc_p - video.quantizer_index_y_ac_p); // Y DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_p - video.quantizer_index_y_ac_p); // Y2 DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_p - video.quantizer_index_y_ac_p); // Y2 AC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_p - video.quantizer_index_y_ac_p); // C DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_p - video.quantizer_index_y_ac_p); // C AC index delta
+		write_literal(vbe, video.quantizer_index_y_ac_p_l, 7); // Y AC quantizer index (full 7 bits)
+		write_quantizer_delta(vbe, video.quantizer_index_y_dc_p_l - video.quantizer_index_y_ac_p_l); // Y DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_p_l - video.quantizer_index_y_ac_p_l); // Y2 DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_p_l - video.quantizer_index_y_ac_p_l); // Y2 AC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_p_l - video.quantizer_index_y_ac_p_l); // C DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_p_l - video.quantizer_index_y_ac_p_l); // C AC index delta
 	}
     /* end of quant_indices() block */
 
@@ -853,7 +856,10 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	{
     /*      prob_intra                                  | L(8)  |*/
 		// probability, that block intra encoded. We use only inter in not-key frames
-		prob_intra = 0;
+		prob_intra = frames.replaced*256/video.mb_count;
+		if ((frames.replaced > 0) && (prob_intra < 2)) prob_intra = 2;
+		if ((frames.replaced < video.mb_count) && (prob_intra > 254)) prob_intra = 254;
+		if (frames.replaced == video.mb_count) prob_intra = 255;
 		write_literal(vbe, prob_intra, 8); 
     /*      prob_last                                   | L(8)  |*/
 		// probability of last frame used as reference  for inter encoding
@@ -863,20 +869,32 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		// probability of golden frame used as reference  for inter encoding
 		write_literal(vbe, 0, 8); // we don't use goldens
     /*      intra_16x16_prob_update_flag                | L(1)  |*/
-		// indicates if the branch probabilities used in the decoding of the luma intra-prediction mode are updated
-		// we do not update any now
-		write_flag(vbe, 0);
+		// indicates if the branch probabilities used in the decoding of the luma intra-prediction(for inter-frames only) mode are updated
     /*      if (intra_16x16_prob_update_flag) {         |       |
     |           for (i = 0; i < 4; i++)                 |       |
     |               intra_16x16_prob                    | L(8)  |
     |       }                                           |       |*/
-		//no updating
-    /*      intra_chroma prob_update_flag               | L(1)  |*/
-		write_flag(vbe, 0);
+	/*      intra_chroma prob_update_flag               | L(1)  |*/
     /*      if (intra_chroma_prob_update_flag) {        |       |
     |           for (i = 0; i < 3; i++)                 |       |
     |               intra_chroma_prob                   | L(8)  |
     |       }                                           |       |*/
+		if (frames.replaced > 7) {
+			int32_t i;
+			write_flag(vbe, 1);
+			new_ymode_prob = B_ymode_prob;
+			for (i = 0; i < 4; ++i)
+				write_literal(vbe, 0, 8); //fexed on B_PRED 
+			write_flag(vbe, 1);
+			new_uv_mode_prob = TM_uv_mode_prob;
+			for (i = 0; i < 3; ++i)
+				write_literal(vbe, 0, 8); //fexed on TM_PRED 
+
+		}
+		else {
+			write_flag(vbe, 0);	
+			write_flag(vbe, 0);
+		}
     /*		for (i = 0; i < 2; i++) {					|		| // it is a start of mv_prob_update()
 	|			for (j = 0; j < 19; j++) {				|		|
 	|				mv_prob_update_flag					| L(1)	|
@@ -912,7 +930,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 
 								//// Now per MacroBlock data
 
-    //each macroblock(MB) wil have these
+    //each macroblock(MB) will have these
     /*  Macroblock Data                                 | Type  |
     | ------------------------------------------------- | ----- |
     |   macroblock_header()                             |       | <---- this in 1st  partition
@@ -944,10 +962,11 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 					zero-probability prob_intra is set by field J of the frame header.*/
 			// we've encoded prob_intra as 0 (ZERO probability of in_inter_mb being ZERO)
 			// and all our blocks are inter
-		if (!frames.prev_is_key_frame) 
+		if (frames.prev_is_key_frame == 0) 
+			write_bool(vbe, prob_intra, (frames.e_data[mb_num].is_inter_mb == 1));
+		if ((frames.prev_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
 		{
-			write_bool(vbe, prob_intra, 1);
-		/*  if (is_inter_mb) {                          |       |<- yes, it is, always in !key_frames. Merge with previous if.
+		/*  if (is_inter_mb) {                          |       |
         |       mb_ref_frame_sel1                       | B(p)  |*/
 			//selects the reference frame to be used; last frame (0), golden/alternate (1)
 			//we have set probability of this flag being ZERO equal to prob_intra
@@ -976,7 +995,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			// part for only inter over
 		}
         /*  } else { /* intra mb                        |       | */
-		else
+		else if (frames.prev_is_key_frame == 1)
 		{
         /*      intra_y_mode                            |   T   | */
         /*      if (intra_y_mode == B_PRED) {           |       |
@@ -986,12 +1005,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
         /*      intra_uv_mode                           |   T   |
         |   }                                           |       |  */
 			encoding_symbol s_tmp;
-			// now encode TM_PRED as luma mode
+			// now encode B_PRED as luma mode
 			// prefix kf_ (!!!) for probabilitiess in key frame (and kf_ymode_tree)
 			s_tmp.bits = 0; // B_PRED = "0" in spec in kf_mode
 			s_tmp.size = 1; 
 			write_symbol(vbe, s_tmp, kf_ymode_prob, kf_ymode_tree);
-			{ int b_num, ctx1, ctx2, ctx3;
+			{ int b_num, ctx1, ctx2;
 			for(b_num = 0; b_num < 16; ++b_num)
 			{
 				// all other blocks encoded with B_TM_PRED too
@@ -1014,6 +1033,26 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			s_tmp.size = 3;
 			write_symbol(vbe, s_tmp, kf_uv_mode_prob, uv_mode_tree);
 		}
+		else // intra MB in inter-frame
+		{
+			// similar but different context
+			encoding_symbol s_tmp;
+			// now encode B_PRED as luma mode
+			s_tmp.bits = 7; // B_PRED = "111" for P-frames
+			s_tmp.size = 3; 
+			write_symbol(vbe, s_tmp, new_ymode_prob, ymode_tree);
+			int32_t b_num;
+			for(b_num = 0; b_num < 16; ++b_num)
+			{
+				s_tmp.bits = 2; /* B_TM_PRED = "10" */
+				s_tmp.size = 2;
+				write_symbol(vbe, s_tmp, bmode_prob, bmode_tree);
+			}
+			// chroma tree is the same for I and P, but probs are different
+			s_tmp.bits = 7; //TM_PRED = "111"
+			s_tmp.size = 3;
+			write_symbol(vbe, s_tmp, new_uv_mode_prob, uv_mode_tree);
+		}
         /*  end of macroblock_header() block  */
     } // end of per macroblock cycle
 
@@ -1034,11 +1073,11 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
 	uint32_t buf;
 	buf = (frames.prev_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
-	buf |= (0 << 1); /* version 0 in bits 3-1 */
+	buf |= (2 << 1); /* version 0 in bits 3-1 */
 	// version 0 - bicubic interpolation
 	// version 1-2 - bilinear
 	// version 3 - no interpolation
-	// doesn't make difference for decoders loop filter
+	// doesn't make difference for decoder's loop filter
 	buf |= 0x10; /* this bit indicates that the frame should be shown */
 	buf |= (vbe->count << 5); 
 
@@ -1051,10 +1090,6 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		partition[3] = 0x9d;
 		partition[4] = 0x01;
 		partition[5] = 0x2a;
-		//example from spec. LSByte goes first in stream
-		//unsigned char *c = pbi->source + 6; unsigned int tmp;
-		//tmp = (c[1] << 8) | c[0];
-		//width = tmp & 0x3FFF;
 		// upscaling == 0
 		partition[6] = (uint8_t)(video.dst_width & 0x00FF);
 		partition[7] = (uint8_t)((video.dst_width >> 8) & 0x00FF);
