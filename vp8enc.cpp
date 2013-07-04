@@ -1,5 +1,5 @@
 //a method to define path to OpenCL.lib
-//#pragma comment(lib,"C:\\Program Files (x86)\\AMD APP\\lib\\x86\\OpenCL.lib")
+#pragma comment(lib,"C:\\Program Files (x86)\\AMD APP\\lib\\x86\\OpenCL.lib")
 
 // all global structure definitions (fileContext, videoContext, deviceContext...)
 #include "vp8enc.h"
@@ -523,6 +523,204 @@ void predict_and_transform_mb(int32_t mb_num)
     return;
 }
 
+float count_SSIM_16x16(uint8_t *frame1, int32_t width1, uint8_t *frame2, int32_t width2)
+{
+	int i,j,M1=0,M2=0,D1=0,D2=0,C=0,t1,t2;
+	for(i = 0; i < 16; ++i)
+		for(j = 0; j < 16; ++j) {
+			M1 += (int)frame1[i*width1+j];
+			M2 += (int)frame2[i*width2+j];
+		}
+	M1 >>= 8; M2 >>= 8;
+	for(i = 0; i < 16; ++i)
+		for(j = 0; j < 16; ++j) {
+			t1 = ((int)frame1[i*width1+j]) - M1;
+			t2 = ((int)frame2[i*width2+j]) - M2;
+			D1 += t1*t1; 
+			D2 += t2*t2;
+			C += t1*t2;
+		}
+	D1 >>= 8; D2 >>= 8; C >>= 8;
+
+	const float c1 = 0.01f*0.01f*255*255;
+	const float c2 = 0.03f*0.03f*255*255;
+	float num, denom, M1f, M2f;
+	M1f = (float)M1;
+	M2f = (float)M2;
+	num = (M1f*M2f*2 + c1)*((float)C*2 + c2);
+	denom = (M1f*M1f + M2f*M2f + c1)*((float)D1 + (float)D2 + c2);
+
+	return (num/denom);
+}
+
+int chroma_corrupted(uint8_t* frame1, int32_t width1, uint8_t *frame2, int32_t width2)
+{
+	int32_t i,j, sum1 = 0, sum2 = 0;
+	for(i = 0; i < 8; ++i)
+		for(j = 0; j < 8; ++j)
+			sum1 += (int)frame1[i*width1 + j];
+	for(i = 0; i < 8; ++i)
+		for(j = 0; j < 8; ++j)
+			sum2 += (int)frame2[i*width2 + j];
+	sum1 = sum1 - sum2;
+	sum1 = (sum1 < 0) ? -sum1 : sum1;
+	sum1 = (sum1 > 2560); // divide by 256 to get average
+	return sum1; 
+}
+
+int test_inter_on_intra(int32_t mb_num)
+{
+	macroblock test_mb;
+	uint8_t test_recon_Y[256];
+	uint8_t test_recon_V[64];
+	uint8_t test_recon_U[64];
+	const int32_t test_width = 16;
+
+	// prepare predictors (TM_B_PRED) and transform each block
+    int32_t i,j, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
+
+    int16_t top_left_pred_Y, top_left_pred_U, top_left_pred_V;
+    int16_t left_pred_Y[16], left_pred_U[8], left_pred_V[8];
+    int16_t top_pred_Y[16], top_pred_U[8], top_pred_V[8];
+
+    mb_row = mb_num / video.mb_width;  mb_col = mb_num % video.mb_width;
+    Y_offset = ((mb_row * video.wrk_width) + mb_col) << 4;
+    UV_offset = ((mb_row *video.wrk_width) << 2) + (mb_col << 3);
+
+    if (mb_col == 0) {
+        top_left_pred_Y = 129; top_left_pred_U = 129; top_left_pred_V = 129;
+        for (i = 0; i < 16; i+=2) {
+            left_pred_Y[i]=129; left_pred_Y[i+1]=129; left_pred_U[i>>1]=129; left_pred_V[i>>1]=129;
+        }
+    }
+    else {
+        pred_ind_Y = Y_offset - 1; pred_ind_UV = UV_offset - 1;
+        for (i = 0; i < 16; i+=2) {
+            left_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            pred_ind_Y += video.wrk_width;
+            left_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            pred_ind_Y += video.wrk_width;
+            left_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
+            left_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            pred_ind_UV += (video.wrk_width>>1);
+        }
+    }
+
+    if (mb_row == 0) {
+        top_left_pred_Y = 127; top_left_pred_U = 127; top_left_pred_V = 127;
+        for (i = 0; i < 16; i+=2) {
+            top_pred_Y[i]=127; top_pred_Y[i+1]=127; top_pred_U[i>>1]=127; top_pred_V[i>>1]=127;
+        }
+    }
+    else {
+        pred_ind_Y = Y_offset - video.wrk_width; pred_ind_UV = UV_offset - (video.wrk_width>>1);
+        for (i = 0; i < 16; i+=2) {
+            top_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            ++pred_ind_Y;
+            top_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            ++pred_ind_Y;
+            top_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
+            top_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            ++pred_ind_UV;
+        }
+    }
+
+    if ((mb_row != 0) && (mb_col != 0))
+	{
+        top_left_pred_Y = frames.reconstructed_Y[Y_offset - video.wrk_width - 1];
+        top_left_pred_U = frames.reconstructed_U[UV_offset - (video.wrk_width>>1) - 1];
+        top_left_pred_V = frames.reconstructed_V[UV_offset - (video.wrk_width>>1) - 1];
+    }
+
+    uint8_t *block_offset, *test_offset;
+    for (b_row = 0; b_row < 4; ++b_row) // 4x4 luma blocks
+    {
+		int16_t buf_pred = left_pred_Y[(b_row<<2) + 3];
+		for (b_col = 0; b_col < 4; ++b_col)
+		{
+			b_num = (b_row<<2) + b_col;
+
+			block_offset = frames.current_Y + (Y_offset + (((b_row*video.wrk_width) + b_col ) <<2));
+			test_offset = test_recon_Y + (((b_row*test_width) + b_col ) <<2);
+
+			pred_DCT_quant_4x4(block_offset, test_mb.coeffs[b_num],
+			                   video.wrk_width, video.quantizer_y_dc_p, video.quantizer_y_ac_p,
+			                   &top_pred_Y[b_col<<2], &left_pred_Y[b_row<<2], top_left_pred_Y);
+
+			dequant_iDCT_depred_4x4(test_mb.coeffs[b_num], test_offset,
+			                        test_width, video.quantizer_y_dc_p, video.quantizer_y_ac_p,
+			                        &top_pred_Y[b_col<<2], &left_pred_Y[b_row<<2], top_left_pred_Y);
+
+			top_left_pred_Y = top_pred_Y[(b_col<<2) + 3];
+
+			left_pred_Y[b_row<<2] = test_offset[3];
+			test_offset += test_width;
+			left_pred_Y[(b_row<<2) + 1] = test_offset[3];
+			test_offset += test_width;
+			left_pred_Y[(b_row<<2) + 2] = test_offset[3];
+			test_offset += test_width;
+			left_pred_Y[(b_row<<2) + 3] = test_offset[3];
+
+			top_pred_Y[b_col<<2] = test_offset[0];
+			top_pred_Y[(b_col<<2) + 1] = test_offset[1];
+			top_pred_Y[(b_col<<2) + 2] = test_offset[2];
+			top_pred_Y[(b_col<<2) + 3] = test_offset[3];
+		}
+		top_left_pred_Y = buf_pred;
+    }
+    for (b_num = 0; b_num < 4; ++b_num) // 2x2 U-chroma blocks
+    {
+        b_row = b_num >> 1; b_col = b_num % 2;
+        block_offset = frames.current_U + (UV_offset + (( b_row*video.wrk_width<<1) + (b_col<<2) ));
+		test_offset = test_recon_U + ((b_row*test_width<<1) + (b_col<<2));
+        pred_DCT_quant_4x4(block_offset, test_mb.coeffs[b_num+16],
+                           video.wrk_width>>1, video.quantizer_uv_dc_p, video.quantizer_uv_ac_p,
+                           &top_pred_U[b_col<<2], &left_pred_U[b_row<<2], top_left_pred_U);
+        dequant_iDCT_depred_4x4(test_mb.coeffs[b_num+16], test_offset,
+                                test_width>>1,video.quantizer_uv_dc_p, video.quantizer_uv_ac_p,
+                                &top_pred_U[b_col<<2], &left_pred_U[b_row<<2], top_left_pred_U);
+
+    }
+    for (b_num = 0; b_num < 4; ++b_num) // 2x2 V-chroma blocks
+    {
+        b_row = b_num >> 1; b_col = b_num % 2;
+        block_offset = frames.current_V + (UV_offset + (( b_row*video.wrk_width<<1) + (b_col<<2) ));
+		test_offset = test_recon_V + ((b_row*test_width<<1) + (b_col<<2));
+        pred_DCT_quant_4x4(block_offset, test_mb.coeffs[b_num+20],
+                           video.wrk_width>>1, video.quantizer_uv_dc_p, video.quantizer_uv_ac_p,
+                           &top_pred_V[b_col<<2], &left_pred_V[b_row<<2], top_left_pred_V);
+        dequant_iDCT_depred_4x4(test_mb.coeffs[b_num+20], test_offset,
+                                test_width>>1,video.quantizer_uv_dc_p, video.quantizer_uv_ac_p,
+                                &top_pred_V[b_col<<2], &left_pred_V[b_row<<2], top_left_pred_V);
+    }
+	
+	test_mb.SSIM = count_SSIM_16x16(test_recon_Y, test_width, frames.current_Y + Y_offset, video.wrk_width);
+	if (test_mb.SSIM > frames.transformed_blocks[mb_num].SSIM)
+	//	&& (!chroma_corrupted(test_recon_U, test_width>>1, frames.current_U  + UV_offset, video.wrk_width>>1)) 
+	//	&& (!chroma_corrupted(test_recon_V, test_width>>1, frames.current_V  + UV_offset, video.wrk_width>>1)))
+	{
+		//then we replace inter encoded and reconstructed MB with intra
+		++frames.replaced;
+		// replace residual
+		memcpy(&frames.transformed_blocks[mb_num], &test_mb, sizeof(macroblock));
+		// replace reconstructed fragment
+		for(i = 0; i < 16; ++i)
+			for(j = 0; j < 16; ++j)
+				frames.reconstructed_Y[Y_offset + i*video.wrk_width + j] = test_recon_Y[i*test_width + j];
+		for(i = 0; i < 8; ++i)
+			for(j = 0; j < 8; ++j)
+				frames.reconstructed_U[UV_offset + i*(video.wrk_width>>1) + j] = test_recon_U[i*(test_width>>1) + j];
+		for(i = 0; i < 8; ++i)
+			for(j = 0; j < 8; ++j)
+				frames.reconstructed_V[UV_offset + i*(video.wrk_width>>1) + j] = test_recon_V[i*(test_width>>1) + j];
+
+		for (b_num = 0; b_num < 24; ++b_num)
+			zigzag_block(frames.transformed_blocks[mb_num].coeffs[b_num]);
+		return 0;
+	}
+    return 1;
+}
+
 
 
 void intra_transform()
@@ -616,6 +814,9 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFlush(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.gpu_work_items_per_dim[0] = video.mb_height*8;
 			mb_size = 8;
 			plane_width = video.wrk_width/2;
@@ -623,9 +824,14 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFlush(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-			clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 
 			device.gpu_work_items_per_dim[0] = video.mb_height*4;
 			mb_size = 16;
@@ -634,6 +840,9 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFlush(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.gpu_work_items_per_dim[0] = video.mb_height*2;
 			mb_size = 8;
 			plane_width = video.wrk_width/2;
@@ -641,9 +850,14 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFlush(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-			clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		}
 	}
 	else
@@ -661,12 +875,15 @@ void do_loop_filter()
 			device.gpu_work_items_per_dim[0] = video.mb_height*16;
 			device.gpu_work_group_size_per_dim[0] = 64; 
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-			clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 
 			device.gpu_work_items_per_dim[0] = video.mb_height*4;
 			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-
-			clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
+			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		}
 	}
 	t.loop_filter += clock() - t.start;
@@ -681,27 +898,49 @@ void interpolate()
 	// both HORIZONTALLY
 	device.gpu_work_items_per_dim[0] = video.wrk_height;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_interpolate_Hx4, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	if (device.state_gpu != 0)  printf(">error when interpolating luma horizontally : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	device.gpu_work_items_per_dim[0] = video.wrk_height/2;
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 1, sizeof(cl_mem), &device.last_frame_U);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Hx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	if (device.state_gpu != 0)  printf(">error when interpolating U-chroma horizontaly : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 1, sizeof(cl_mem), &device.last_frame_V);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Hx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	clFinish(device.commandQueue_gpu);
+	if (device.state_gpu != 0)  printf(">error when interpolating V-chroma horizontaly : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	// and VERTICALLY
 	device.gpu_work_items_per_dim[0] = video.wrk_width;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_interpolate_Vx4, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	if (device.state_gpu != 0)  printf(">error when interpolating luma vertically : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 0, sizeof(cl_mem), &device.last_frame_U);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Vx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	if (device.state_gpu != 0)  printf(">error when interpolating U-chroma vertically : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 0, sizeof(cl_mem), &device.last_frame_V);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Vx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	if (device.state_gpu != 0)  printf(">error when interpolating V-chroma vertically : %d", device.state_gpu);
+	device.state_gpu = clFinish(device.commandQueue_gpu);
+
+	//uint8_t *frame=(uint8_t*)malloc(video.wrk_frame_size_chroma*64);
+	//device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.last_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma*64, frame, 0, NULL, NULL);
+	//device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.last_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma*64, frame, 0, NULL, NULL);
+	//free(frame);
 	
 	t.interpolate += clock() - t.start;
 }
 
 void correct_quant_indexes()
 {
+	video.quantizer_index_y_dc_p_l = video.quantizer_index_y_dc_p_c;
+	video.quantizer_index_y_ac_p_l = video.quantizer_index_y_ac_p_c;
+	video.quantizer_index_y2_dc_p_l = video.quantizer_index_y2_dc_p_c;
+	video.quantizer_index_y2_ac_p_l = video.quantizer_index_y2_ac_p_c;
+	video.quantizer_index_uv_dc_p_l = video.quantizer_index_uv_dc_p_c;
+	video.quantizer_index_uv_ac_p_l = video.quantizer_index_uv_ac_p_c;
 	// smoothing quant values in 3 steps frop P-frame to I-frame
 	if (frames.frames_until_key < 4)
 	{
@@ -712,7 +951,7 @@ void correct_quant_indexes()
 		video.quantizer_index_uv_dc_p_c = (video.quantizer_index_uv_dc_p + video.quantizer_index_uv_dc_i*3 + 2)/4;
 		video.quantizer_index_uv_ac_p_c = (video.quantizer_index_uv_ac_p + video.quantizer_index_uv_ac_i*3 + 2)/4;
 	} 
-	else if (frames.frames_until_key < 12)
+	else if (frames.frames_until_key < 16)
 	{
 		video.quantizer_index_y_dc_p_c = (video.quantizer_index_y_dc_p + video.quantizer_index_y_dc_i + 1)/2;
 		video.quantizer_index_y_ac_p_c = (video.quantizer_index_y_ac_p + video.quantizer_index_y_ac_i + 1)/2;
@@ -721,7 +960,7 @@ void correct_quant_indexes()
 		video.quantizer_index_uv_dc_p_c = (video.quantizer_index_uv_dc_p + video.quantizer_index_uv_dc_i + 1)/2;
 		video.quantizer_index_uv_ac_p_c = (video.quantizer_index_uv_ac_p + video.quantizer_index_uv_ac_i + 1)/2;
 	} 
-	else if (frames.frames_until_key < 24)
+	else if (frames.frames_until_key < 36)
 	{
 		video.quantizer_index_y_dc_p_c = (video.quantizer_index_y_dc_p*3 + video.quantizer_index_y_dc_i + 2)/4;
 		video.quantizer_index_y_ac_p_c = (video.quantizer_index_y_ac_p*3 + video.quantizer_index_y_ac_i + 2)/4;
@@ -739,6 +978,7 @@ void correct_quant_indexes()
 		video.quantizer_index_uv_dc_p_c = video.quantizer_index_uv_dc_p;
 		video.quantizer_index_uv_ac_p_c = video.quantizer_index_uv_ac_p;
 	} 
+
 	//check for delta for chroma (because they are lowered as much as possible)
 	video.quantizer_index_uv_dc_p_c = ((video.quantizer_index_y_ac_p_c - video.quantizer_index_uv_dc_p_c) > 15) 
 										? video.quantizer_index_y_ac_p_c - 15 
@@ -753,7 +993,8 @@ void inter_transform()
 {
 	clFinish(device.commandQueue_gpu);
 
-	if (video.loop_filter_level > 0) do_loop_filter();
+	if (video.loop_filter_level > 0) 
+		do_loop_filter();
 
 	interpolate();
 
@@ -801,9 +1042,9 @@ void inter_transform()
             device.gpu_work_items_per_dim[0] = blocks_to_be_done - blocks_done;
             blocks_done += blocks_to_be_done - blocks_done;
         }
-		clFinish(device.commandQueue_gpu);
+		device.state_gpu = clFinish(device.commandQueue_gpu);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_search, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-		clFlush(device.commandQueue_gpu);
+		device.state_gpu = clFlush(device.commandQueue_gpu);
     }
 
 	entropy_encode(); // entropy coding of previous frame
@@ -823,9 +1064,9 @@ void inter_transform()
             device.gpu_work_items_per_dim[0] = blocks_to_be_done - blocks_done;
             blocks_done += blocks_to_be_done - blocks_done;
         }
-		clFinish(device.commandQueue_gpu);
-		clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-		clFlush(device.commandQueue_gpu);
+		device.state_gpu = clFinish(device.commandQueue_gpu);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		device.state_gpu = clFlush(device.commandQueue_gpu);
     }
 
 	blocks_to_be_done = video.mb_count<<2;
@@ -846,12 +1087,14 @@ void inter_transform()
             device.gpu_work_items_per_dim[0] = blocks_to_be_done - blocks_done;
             blocks_done += blocks_to_be_done - blocks_done;
         }
-		//clFinish(device.commandQueue_gpu); // UV always should wait for Y vectors
-		clSetKernelArg(device.chroma_transform, 0, sizeof(cl_mem), &device.current_frame_U);
-		clSetKernelArg(device.chroma_transform, 1, sizeof(cl_mem), &device.last_frame_U);
-		clSetKernelArg(device.chroma_transform, 2, sizeof(cl_mem), &device.reconstructed_frame_U);
-		clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-		clFlush(device.commandQueue_gpu);
+		device.state_gpu = clFinish(device.commandQueue_gpu); // UV always should wait for Y vectors
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 0, sizeof(cl_mem), &device.current_frame_U);
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 1, sizeof(cl_mem), &device.last_frame_U);
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 2, sizeof(cl_mem), &device.reconstructed_frame_U);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		if (device.state_gpu != 0)  printf(">error when transforming chroma blocks : %d", device.state_gpu);
+		device.state_gpu = clFlush(device.commandQueue_gpu);
+		if (device.state_gpu != 0)  printf(">error when transforming chroma blocks : %d", device.state_gpu);
 	}	
 
 	block_place = 20;
@@ -871,65 +1114,92 @@ void inter_transform()
             device.gpu_work_items_per_dim[0] = blocks_to_be_done - blocks_done;
             blocks_done += blocks_to_be_done - blocks_done;
         }
-		//clFinish(device.commandQueue_gpu);
-		clSetKernelArg(device.chroma_transform, 0, sizeof(cl_mem), &device.current_frame_V);
-		clSetKernelArg(device.chroma_transform, 1, sizeof(cl_mem), &device.last_frame_V);
-		clSetKernelArg(device.chroma_transform, 2, sizeof(cl_mem), &device.reconstructed_frame_V);
-		clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-		clFlush(device.commandQueue_gpu);
+		device.state_gpu = clFinish(device.commandQueue_gpu);
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 0, sizeof(cl_mem), &device.current_frame_V);
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 1, sizeof(cl_mem), &device.last_frame_V);
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 2, sizeof(cl_mem), &device.reconstructed_frame_V);
+		device.state_gpu = device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		if (device.state_gpu != 0)  printf(">error when transforming chroma blocks : %d", device.state_gpu);
+		device.state_gpu = clFlush(device.commandQueue_gpu);
+		if (device.state_gpu != 0)  printf(">error when transforming chroma blocks : %d", device.state_gpu);
 	}	
 
 	t.inter_transform += clock() - start_i;
 
+	blocks_to_be_done = video.mb_count*4;
+	device.gpu_work_group_size_per_dim[0] = 256; //fixed as kernel attribute
+	blocks_to_be_done += ((blocks_to_be_done % device.gpu_work_group_size_per_dim[0]) > 0) ? (device.gpu_work_group_size_per_dim[0] - (blocks_to_be_done % device.gpu_work_group_size_per_dim[0])) : 0;
+	
 	//count SSIM
-	clFinish(device.commandQueue_gpu);
-	device.gpu_work_items_per_dim[0] = video.mb_count;
+	device.state_gpu = clFinish(device.commandQueue_gpu);
 	device.gpu_work_group_size_per_dim[0] = 64;
+	device.gpu_work_items_per_dim[0] = video.mb_count;
+	device.gpu_work_items_per_dim[0] += ((video.mb_count % device.gpu_work_group_size_per_dim[0]) > 0) ?
+										device.gpu_work_group_size_per_dim[0] - (video.mb_count % device.gpu_work_group_size_per_dim[0]) :
+										0;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.count_SSIM, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
-	if (device.state_gpu != 0) printf("count SSIM error: %d\n", device.state_gpu);
-
+	device.state_gpu = clFlush(device.commandQueue_gpu);
 
     return;
 }
 
-int check_SSIM()
+void check_SSIM()
 {
+	device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+	device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.reconstructed_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+	device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.reconstructed_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+
 	frames.new_SSIM = 0;
 	float min = 2;
 	float max = -2;
-	int i;
-	for (i = 0; i < video.mb_count; ++i)
+	int mb_num;
+	frames.replaced = 0;
+	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
 	{
-		frames.new_SSIM += frames.transformed_blocks[i].SSIM;
-		min = (frames.transformed_blocks[i].SSIM < min) ? frames.transformed_blocks[i].SSIM : min;
-		max = (frames.transformed_blocks[i].SSIM > max) ? frames.transformed_blocks[i].SSIM : max;
+		if (frames.transformed_blocks[mb_num].SSIM < 0.7f) 
+			frames.e_data[mb_num].is_inter_mb = test_inter_on_intra(mb_num);
+		frames.new_SSIM += frames.transformed_blocks[mb_num].SSIM;
+		min = (frames.transformed_blocks[mb_num].SSIM < min) ? frames.transformed_blocks[mb_num].SSIM : min;
+		max = (frames.transformed_blocks[mb_num].SSIM > max) ? frames.transformed_blocks[mb_num].SSIM : max;
 	}
+	if (frames.replaced > 0)
+	{
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+	}
+
 	frames.new_SSIM /= (float)video.mb_count;
-	printf("Frame %d => Avg SSIM = %f; Min SSIM = %f; Max SSIM = %f\n", frames.frame_number, frames.new_SSIM, min, max);
-	if (frames.new_SSIM < 0.85f)
-		return 1;
-	return 0;
+	printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f; MaxSSIM=%f I:%d\n", frames.frame_number, frames.new_SSIM, min, max, frames.replaced);
+	return;
 }
 
 int scene_change()
 {
-	// something more sophisticated is desirebale
-	int i,j,c,k=0;
-	for (i = 0; i < video.mb_count; ++i)
+	// something more sophisticated is desirable
+	int Udiff = 0, Vdiff = 0, diff, pix;
+	for (pix = 0; pix < video.wrk_frame_size_chroma; ++pix)
 	{
-		for(j = 16; j < 24; ++j)
-		{
-			if (frames.transformed_blocks[i].coeffs[j][0] > 0)
-				++k;
-		}
+		diff = (int)frames.last_U[pix] - (int)frames.current_U[pix];
+		diff = (diff < 0) ? -diff : diff;
+		Udiff += diff;
 	}
-	return (k > (video.mb_count*4)/4);
+	Udiff /= video.wrk_frame_size_chroma;
+	for (pix = 0; pix < video.wrk_frame_size_chroma; ++pix)
+	{
+		diff = (int)frames.last_V[pix] - (int)frames.current_V[pix];
+		diff = (diff < 0) ? -diff : diff;
+		Vdiff += diff;
+	}
+	Vdiff /= video.wrk_frame_size_chroma;
+	return ((Udiff > 7) || (Vdiff > 7) || (Udiff+Vdiff > 10));
 }
 
 void finalize();
 
 int main(int argc, char *argv[])
 {
+	int32_t mb_num;
 	printf("\n");
 	t.init = clock();
 	t.inter_transform = 0;
@@ -951,7 +1221,6 @@ int main(int argc, char *argv[])
 	}
 	
     OpenYUV420FileAndParseHeader();
-	fseek(output_file.handle, 32, SEEK_SET); //skip header;
     
 	printf("initialization started;\n");
     init_all();
@@ -969,58 +1238,72 @@ int main(int argc, char *argv[])
 	if (!get_yuv420_frame()) {  // reads frame to host memory
 		printf("first frame is incomplete;\n");
 	}
+	
+	write_output_header();
 
     intra_transform();
-	frames.last_SSIM = -1;
 	if (video.GOP_size > 1) {
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 	}
 			
     ++frames.frame_number;
     while (get_yuv420_frame() > 0)
     {
-		device.state_cpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.transformed_blocks_cpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
+		device.state_cpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
 		frames.prev_is_key_frame = frames.current_is_key_frame; // for entropy coding of previous frame;
 		--frames.frames_until_key;
 		frames.current_is_key_frame = (frames.frames_until_key < 1);
         if (frames.current_is_key_frame)
         {
-			correct_quant_indexes();
 			entropy_encode(); // entropy coding of previous frame
             intra_transform(); 
-			frames.last_SSIM = -1;
-			
 			if (video.GOP_size > 1) {
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 			}        
 		}
-        else
+        else if (scene_change()) 
+		{
+			entropy_encode();
+			intra_transform();
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+			frames.current_is_key_frame = 1;
+			printf("key frame FORCED by chroma color difference!\n");
+		} 
+		else
         {
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
             
 			correct_quant_indexes();
 			inter_transform(); 
-			clFinish(device.commandQueue_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
 			// copy transformed_blocks to host
 			device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.transformed_blocks_gpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+			
+			for(mb_num = 0; mb_num < video.mb_count; ++mb_num)
+				frames.e_data[mb_num].is_inter_mb = 1;
 
-			if (scene_change() || check_SSIM()) 
+			check_SSIM();
+			if (frames.replaced > (video.mb_count/4))
 			{
+				// redo as intra
 				intra_transform();
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 				frames.current_is_key_frame = 1;
-				frames.last_SSIM = -1;
-				printf("key frame FORCED!\n");
-			} 
-			else frames.last_SSIM = frames.new_SSIM;
+				printf("key frame FORCED by replaced blocks!\n");
+			}
 			
 			// we will move reconstructed buffers to last while interpolating later in inter_transform();
-			clFinish(device.commandQueue_gpu);
+			device.state_gpu = clFinish(device.commandQueue_gpu);
         }
 		if ((frames.frame_number % video.framerate) == 0) printf("second %d encoded\n", frames.frame_number/video.framerate);
 		gather_frame();
@@ -1029,7 +1312,7 @@ int main(int argc, char *argv[])
     }
 	device.state_cpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
 	frames.prev_is_key_frame = frames.current_is_key_frame;
-	clFinish(device.commandQueue_cpu);
+	device.state_gpu = clFinish(device.commandQueue_cpu);
 	entropy_encode();
 	gather_frame();
 	write_output_file();
@@ -1049,7 +1332,6 @@ int main(int argc, char *argv[])
 	printf("interpolating time part :%f seconds\n", ((float)t.interpolate)/CLOCKS_PER_SEC);
 	printf("counting probs for coeffs :%f seconds\n", ((float)t.count_probs)/CLOCKS_PER_SEC);
 	printf("header boolean encoding time part :%f seconds\n", ((float)t.bool_encode_header)/CLOCKS_PER_SEC);
-	//printf("coeffs boolean encoding time part :%f seconds\n", ((float)t.bool_encode_coeffs)/CLOCKS_PER_SEC);
 	printf("write output file time part :%f seconds\n", ((float)t.write)/CLOCKS_PER_SEC);
 
 	printf("\n FPS: %f.\n", (float)frames.frame_number/(((float)t.all)/CLOCKS_PER_SEC));
@@ -1101,6 +1383,8 @@ void finalize()
 	free(frames.reconstructed_Y);
     free(frames.reconstructed_U);
 	free(frames.reconstructed_V);
+	free(frames.last_U);
+	free(frames.last_V);
 	free(frames.transformed_blocks);
 	free(frames.e_data);
 	free(frames.encoded_frame);
@@ -1117,5 +1401,4 @@ void finalize()
 
 	free(device.platforms);
 	free(device.device_cpu);
-
 }
