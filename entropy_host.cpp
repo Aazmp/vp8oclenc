@@ -1073,7 +1073,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
 	uint32_t buf;
 	buf = (frames.prev_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
-	buf |= (2 << 1); /* version 0 in bits 3-1 */
+	buf |= (0 << 1); /* version 0 in bits 3-1 */
 	// version 0 - bicubic interpolation
 	// version 1-2 - bilinear
 	// version 3 - no interpolation
