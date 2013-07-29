@@ -1,13 +1,7 @@
 vp8oclenc
 =========
 
-upd:
-returned bilinear interpolation filter -> it work's
-bicubic filter in the code too -> luma seems to work, but chroma produces traces on moving black edge (with 1..7 fractal vector part)
-
-to enable bicubic filter: 
-1. change kernel string in clCreateKernel (suffix _bl for bilinear; _bc for bicubic) : init.h :: init_all()
-2. change version number (0 - bc; 1,2 - bl) in entropy_host.c::encode_header();
+upd: found problem (DCT order), bicubic filter is alright and set as main (for bilinear edit clCreateKernel and version in header)
 
 
 main:
