@@ -925,11 +925,6 @@ void interpolate()
 	if (device.state_gpu != 0)  printf(">error when interpolating V-chroma vertically : %d", device.state_gpu);
 	device.state_gpu = clFinish(device.commandQueue_gpu);
 
-	//uint8_t *frame=(uint8_t*)malloc(video.wrk_frame_size_chroma*64);
-	//device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.last_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma*64, frame, 0, NULL, NULL);
-	//device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.last_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma*64, frame, 0, NULL, NULL);
-	//free(frame);
-	
 	t.interpolate += clock() - t.start;
 }
 
@@ -941,6 +936,14 @@ void correct_quant_indexes()
 	video.quantizer_index_y2_ac_p_l = video.quantizer_index_y2_ac_p_c;
 	video.quantizer_index_uv_dc_p_l = video.quantizer_index_uv_dc_p_c;
 	video.quantizer_index_uv_ac_p_l = video.quantizer_index_uv_ac_p_c;
+
+	video.quantizer_index_y_dc_p_c = video.quantizer_index_y_dc_p;
+	video.quantizer_index_y_ac_p_c = video.quantizer_index_y_ac_p;
+	video.quantizer_index_y2_dc_p_c = video.quantizer_index_y2_dc_p;
+	video.quantizer_index_y2_ac_p_c = video.quantizer_index_y2_ac_p;
+	video.quantizer_index_uv_dc_p_c = video.quantizer_index_uv_dc_p;
+	video.quantizer_index_uv_ac_p_c = video.quantizer_index_uv_ac_p;
+
 	// smoothing quant values in 3 steps frop P-frame to I-frame
 	if (frames.frames_until_key < 4)
 	{
@@ -1381,7 +1384,7 @@ void finalize()
 
 	free(frames.input_pack);
 	free(frames.reconstructed_Y);
-    free(frames.reconstructed_U);
+    	free(frames.reconstructed_U);
 	free(frames.reconstructed_V);
 	free(frames.last_U);
 	free(frames.last_V);
