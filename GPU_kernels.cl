@@ -100,6 +100,14 @@ void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * cons
 void DCT_and_quant(int4 Line0, int4 Line1, int4 Line2, int4 Line3, // <- input differences
 					int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3, const int dc_q, const int ac_q) // -> output DCT Lines
 {
+	*__Line0 = (int4)(Line0.x, Line1.x, Line2.x, Line3.x);
+	*__Line1 = (int4)(Line0.y, Line1.y, Line2.y, Line3.y);
+	*__Line2 = (int4)(Line0.z, Line1.z, Line2.z, Line3.z);
+	*__Line3 = (int4)(Line0.w, Line1.w, Line2.w, Line3.w);
+	Line0 = *__Line0;
+	Line1 = *__Line1;
+	Line2 = *__Line2;
+	Line3 = *__Line3; // <========================================================================
 
 	*__Line0 = ((Line0 + Line3) << 3);	// a1 = ((ip[0] + ip[3])<<3);
 	*__Line1 = ((Line1 + Line2) << 3);	// b1 = ((ip[1] + ip[2])<<3);
@@ -199,6 +207,16 @@ void dequant_and_iDCT(int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3
 														// op[2] = ((b1 - c1 + 4) >> 3) + pred[2,i]
 	*__Line3 = ((Line0 - Line3 + 4) >> 3);
 														// op[3] = ((a1 - d1 + 4) >> 3) + pred[3,i]
+
+	Line0 = *__Line0;
+	Line1 = *__Line1;
+	Line2 = *__Line2;
+	Line3 = *__Line3; // <========================================================================	
+	*__Line0 = (int4)(Line0.x, Line1.x, Line2.x, Line3.x);
+	*__Line1 = (int4)(Line0.y, Line1.y, Line2.y, Line3.y);
+	*__Line2 = (int4)(Line0.z, Line1.z, Line2.z, Line3.z);
+	*__Line3 = (int4)(Line0.w, Line1.w, Line2.w, Line3.w);
+
 	return;
 }
 
@@ -263,12 +281,11 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 
 	cx *= 4; cy *= 4; //into qpel
 	
-	
-	vector_x = 0; vector_y = 0; /*
+	vector_x = 0; vector_y = 0; 
 	//test ZERO vector
-	pi = cy*width_x4 + cx;
+	pi = cy*width_x4 + cx; /*
 	// block 00
-	const int test_q = ac_q/12;
+	const int test_q = ac_q/8 + 4;
 	UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
 	UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
 	UC20 = vload4(0,prev_frame+pi); UC21 = vload4(0,prev_frame+pi+4); UC22 = vload4(0,prev_frame+pi+8); UC23 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
@@ -292,7 +309,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 	DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
 	weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);
-	Diff0 = (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
+	Diff0 += (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
 			(DL1.x/test_q) + (DL1.y/test_q) + (DL1.z/test_q) + (DL1.w/test_q) + 
 			(DL2.x/test_q) + (DL2.y/test_q) + (DL2.z/test_q) + (DL2.w/test_q) + 
 			(DL3.x/test_q) + (DL3.y/test_q) + (DL3.z/test_q) + (DL3.w/test_q);
@@ -308,7 +325,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 	DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
 	weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);
-	Diff0 = (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
+	Diff0 += (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
 			(DL1.x/test_q) + (DL1.y/test_q) + (DL1.z/test_q) + (DL1.w/test_q) + 
 			(DL2.x/test_q) + (DL2.y/test_q) + (DL2.z/test_q) + (DL2.w/test_q) + 
 			(DL3.x/test_q) + (DL3.y/test_q) + (DL3.z/test_q) + (DL3.w/test_q);
@@ -322,7 +339,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 	DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
 	weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);
-	Diff0 = (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
+	Diff0 += (DL0.y/test_q) + (DL0.z/test_q) + (DL0.w/test_q) + 
 			(DL1.x/test_q) + (DL1.y/test_q) + (DL1.z/test_q) + (DL1.w/test_q) + 
 			(DL2.x/test_q) + (DL2.y/test_q) + (DL2.z/test_q) + (DL2.w/test_q) + 
 			(DL3.x/test_q) + (DL3.y/test_q) + (DL3.z/test_q) + (DL3.w/test_q);
@@ -685,71 +702,71 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 
 	// block 00
 	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[0]]=DCTLine0.s0;
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[1]]=DCTLine1.s0; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[2]]=DCTLine2.s0; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[3]]=DCTLine3.s0;
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[4]]=DCTLine0.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[1]]=DCTLine0.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[2]]=DCTLine0.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[3]]=DCTLine0.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[4]]=DCTLine1.s0; 
 	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[5]]=DCTLine1.s1; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[6]]=DCTLine2.s1; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[7]]=DCTLine3.s1;
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[8]]=DCTLine0.s2; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[9]]=DCTLine1.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[6]]=DCTLine1.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[7]]=DCTLine1.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[8]]=DCTLine2.s0; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[9]]=DCTLine2.s1; 
 	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[10]]=DCTLine2.s2; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[11]]=DCTLine3.s2;
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[12]]=DCTLine0.s3; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[13]]=DCTLine1.s3; 
-	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[14]]=DCTLine2.s3; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[11]]=DCTLine2.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[12]]=DCTLine3.s0; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[13]]=DCTLine3.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[14]]=DCTLine3.s2; 
 	MBs[mb_num].coeffs[b4x4_in_mb][inv_zigzag[15]]=DCTLine3.s3;
 	// block 01
 	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[0]]=DCTLine0.s4;
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[1]]=DCTLine1.s4; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[2]]=DCTLine2.s4; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[3]]=DCTLine3.s4;
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[4]]=DCTLine0.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[1]]=DCTLine0.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[2]]=DCTLine0.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[3]]=DCTLine0.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[4]]=DCTLine1.s4; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[5]]=DCTLine1.s5; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[6]]=DCTLine2.s5; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[7]]=DCTLine3.s5;
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[8]]=DCTLine0.s6; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[9]]=DCTLine1.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[6]]=DCTLine1.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[7]]=DCTLine1.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[8]]=DCTLine2.s4; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[9]]=DCTLine2.s5; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[10]]=DCTLine2.s6; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[11]]=DCTLine3.s6;
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[12]]=DCTLine0.s7; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[13]]=DCTLine1.s7; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[14]]=DCTLine2.s7; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[11]]=DCTLine2.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[12]]=DCTLine3.s4; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[13]]=DCTLine3.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[14]]=DCTLine3.s6; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 1][inv_zigzag[15]]=DCTLine3.s7;
 	// block 10
 	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[0]]=DCTLine4.s0;
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[1]]=DCTLine5.s0; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[2]]=DCTLine6.s0; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[3]]=DCTLine7.s0;
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[4]]=DCTLine4.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[1]]=DCTLine4.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[2]]=DCTLine4.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[3]]=DCTLine4.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[4]]=DCTLine5.s0; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[5]]=DCTLine5.s1; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[6]]=DCTLine6.s1; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[7]]=DCTLine7.s1;
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[8]]=DCTLine4.s2; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[9]]=DCTLine5.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[6]]=DCTLine5.s2; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[7]]=DCTLine5.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[8]]=DCTLine6.s0; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[9]]=DCTLine6.s1; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[10]]=DCTLine6.s2; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[11]]=DCTLine7.s2;
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[12]]=DCTLine4.s3; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[13]]=DCTLine5.s3; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[14]]=DCTLine6.s3; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[11]]=DCTLine6.s3;
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[12]]=DCTLine7.s0; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[13]]=DCTLine7.s1; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[14]]=DCTLine7.s2; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 4][inv_zigzag[15]]=DCTLine7.s3;
 	// block 11
 	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[0]]=DCTLine4.s4;
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[1]]=DCTLine5.s4; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[2]]=DCTLine6.s4; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[3]]=DCTLine7.s4;
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[4]]=DCTLine4.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[1]]=DCTLine4.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[2]]=DCTLine4.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[3]]=DCTLine4.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[4]]=DCTLine5.s4; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[5]]=DCTLine5.s5; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[6]]=DCTLine6.s5; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[7]]=DCTLine7.s5;
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[8]]=DCTLine4.s6; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[9]]=DCTLine5.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[6]]=DCTLine5.s6; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[7]]=DCTLine5.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[8]]=DCTLine6.s4; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[9]]=DCTLine6.s5; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[10]]=DCTLine6.s6; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[11]]=DCTLine7.s6;
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[12]]=DCTLine4.s7; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[13]]=DCTLine5.s7; 
-	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[14]]=DCTLine6.s7; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[11]]=DCTLine6.s7;
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[12]]=DCTLine7.s4; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[13]]=DCTLine7.s5; 
+	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[14]]=DCTLine7.s6; 
 	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[15]]=DCTLine7.s7;
 	
 	// block 00
@@ -859,7 +876,7 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 	CurrentLine1 = vload4(0, current_frame + ci10);
 	CurrentLine2 = vload4(0, current_frame + ci20);
 	CurrentLine3 = vload4(0, current_frame + ci30);
-
+	
 	__private int vector_x, vector_y;
 		
 	__private int mb_num, block_in_mb;
@@ -876,8 +893,6 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 
 	px = (cx*8) + vector_x;
 	py = (cy*8) + vector_y;
-	
-	//py = cy*8 + (vector_y >> 3)*8 + (vector_y & 7);
 	
 	PredictorLine0.x = prev_frame[py*chroma_width_x8 + px]; 
 	PredictorLine0.y = prev_frame[py*chroma_width_x8 + px + 8];
@@ -903,139 +918,35 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 	BestDiffLine1 = convert_int4(CurrentLine1) - convert_int4(PredictorLine1);
 	BestDiffLine2 = convert_int4(CurrentLine2) - convert_int4(PredictorLine2);
 	BestDiffLine3 = convert_int4(CurrentLine3) - convert_int4(PredictorLine3);
-
-	DiffLine0 = ((BestDiffLine0 + BestDiffLine3) << 3);	// a1 = ((ip[0] + ip[3])<<3);
-	DiffLine1 = ((BestDiffLine1 + BestDiffLine2) << 3);	// b1 = ((ip[1] + ip[2])<<3);
-	DiffLine2 = ((BestDiffLine1 - BestDiffLine2) << 3);	// c1 = ((ip[1] - ip[2])<<3);
-	DiffLine3 = ((BestDiffLine0 - BestDiffLine3) << 3);	// d1 = ((ip[0] - ip[3])<<3);
 	
-	BestDiffLine0 = DiffLine0 + DiffLine1;				// op[0] = (a1 + b1); 
-	BestDiffLine2 = DiffLine0 - DiffLine1;				// op[2] = (a1 - b1);
-	
-	BestDiffLine1 = (((DiffLine2 * 2217) + (DiffLine3 * 5352) + 14500) >> 12);
-														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
-	BestDiffLine3 = (((DiffLine3 * 2217) - (DiffLine2 * 5352) + 7500) >> 12);
-														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
-
-	DiffLine0 = (int4)(BestDiffLine0.x, BestDiffLine1.x, BestDiffLine2.x, BestDiffLine3.x);
-	DiffLine1 = (int4)(BestDiffLine0.y, BestDiffLine1.y, BestDiffLine2.y, BestDiffLine3.y);
-	DiffLine2 = (int4)(BestDiffLine0.z, BestDiffLine1.z, BestDiffLine2.z, BestDiffLine3.z);
-	DiffLine3 = (int4)(BestDiffLine0.w, BestDiffLine1.w, BestDiffLine2.w, BestDiffLine3.w);
-
-	BestDiffLine0 = DiffLine0 + DiffLine3;				// a1 = op[0] + op[3];	
-	BestDiffLine1 = DiffLine1 + DiffLine2;				// b1 = op[1] + op[2];
-	BestDiffLine2 = DiffLine1 - DiffLine2;				// c1 = op[1] - op[2];
-	BestDiffLine3 = DiffLine0 - DiffLine3;				// d1 = op[0] - op[3];
-
-	
-	DiffLine0 = ((BestDiffLine0 + BestDiffLine1 + 7) >> 4); 
-														// op[0] = (( a1 + b1 + 7)>>4) / q;
-	DiffLine2 = ((BestDiffLine0 - BestDiffLine1 + 7) >> 4);
-														// op[2] = (( a1 - b1 + 7)>>4) / q;
-	
-	DiffLine1 = (((BestDiffLine2 * 2217) + (BestDiffLine3 * 5352) + 12000) >> 16);
-	DiffLine1 -= (BestDiffLine3 != 0); 					// op[1]  = (((c1 * 2217 + d1 * 5352 +  12000)>>16) + (d1!=0)) / q;
-	
-	DiffLine3 = (((BestDiffLine3 * 2217) - (BestDiffLine2 * 5352) + 51000) >> 16);
-														// op[3] = ((d1 * 2217 - c1 * 5352 +  51000)>>16) / q;
-														
-	DiffLine0 /= (int4)(dc_q, ac_q, ac_q, ac_q);
-	DiffLine1 /= (int4)(ac_q, ac_q, ac_q, ac_q);
-	DiffLine2 /= (int4)(ac_q, ac_q, ac_q, ac_q);
-	DiffLine3 /= (int4)(ac_q, ac_q, ac_q, ac_q);
+	DCT_and_quant(BestDiffLine0, BestDiffLine1, BestDiffLine2, BestDiffLine3,
+					&DiffLine0, &DiffLine1, &DiffLine2, &DiffLine3, dc_q, ac_q);
 	
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
 	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[0]]=(short)DiffLine0.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[1]]=(short)DiffLine1.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[2]]=(short)DiffLine2.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[3]]=(short)DiffLine3.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[4]]=(short)DiffLine0.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[1]]=(short)DiffLine0.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[2]]=(short)DiffLine0.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[3]]=(short)DiffLine0.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[4]]=(short)DiffLine1.x;
 	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[5]]=(short)DiffLine1.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[6]]=(short)DiffLine2.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[7]]=(short)DiffLine3.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[8]]=(short)DiffLine0.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[9]]=(short)DiffLine1.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[6]]=(short)DiffLine1.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[7]]=(short)DiffLine1.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[8]]=(short)DiffLine2.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[9]]=(short)DiffLine2.y;
 	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[10]]=(short)DiffLine2.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[11]]=(short)DiffLine3.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[12]]=(short)DiffLine0.w;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[13]]=(short)DiffLine1.w;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[14]]=(short)DiffLine2.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[11]]=(short)DiffLine2.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[12]]=(short)DiffLine3.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[13]]=(short)DiffLine3.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[14]]=(short)DiffLine3.z;
 	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[15]]=(short)DiffLine3.w;
 	
-	DiffLine0 *= (int4)(dc_q, ac_q, ac_q, ac_q);
-	DiffLine1 *= (int4)(ac_q, ac_q, ac_q, ac_q);
-	DiffLine2 *= (int4)(ac_q, ac_q, ac_q, ac_q);
-	DiffLine3 *= (int4)(ac_q, ac_q, ac_q, ac_q);
-		
-	BestDiffLine0 = DiffLine0 + DiffLine2;				// a1 = ip[0]+ip[2];
-	BestDiffLine1 = DiffLine0 - DiffLine2;				// b1 = ip[0]-ip[2];
-								
-	BestDiffLine2 = ((DiffLine1 * 35468) >> 16) - (DiffLine3 + ((DiffLine3 * 20091)>>16));
-														// temp1 = (ip[1] * sinpi8sqrt2)>>16;
-														// temp2 = ip[3] + ((ip[3] * cospi8sqrt2minus1)>>16);
-														// c1 = temp1 - temp2;
-	BestDiffLine3 = (DiffLine1 + ((DiffLine1 * 20091)>>16)) + ((DiffLine3 * 35468) >> 16);
-														// temp1 = ip[1] + ((ip[1] * cospi8sqrt2minus1)>>16);
-														// temp2 = (ip[3] * sinpi8sqrt2)>>16;
-														// d1 = temp1 + temp2;
-
+	dequant_and_iDCT(&BestDiffLine0, &BestDiffLine1, &BestDiffLine2, &BestDiffLine3, 
+					DiffLine0, DiffLine1, DiffLine2, DiffLine3, dc_q, ac_q);
 	
-	DiffLine0 = BestDiffLine0 + BestDiffLine3;			// op[0] = a1 + d1;
-	DiffLine3 = BestDiffLine0 - BestDiffLine3;			// op[3] = a1 - d1;
-	DiffLine1 = BestDiffLine1 + BestDiffLine2;			// op[1] = b1 + c1;
-	DiffLine2 = BestDiffLine1 - BestDiffLine2;			// op[2] = b1 - c1;
-
-	BestDiffLine0 = (int4)(DiffLine0.x, DiffLine1.x, DiffLine2.x, DiffLine3.x);
-	BestDiffLine1 = (int4)(DiffLine0.y, DiffLine1.y, DiffLine2.y, DiffLine3.y);
-	BestDiffLine2 = (int4)(DiffLine0.z, DiffLine1.z, DiffLine2.z, DiffLine3.z);
-	BestDiffLine3 = (int4)(DiffLine0.w, DiffLine1.w, DiffLine2.w, DiffLine3.w);
-
-	DiffLine0 = BestDiffLine0 + BestDiffLine2;			// a1 = op[0]+op[2];
-	DiffLine1 = BestDiffLine0 - BestDiffLine2;			// b1 = tp[0]-tp[2];
-	
-	DiffLine2 = ((BestDiffLine1 * 35468) >> 16) - (BestDiffLine3 + ((BestDiffLine3 * 20091)>>16));
-														// temp1 = (ip[1] * sinpi8sqrt2)>>16;
-														// temp2 = ip[3] + ((ip[3] * cospi8sqrt2minus1)>>16);
-														// c1 = temp1 - temp2;
-	DiffLine3 = (BestDiffLine1 + ((BestDiffLine1 * 20091)>>16)) + ((BestDiffLine3 * 35468) >> 16);
-														// temp1 = ip[1] + ((ip[1] * cospi8sqrt2minus1)>>16);
-														// temp2 = (ip[3] * sinpi8sqrt2)>>16;
-														// d1 = temp1 + temp2;
-
-	BestDiffLine0 = (((DiffLine0 + DiffLine3 + 4) >> 3) + convert_int4(PredictorLine0));
-														// op[0] = ((a1 + d1 + 4) >> 3) + pred[0,i]
-	BestDiffLine1 = (((DiffLine1 + DiffLine2 + 4) >> 3) + convert_int4(PredictorLine1));
-														// op[1] = ((b1 + c1 + 4) >> 3) + pred[1,i]
-	BestDiffLine2 = (((DiffLine1 - DiffLine2 + 4) >> 3) + convert_int4(PredictorLine2));
-														// op[2] = ((b1 - c1 + 4) >> 3) + pred[2,i]
-	BestDiffLine3 = (((DiffLine0 - DiffLine3 + 4) >> 3) + convert_int4(PredictorLine3));
-														// op[3] = ((a1 - d1 + 4) >> 3) + pred[3,i]
-	
-	/*int4 Fl;
-	int4 ZERO = 0;
-	int4 ONE = 1;
-	Fl = select(ZERO,ONE,(abs(convert_int4(CurrentLine0) - BestDiffLine0) > 4));
-	Fl += select(ZERO,ONE,(abs(convert_int4(CurrentLine1) - BestDiffLine1) > 4));
-	Fl += select(ZERO,ONE,(abs(convert_int4(CurrentLine2) - BestDiffLine2) > 4));
-	Fl += select(ZERO,ONE,(abs(convert_int4(CurrentLine3) - BestDiffLine3) > 4));
-	Fl.x += Fl.y + Fl.z + Fl.w;
-	if (Fl.x > 0)
-	{
-		printf((__constant char*)" %d %d %d %d\n", CurrentLine0.x, CurrentLine0.y, CurrentLine0.z, CurrentLine0.w);
-		printf((__constant char*)" %d %d %d %d\n", CurrentLine1.x, CurrentLine1.y, CurrentLine1.z, CurrentLine1.w);
-		printf((__constant char*)" %d %d %d %d\n", CurrentLine2.x, CurrentLine2.y, CurrentLine2.z, CurrentLine2.w);
-		printf((__constant char*)" %d %d %d %d\n\n", CurrentLine3.x, CurrentLine3.y, CurrentLine3.z, CurrentLine3.w);
-		
-		printf((__constant char*)" %d %d %d %d\n", PredictorLine0.x, PredictorLine0.y, PredictorLine0.z, PredictorLine0.w);
-		printf((__constant char*)" %d %d %d %d\n", PredictorLine1.x, PredictorLine1.y, PredictorLine1.z, PredictorLine1.w);
-		printf((__constant char*)" %d %d %d %d\n", PredictorLine2.x, PredictorLine2.y, PredictorLine2.z, PredictorLine2.w);
-		printf((__constant char*)" %d %d %d %d\n\n", PredictorLine3.x, PredictorLine3.y, PredictorLine3.z, PredictorLine3.w);
-	
-		printf((__constant char*)" %d %d %d %d\n", BestDiffLine0.x, BestDiffLine0.y, BestDiffLine0.z, BestDiffLine0.w);
-		printf((__constant char*)" %d %d %d %d\n", BestDiffLine1.x, BestDiffLine1.y, BestDiffLine1.z, BestDiffLine1.w);
-		printf((__constant char*)" %d %d %d %d\n", BestDiffLine2.x, BestDiffLine2.y, BestDiffLine2.z, BestDiffLine2.w);
-		printf((__constant char*)" %d %d %d %d\n\n\n", BestDiffLine3.x, BestDiffLine3.y, BestDiffLine3.z, BestDiffLine3.w);
-	}*/
+	BestDiffLine0 += convert_int4(PredictorLine0);
+	BestDiffLine1 += convert_int4(PredictorLine1);
+	BestDiffLine2 += convert_int4(PredictorLine2);
+	BestDiffLine3 += convert_int4(PredictorLine3);
 	
 	CurrentLine0 = (convert_uchar4_sat(BestDiffLine0));
 	CurrentLine1 = (convert_uchar4_sat(BestDiffLine1));
@@ -2112,6 +2023,8 @@ __kernel void luma_interpolate_Vx4_bc( __global uchar *const frame, //0
 	return;	
 }
 
+
+
 __kernel void chroma_interpolate_Hx8_bc(__global uchar *const src_frame, //0
 										__global uchar *const dst_frame, //1
 										const int width, //2
@@ -2130,21 +2043,24 @@ __kernel void chroma_interpolate_Hx8_bc(__global uchar *const src_frame, //0
 	ind = (get_global_id(0) + 1)*width - 4;
 	buf = vload4(0, src_frame + ind);
 	M = convert_int4(buf);
-	R = M.s3;
+	R.s0 = M.s3; R.s1 = M.s3; R.s2 = M.s3; R.s3 = M.s3;
 	
-	for (i = width-4; i >= 4; i -= 4)
+	for (i = width-4; i >= 0; i -= 4)
 	{
 		// index for reading not-interpolated pixels (4 pixels to the left)
 		// medium M pixels are set as left L pixels from previous step
 		// and previous M -> new right(R)
 		ind = get_global_id(0)*width + i - 4;
-		buf = vload4(0, src_frame + ind);
-		L = convert_int4(buf);
+		if (i >= 4) {
+			buf = vload4(0, src_frame + ind);
+			L = convert_int4(buf);
+		}
+		else L = M.s0;
 		
 		//index for writing interpolated pixels
 		ind = get_global_id(0)*width_x8 + (i*8);
 		
-		//using this: a*b + c*d + e*f + 64 == mad24(a,b,mad24(c,d,mad24(e,f,64)));
+		//using this: a*b + c*d + e*f + 64 == mad24(a,b,mad24(c,d,mad24(e,f,64))); 
 		O.s0 =                                   M.s0;																//	{ 0, 0, 128, 0, 0, 0 }, 
 		O.s1 =              mad24(L.s3, -6,mad24(M.s0,123,mad24(M.s1, 12,mad24(M.s2, -1, 64))))>>7;					//	{ 0, -6, 123, 12, -1, 0 }
 		O.s2 = mad24(L.s2,2,mad24(L.s3,-11,mad24(M.s0,108,mad24(M.s1, 36,mad24(M.s2, -8, M.s3 + 64)))))>>7;			//	{ 2, -11, 108, 36, -8, 1 }
@@ -2185,55 +2101,11 @@ __kernel void chroma_interpolate_Hx8_bc(__global uchar *const src_frame, //0
 		O.s2 =      (M.s1 + mad24(M.s2, -8,mad24(M.s3, 36,mad24(R.s0,108,mad24(R.s1,-11, mad24(R.s2,2,64))))))>>7;	//	{ 1, -8, 36, 108, -11, 2 }
 		O.s3 =              mad24(M.s2, -1,mad24(M.s3, 12,mad24(R.s0,123,mad24(R.s1, -6, 64))))>>7;					//	{ 0, -1, 12, 123, -6, 0 }
 			ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-		
+
 		R = M;
 		M = L;
 	}
 	
-	L = M.s0;
-	ind = get_global_id(0)*width_x8;
-	
-	O.s0 =                                   M.s0;																//	{ 0, 0, 128, 0, 0, 0 }, 
-	O.s1 =              mad24(L.s3, -6,mad24(M.s0,123,mad24(M.s1, 12,mad24(M.s2, -1, 64))))>>7;					//	{ 0, -6, 123, 12, -1, 0 }
-	O.s2 = mad24(L.s2,2,mad24(L.s3,-11,mad24(M.s0,108,mad24(M.s1, 36,mad24(M.s2, -8, M.s3 + 64)))))>>7;			//	{ 2, -11, 108, 36, -8, 1 }
-	O.s3 =              mad24(L.s3, -9,mad24(M.s0, 93,mad24(M.s1, 50,mad24(M.s2, -6, 64))))>>7;					//	{ 0, -9, 93, 50, -6, 0 }
-		buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 = mad24(L.s2,3,mad24(L.s3,-16,mad24(M.s0, 77,mad24(M.s1, 77,mad24(M.s2,-16, mad24(M.s3,3,64))))))>>7;	//	{ 3, -16, 77, 77, -16, 3 }
-	O.s1 =              mad24(L.s3, -6,mad24(M.s0, 50,mad24(M.s1, 93,mad24(M.s2, -9, 64))))>>7;					//	{ 0, -6, 50, 93, -9, 0 }
-	O.s2 =      (L.s2 + mad24(L.s3, -8,mad24(M.s0, 36,mad24(M.s1,108,mad24(M.s2,-11, mad24(M.s3,2,64))))))>>7;	//	{ 1, -8, 36, 108, -11, 2 }
-	O.s3 =              mad24(L.s3, -1,mad24(M.s0, 12,mad24(M.s1,123,mad24(M.s2, -6, 64))))>>7;					//	{ 0, -1, 12, 123, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 =                                   M.s1;																//	{ 0, 0, 128, 0, 0, 0 }, 
-	O.s1 =              mad24(M.s0, -6,mad24(M.s1,123,mad24(M.s2, 12,mad24(M.s3, -1, 64))))>>7;					//	{ 0, -6, 123, 12, -1, 0 }
-	O.s2 = mad24(L.s3,2,mad24(M.s0,-11,mad24(M.s1,108,mad24(M.s2, 36,mad24(M.s3, -8, R.s0 + 64)))))>>7;			//	{ 2, -11, 108, 36, -8, 1 }
-	O.s3 =              mad24(M.s0, -9,mad24(M.s1, 93,mad24(M.s2, 50,mad24(M.s3, -6, 64))))>>7;					//	{ 0, -9, 93, 50, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 = mad24(L.s3,3,mad24(M.s0,-16,mad24(M.s1, 77,mad24(M.s2, 77,mad24(M.s3,-16, mad24(R.s0,3,64))))))>>7;	//	{ 3, -16, 77, 77, -16, 3 }
-	O.s1 =              mad24(M.s0, -6,mad24(M.s1, 50,mad24(M.s2, 93,mad24(M.s3, -9, 64))))>>7;					//	{ 0, -6, 50, 93, -9, 0 }
-	O.s2 =      (L.s3 + mad24(M.s0, -8,mad24(M.s1, 36,mad24(M.s2,108,mad24(M.s3,-11, mad24(R.s0,2,64))))))>>7;	//	{ 1, -8, 36, 108, -11, 2 }
-	O.s3 =              mad24(M.s0, -1,mad24(M.s1, 12,mad24(M.s2,123,mad24(M.s3, -6, 64))))>>7;					//	{ 0, -1, 12, 123, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 =                                   M.s2;																//	{ 0, 0, 128, 0, 0, 0 }, 
-	O.s1 =              mad24(M.s1, -6,mad24(M.s2,123,mad24(M.s3, 12,mad24(R.s0, -1, 64))))>>7;					//	{ 0, -6, 123, 12, -1, 0 }
-	O.s2 = mad24(M.s0,2,mad24(M.s1,-11,mad24(M.s2,108,mad24(M.s3, 36,mad24(R.s0, -8, R.s1 + 64)))))>>7;			//	{ 2, -11, 108, 36, -8, 1 }
-	O.s3 =              mad24(M.s1, -9,mad24(M.s2, 93,mad24(M.s3, 50,mad24(R.s0, -6, 64))))>>7;					//	{ 0, -9, 93, 50, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 = mad24(M.s0,3,mad24(M.s1,-16,mad24(M.s2, 77,mad24(M.s3, 77,mad24(R.s0,-16, mad24(R.s1,3,64))))))>>7;	//	{ 3, -16, 77, 77, -16, 3 }
-	O.s1 =              mad24(M.s1, -6,mad24(M.s2, 50,mad24(M.s3, 93,mad24(R.s0, -9, 64))))>>7;					//	{ 0, -6, 50, 93, -9, 0 }
-	O.s2 =      (M.s0 + mad24(M.s1, -8,mad24(M.s2, 36,mad24(M.s3,108,mad24(R.s0,-11, mad24(R.s1,2,64))))))>>7;	//	{ 1, -8, 36, 108, -11, 2 }
-	O.s3 =              mad24(M.s1, -1,mad24(M.s2, 12,mad24(M.s3,123,mad24(R.s0, -6, 64))))>>7;					//	{ 0, -1, 12, 123, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 =                                   M.s3;																//	{ 0, 0, 128, 0, 0, 0 }, 
-	O.s1 =              mad24(M.s2, -6,mad24(M.s3,123,mad24(R.s0, 12,mad24(R.s1, -1, 64))))>>7;					//	{ 0, -6, 123, 12, -1, 0 }
-	O.s2 = mad24(M.s1,2,mad24(M.s2,-11,mad24(M.s3,108,mad24(R.s0, 36,mad24(R.s1, -8, R.s2 + 64)))))>>7;			//	{ 2, -11, 108, 36, -8, 1 }
-	O.s3 =              mad24(M.s2, -9,mad24(M.s3, 93,mad24(R.s0, 50,mad24(R.s1, -6, 64))))>>7;					//	{ 0, -9, 93, 50, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-	O.s0 = mad24(M.s1,3,mad24(M.s2,-16,mad24(M.s3, 77,mad24(R.s0, 77,mad24(R.s1,-16, mad24(R.s2,3,64))))))>>7;	//	{ 3, -16, 77, 77, -16, 3 }
-	O.s1 =              mad24(M.s2, -6,mad24(M.s3, 50,mad24(R.s0, 93,mad24(R.s1, -9, 64))))>>7;					//	{ 0, -6, 50, 93, -9, 0 }
-	O.s2 =      (M.s1 + mad24(M.s2, -8,mad24(M.s3, 36,mad24(R.s0,108,mad24(R.s1,-11, mad24(R.s2,2,64))))))>>7;	//	{ 1, -8, 36, 108, -11, 2 }
-	O.s3 =              mad24(M.s2, -1,mad24(M.s3, 12,mad24(R.s0,123,mad24(R.s1, -6, 64))))>>7;					//	{ 0, -1, 12, 123, -6, 0 }
-		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
-
 	return;	
 }
 
@@ -2247,7 +2119,7 @@ __kernel void chroma_interpolate_Vx8_bc(__global uchar *const frame, //0
 	int width_x8 = width*8;
 	int i, ind;
 	
-	if ((get_global_id(0)*4) > width_x8) return;
+	if ((get_global_id(0)*4) > (width_x8-1)) return;
 	
 	ind = (height-1)*width_x8 + (get_global_id(0)*4);
 	buf = vload4(0, frame + ind);
@@ -2256,11 +2128,13 @@ __kernel void chroma_interpolate_Vx8_bc(__global uchar *const frame, //0
 	A1 = convert_int4(buf);
 	U0 = M; U1 = M; U2 = M;
 	
-	for (i = height-1; i >= 2; --i)
+	for (i = height-1; i >= 0; --i)
 	{
 		ind = (i-2)*width_x8 + (get_global_id(0)*4);
-		buf = vload4(0, frame + ind);
-		A0 = convert_int4(buf);
+		if (i >= 2) { //checking (i > 2) gives compile-error o_O 
+			buf = vload4(0, frame + ind);
+			A0 = convert_int4(buf);
+		}
 		
 		//	{ 0,   0, 128,   0,   0,  0 }, 
 		//	{ 0,  -6, 123,  12,  -1,  0 }
@@ -2270,7 +2144,7 @@ __kernel void chroma_interpolate_Vx8_bc(__global uchar *const frame, //0
 		//	{ 0,  -6,  50,  93,  -9,  0 }
 		//	{ 1,  -8,  36, 108, -11,  2 }
 		//	{ 0,  -1,  12, 123,  -6,  0 }	
-			                                                            ind = (i*8)*width_x8 + (get_global_id(0)*4); buf = convert_uchar4_sat(M); vstore4(buf, 0, frame + ind);
+																		ind = (i*8)*width_x8 + (get_global_id(0)*4); buf = convert_uchar4_sat(M); vstore4(buf, 0, frame + ind);
 		O =            mad24(A1, -6,mad24(M,123,mad24(U0, 12,mad24(U1, -1, 64))))/128;	            ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
 		O = mad24(A0,2,mad24(A1,-11,mad24(M,108,mad24(U0, 36,mad24(U1, -8, U2 + 64)))))/128;        ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
 		O =            mad24(A1, -9,mad24(M, 93,mad24(U0, 50,mad24(U1, -6, 64))))/128;	            ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
@@ -2278,37 +2152,15 @@ __kernel void chroma_interpolate_Vx8_bc(__global uchar *const frame, //0
 		O =            mad24(A1, -6,mad24(M, 50,mad24(U0, 93,mad24(U1, -9, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
 		O =      (A0 + mad24(A1, -8,mad24(M, 36,mad24(U0,108,mad24(U1,-11, mad24(U2,2,64))))))/128; ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
 		O =            mad24(A1, -1,mad24(M, 12,mad24(U0,123,mad24(U1, -6, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-			
+		
 		U2 = U1;
 		U1 = U0;
 		U0 = M;
 		M = A1;
 		A1 = A0;
 	}
-		                                                                ind = width_x8*8 + (get_global_id(0)*4); buf = convert_uchar4_sat(M); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -6,mad24(M,123,mad24(U0, 12,mad24(U1, -1, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O = mad24(A0,2,mad24(A1,-11,mad24(M,108,mad24(U0, 36,mad24(U1, -8, U2 + 64)))))/128;        ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -9,mad24(M, 93,mad24(U0, 50,mad24(U1, -6, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O = mad24(A0,3,mad24(A1,-16,mad24(M, 77,mad24(U0, 77,mad24(U1,-16, mad24(U2,3,64))))))/128; ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -6,mad24(M, 50,mad24(U0, 93,mad24(U1, -9, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =      (A0 + mad24(A1, -8,mad24(M, 36,mad24(U0,108,mad24(U1,-11, mad24(U2,2,64))))))/128; ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -1,mad24(M, 12,mad24(U0,123,mad24(U1, -6, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
 	
-	U2 = U1;
-	U1 = U0;
-	U0 = M;
-	M = A1;
-
-			                                                                         ind = (get_global_id(0)*4); buf = convert_uchar4_sat(M); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -6,mad24(M,123,mad24(U0, 12,mad24(U1, -1, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O = mad24(A0,2,mad24(A1,-11,mad24(M,108,mad24(U0, 36,mad24(U1, -8, U2 + 64)))))/128;        ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -9,mad24(M, 93,mad24(U0, 50,mad24(U1, -6, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O = mad24(A0,3,mad24(A1,-16,mad24(M, 77,mad24(U0, 77,mad24(U1,-16, mad24(U2,3,64))))))/128; ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -6,mad24(M, 50,mad24(U0, 93,mad24(U1, -9, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =      (A0 + mad24(A1, -8,mad24(M, 36,mad24(U0,108,mad24(U1,-11, mad24(U2,2,64))))))/128; ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-	O =            mad24(A1, -1,mad24(M, 12,mad24(U0,123,mad24(U1, -6, 64))))/128;              ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
-
-	return;	
+	return;
 }
 
 __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
@@ -2423,6 +2275,12 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	
 	return;
 }
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 __kernel void chroma_interpolate_Hx8_bl(__global uchar *const src_frame, //0
 										__global uchar *const dst_frame, //1
@@ -2619,3 +2477,13 @@ __kernel void luma_interpolate_Vx4_bl( __global uchar *const frame, //0
 	}
 	return;	
 }
+
+
+
+
+
+
+
+
+
+
