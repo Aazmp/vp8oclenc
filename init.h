@@ -106,13 +106,13 @@ int init_all()
 		device.luma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_transform";
 		device.chroma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_interpolate_Hx4_bl";
+		{ char kernel_name[] = "luma_interpolate_Hx4_bc";
 		device.luma_interpolate_Hx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_interpolate_Vx4_bl";
+		{ char kernel_name[] = "luma_interpolate_Vx4_bc";
 		device.luma_interpolate_Vx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "chroma_interpolate_Hx8_bl";
+		{ char kernel_name[] = "chroma_interpolate_Hx8_bc";
 		device.chroma_interpolate_Hx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "chroma_interpolate_Vx8_bl";
+		{ char kernel_name[] = "chroma_interpolate_Vx8_bc";
 		device.chroma_interpolate_Vx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "simple_loop_filter_MBH";
 		device.simple_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
