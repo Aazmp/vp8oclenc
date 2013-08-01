@@ -1,11 +1,12 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-#pragma OPENCL EXTENSION cl_amd_printf : enable
+//#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef struct {
     short coeffs[25][16];
     int vector_x[4];
     int vector_y[4];
 	float SSIM;
+	int non_zero_coeffs;
 } macroblock;
 
 void weight(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) //Hadamard
@@ -283,7 +284,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	
 	vector_x = 0; vector_y = 0; 
 	//test ZERO vector
-	pi = cy*width_x4 + cx; /*
+	pi = cy*width_x4 + cx; 
 	// block 00
 	const int test_q = ac_q/8 + 4;
 	UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
@@ -349,7 +350,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 		MBs[mb_num].vector_x[b8x8_num] = 0;
 		MBs[mb_num].vector_y[b8x8_num] = 0;
 		return;
-	} */
+	} 
 	
 	start_x = 0; end_x = width_x4 - 20; start_y = 0; end_y = (height*4) - 32;
 	
@@ -2477,13 +2478,3 @@ __kernel void luma_interpolate_Vx4_bl( __global uchar *const frame, //0
 	}
 	return;	
 }
-
-
-
-
-
-
-
-
-
-
