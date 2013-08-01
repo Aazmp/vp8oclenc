@@ -1,4 +1,4 @@
-//a method to define path to OpenCL.lib
+//a way to define path to OpenCL.lib
 #pragma comment(lib,"C:\\Program Files (x86)\\AMD APP\\lib\\x86\\OpenCL.lib")
 
 // all global structure definitions (fileContext, videoContext, deviceContext...)
@@ -73,7 +73,8 @@ void entropy_encode()
 
 	t.start = clock();
 	// start of encoding coefficients 
-	clSetKernelArg(device.encode_coefficients, 9, sizeof(int32_t), &frames.prev_is_key_frame);	
+	clSetKernelArg(device.encode_coefficients, 9, sizeof(int32_t), &frames.prev_is_key_frame);
+	device.state_cpu = clSetKernelArg(device.encode_coefficients, 11, sizeof(int32_t), &frames.skip_prob);
 	clEnqueueNDRangeKernel(device.commandQueue_cpu, device.encode_coefficients, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
 	clFlush(device.commandQueue_cpu); // we don't nedd result until gather_frame(), so no block now
 	t.bool_encode_coeffs += clock() - t.start; // this time means something only if encode_coefficients is blocking (followed by clFinish, not clFlush)
@@ -1254,7 +1255,27 @@ int main(int argc, char *argv[])
     ++frames.frame_number;
     while (get_yuv420_frame() > 0)
     {
+		// searching for MBs to be skipp		frames.skip_prob = 0;
+		int mb_num;
+		for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
+		{
+			frames.transformed_blocks[mb_num].non_zero_coeffs = 0;
+			int b_num, coeff_num;
+			int b_last = 24;
+			int first_coeff = 0;
+			for (b_num = 0; b_num < b_last; ++b_num)
+				for (coeff_num = first_coeff; coeff_num < 16; ++coeff_num)
+					frames.transformed_blocks[mb_num].non_zero_coeffs += (frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num] < 0) ?
+																			-frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num] :	
+																			frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num];
+			if (frames.transformed_blocks[mb_num].non_zero_coeffs > 0) ++frames.skip_prob;
+		}
+		frames.skip_prob *= 256;
+		frames.skip_prob /= video.mb_count;
+		frames.skip_prob = (frames.skip_prob > 254) ? 254 : frames.skip_prob;
+		frames.skip_prob = (frames.skip_prob < 2) ? 2 : frames.skip_prob;
 		device.state_cpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
+		
 		frames.prev_is_key_frame = frames.current_is_key_frame; // for entropy coding of previous frame;
 		--frames.frames_until_key;
 		frames.current_is_key_frame = (frames.frames_until_key < 1);
@@ -1290,7 +1311,7 @@ int main(int argc, char *argv[])
 			// copy transformed_blocks to host
 			device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.transformed_blocks_gpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
 			
-			for(mb_num = 0; mb_num < video.mb_count; ++mb_num)
+			for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
 				frames.e_data[mb_num].is_inter_mb = 1;
 
 			check_SSIM();
@@ -1384,7 +1405,7 @@ void finalize()
 
 	free(frames.input_pack);
 	free(frames.reconstructed_Y);
-    	free(frames.reconstructed_U);
+    free(frames.reconstructed_U);
 	free(frames.reconstructed_V);
 	free(frames.last_U);
 	free(frames.last_V);
