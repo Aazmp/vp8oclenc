@@ -53,6 +53,7 @@ typedef struct {
     int32_t vector_x[4];
     int32_t vector_y[4];
 	float SSIM;
+	int32_t non_zero_coeffs;
 } macroblock;
 typedef struct 
 {
@@ -226,6 +227,7 @@ struct hostFrameBuffers
     uint8_t *current_frame_pos_in_pack;
     int32_t current_is_key_frame;
 	int32_t prev_is_key_frame;
+	int32_t skip_prob;
 	float new_SSIM;
 	
 	int32_t partition_sizes[8];
