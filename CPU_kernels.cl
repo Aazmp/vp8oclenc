@@ -1,4 +1,5 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+//#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef short int16_t;
 typedef int int32_t;
@@ -14,11 +15,12 @@ typedef struct {
     int16_t coeffs[25][16];
     int32_t vector_x[4];
     int32_t vector_y[4];
-    float SSIM;
+	float SSIM;
+	int non_zero_coeffs;
 } macroblock;
 
 typedef struct {
-  __global uint8_t *output; /* ptr to next byte to be written */
+	__global uint8_t *output; /* ptr to next byte to be written */
 	uint32_t range; /* 128 <= range <= 255 */
 	uint32_t bottom; /* minimum value of remaining output */
 	int32_t bit_count; /* # of shifts before an output byte is available */
@@ -308,7 +310,8 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 									int mb_width, 
 									int num_partitions,
 									int key_frame,
-									int partition_step)
+									int partition_step,
+									int skip_prob)
 {
 	int part_num = get_global_id(0);
 	int mb_row, mb_num, mb_col, b_num;
@@ -326,6 +329,8 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
 		{
 			mb_num = mb_col + mb_row * mb_width;
+			if (MBs[mb_num].non_zero_coeffs == 0) 
+				continue;
 			if (has_Y2)
 			{
 				first_context = 1; // for Y2
@@ -524,8 +529,9 @@ __kernel void count_probs(	__global macroblock *MBs,
 	{
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
 		{
-			
 			mb_num = mb_col + mb_row * mb_width;
+			if (MBs[mb_num].non_zero_coeffs == 0) 
+				continue;
 			if (has_Y2)
 			{
 				first_context = 1; // for Y2
@@ -714,3 +720,6 @@ __kernel void num_div_denom(__global uint *coeff_probs,
 	return;
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
