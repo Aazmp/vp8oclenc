@@ -73,7 +73,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.0";
+		const char gpu_options[] = "-cl-std=CL1.2 -cl-opt-disable";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -395,7 +395,8 @@ int init_all()
 											int mb_width, - 7
 											int num_partitions, - 8
 											int key_frame, - 9
-											int partition_step) - 10 */
+											int partition_step, - 10
+											int skip_prob) - 11 */
 	
 	device.state_cpu = clSetKernelArg(device.encode_coefficients, 0, sizeof(cl_mem), &device.transformed_blocks_cpu);
 	device.state_cpu = clSetKernelArg(device.encode_coefficients, 1, sizeof(cl_mem), &device.partitions);
@@ -409,6 +410,7 @@ int init_all()
 	// 9 before launch each time
 	video.partition_step = video.partition_step / video.number_of_partitions;
 	device.state_cpu = clSetKernelArg(device.encode_coefficients, 10, sizeof(int32_t), &video.partition_step);
+	// 10 different for each frame
 
 	/*__kernel void count_probs(	__global macroblock *MBs, - 0
 									__global uint *coeff_probs, - 1
