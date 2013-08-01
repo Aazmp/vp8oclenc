@@ -846,10 +846,10 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     /*  end of token_prob_update() block */
 
     /*  mb_no_skip_coeff                                | L(1)  | */
-    write_flag(vbe, 0); // do not skip any macroblocks
     /*  if (mb_no_skip_coeff)                           |       |
     |       prob_skip_false                             | L(8)  | */
-    // no skipping -> no probability
+	write_flag(vbe, 1);
+	write_literal(vbe, frames.skip_prob, 8);
 
 	/*  if (!key_frame) {                               |       |*/
 	if (!frames.prev_is_key_frame)
@@ -949,7 +949,9 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 
         /*  if (mb_no_skip_coeff)                       |       |
         |       mb_skip_coeff                           | B(p)  | */
-        // do not skip no non-zero MBs
+		if (frames.transformed_blocks[mb_num].non_zero_coeffs != 0) 
+			write_bool(vbe, frames.skip_prob, 0);
+		else write_bool(vbe, frames.skip_prob, 1);
 
         /*  if (!key_frame)                             |       |
         |       is_inter_mb                             | B(p)  | */
