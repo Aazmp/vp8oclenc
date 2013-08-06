@@ -5,7 +5,7 @@ upd: found problem (DCT order), bicubic filter is alright and set as main (for b
 
 upd2: added skipping macroblocks with only zero coefficients
 
-upd3: there is maybe an error in loop filter (visible with hight quantizers as brightly colored blocks; even with loop filter level == 1, but not with 0)
+upd3: there is maybe an error in loop filter (visible with high quantizers as brightly colored blocks; even with loop filter level == 1, but not with 0)
 
 
 
