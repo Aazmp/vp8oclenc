@@ -332,7 +332,7 @@ int init_all()
 												const int width, // 1
 												const int mbedge_limit, // 2
 												const int sub_edge_limit, // 3
-												const int mb_col) // 4 */
+												const int stage) // 4 */
 
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 1, sizeof(int32_t), &video.wrk_width);
@@ -342,7 +342,7 @@ int init_all()
 												const int width, // 1
 												const int mbedge_limit, // 2
 												const int sub_edge_limit, // 3
-												const int mb_col) // 4 */
+												const int stage) // 4 */
 
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 1, sizeof(int32_t), &video.wrk_width);
@@ -354,7 +354,7 @@ int init_all()
 												const int interior_limit, //4
 												const int hev_threshold, //5
 												const int mb_size, //6
-												const int mb_col) //7 */
+												const int stage) //7 */
 
 		// no params at init time
 
@@ -365,7 +365,7 @@ int init_all()
 												const int interior_limit, //4
 												const int hev_threshold, //5
 												const int mb_size, //6
-												const int mb_col) //7 */
+												const int stage) //7 */
 
 		// no params at init time
 
