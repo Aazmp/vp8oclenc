@@ -565,7 +565,7 @@ int chroma_corrupted(uint8_t* frame1, int32_t width1, uint8_t *frame2, int32_t w
 			sum2 += (int)frame2[i*width2 + j];
 	sum1 = sum1 - sum2;
 	sum1 = (sum1 < 0) ? -sum1 : sum1;
-	sum1 = (sum1 > 2560); // divide by 256 to get average
+	sum1 = (sum1 > 2560); 
 	return sum1; 
 }
 
@@ -801,11 +801,11 @@ void do_loop_filter()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 4, sizeof(int32_t), &video.interior_limit);
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 5, sizeof(int32_t), &video.hev_threshold);
-		int32_t mb_col, mb_size, plane_width;
-		for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
+		int32_t stage, mb_size, plane_width;
+		for (stage = 0; stage <= ((video.mb_width - 1) + 2*(video.mb_height-1)); ++stage) 
 		{
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 7, sizeof(int32_t), &mb_col);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 7, sizeof(int32_t), &mb_col);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 7, sizeof(int32_t), &stage);
+			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 7, sizeof(int32_t), &stage);
 			device.gpu_work_group_size_per_dim[0] = 64; 
 
 			device.gpu_work_items_per_dim[0] = video.mb_height*16;
@@ -867,11 +867,11 @@ void do_loop_filter()
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 3, sizeof(int32_t), &video.sub_bedge_limit);
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 2, sizeof(int32_t), &video.mbedge_limit);
 		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 3, sizeof(int32_t), &video.sub_bedge_limit);
-		int32_t mb_col;
-		for (mb_col = 0; mb_col < video.mb_width; ++mb_col) 
+		int32_t stage;
+		for (stage = 0; stage <= ((video.mb_width - 1) + 2*(video.mb_height-1)); ++stage) 
 		{
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 4, sizeof(int32_t), &mb_col);
-			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 4, sizeof(int32_t), &mb_col);
+			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 4, sizeof(int32_t), &stage);
+			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 4, sizeof(int32_t), &stage);
 			
 			device.gpu_work_items_per_dim[0] = video.mb_height*16;
 			device.gpu_work_group_size_per_dim[0] = 64; 
