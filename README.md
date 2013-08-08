@@ -1,12 +1,7 @@
 vp8oclenc
 =========
 
-upd: found problem (DCT order), bicubic filter is alright and set as main (for bilinear edit clCreateKernel and version in header)
-
-upd2: added skipping macroblocks with only zero coefficients
-
-upd3: there is maybe an error in loop filter (visible with high quantizers as brightly colored blocks; even with loop filter level == 1, but not with 0)
-
+upd: using loop filter (any level) and intrA-codded blocks in intEr frames results in colorful artifacts. Using only intrA blocks or only loop filter doesn't produce visible artifacts. The higher quantizer the more visible artifacts. Searching for problem (order seems correct - filter is being used on fully decoded frame).
 
 
 main:
