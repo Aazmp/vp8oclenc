@@ -36,8 +36,7 @@ No benchmarks, because there is no need in them :)
 Quality of material can't compete with any good encoder of any standard.
 It's just bad now.
 No adaptive quant even on frame level.
-No skipping macroblocks.
-Fixed GOP size, only one reference frame - last one.
+Only one reference frame - last one.
 Fixed size of blocks for ME - 8x8
 MV search - full search (but for GPU it's not that bad)
 Encoding is very straightforward, no crafty methods at all.
