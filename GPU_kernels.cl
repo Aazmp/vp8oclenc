@@ -1,5 +1,5 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-//#pragma OPENCL EXTENSION cl_amd_printf : enable
+#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef struct {
     short coeffs[25][16];
@@ -966,11 +966,19 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 									const int width,
 									const int mbedge_limit,
 									const int sub_bedge_limit,
-									const int mb_col)
+									const int stage)
 {
 	int x, y, i, nf;
 	uchar4 L, R;
 	int a, b;
+	
+	int mb_col, mb_row;
+	
+	mb_row = get_global_id(0)/16;
+	mb_col = stage - (2*mb_row);
+	
+	if (mb_col < 0) return;
+	if (mb_col >= (width/16)) return;
 	
 	y = get_global_id(0);
 	x = mb_col * 16;
@@ -1110,11 +1118,19 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 									const int width,
 									const int mbedge_limit,
 									const int sub_bedge_limit,
-									const int mb_col)
+									const int stage)
 {
 	int x, y, i;
 	uchar4 U2, U3, D0, D1; 
 	int4 a, b, nf, one = 1, zero = 0;
+	
+	int mb_row, mb_col;
+	
+	mb_row = get_global_id(0)/4;
+	mb_col = stage - (2*mb_row);
+	
+	if (mb_col < 0) return;
+	if (mb_col >= (width/16)) return;
 	
 	y = (get_global_id(0)/4)*16;
 	x = mad24((int)mb_col, (int)16, (int)(get_global_id(0)%4)*4);
@@ -1286,7 +1302,7 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 									const int interior_limit, //4
 									const int hev_threshold, //5
 									const int mb_size, //6
-									const int mb_col) //7
+									const int stage) //7
 {
 	int x, y, i;
 	uchar4 L, R;
@@ -1294,6 +1310,13 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	int a, b, w;
 	int filter_yes;
 	int hev;
+	int mb_col, mb_row;
+	
+	mb_row = get_global_id(0)/mb_size;
+	mb_col = stage - (2*mb_row);
+	
+	if (mb_col < 0) return;
+	if (mb_col >= (width/mb_size)) return;
 	
 	y = get_global_id(0);
 	x = mb_col * mb_size;
@@ -1498,7 +1521,7 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 									const int interior_limit, //4
 									const int hev_threshold, //5
 									const int mb_size, //6
-									const int mb_col) //7
+									const int stage) //7
 {
 	int x, y, i;
 	// these in usual forward order (U1 lower than U0):
@@ -1508,6 +1531,13 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	int4 a, b, w;
 	int4 filter_yes;
 	int4 hev;
+	int mb_row, mb_col;
+	
+	mb_row = get_global_id(0)/(mb_size/4);
+	mb_col = stage - (2*mb_row);
+	
+	if (mb_col < 0) return;
+	if (mb_col >= (width/mb_size)) return;
 	
 	y = (get_global_id(0)/(mb_size/4))*mb_size;
 	x = mad24((int)mb_col, mb_size, (int)(get_global_id(0)%(mb_size/4))*4);
@@ -2478,3 +2508,4 @@ __kernel void luma_interpolate_Vx4_bl( __global uchar *const frame, //0
 	}
 	return;	
 }
+
