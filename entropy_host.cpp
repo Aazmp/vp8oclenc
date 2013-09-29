@@ -698,7 +698,8 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	/*  filter_type                                     | L(1)  | */
 	write_flag(vbe, video.loop_filter_type);
     /*  loop_filter_level                               | L(6)  | */
-	write_literal(vbe, video.loop_filter_level, 6);
+	{ int32_t lpf = video.loop_filter_level;//(frames.prev_is_key_frame != 0) ? 0 : video.loop_filter_level;
+	write_literal(vbe, lpf, 6); }
     /*  sharpness_level                                 | L(3)  | */
 	write_literal(vbe, video.loop_filter_sharpness, 3);
 
@@ -839,8 +840,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
         for (j = 0; j < 8; j++)
             for (k = 0; k < 3; k++)
 				for (l = 0; l < 11; l++) {
-					write_bool(vbe, coeff_update_probs[i][j][k][l], 1); 
-					write_literal(vbe, frames.new_probs[i][j][k][l], 8);
+					if (frames.new_probs_denom[i][j][k][l] < 2) 
+						write_bool(vbe, coeff_update_probs[i][j][k][l], 0); 
+					else {
+						write_bool(vbe, coeff_update_probs[i][j][k][l], 1); 
+						write_literal(vbe, frames.new_probs[i][j][k][l], 8);
+					}
 				}
 	}
     /*  end of token_prob_update() block */
