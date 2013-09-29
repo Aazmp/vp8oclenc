@@ -1,17 +1,17 @@
 // string to print when "-h" option is met
 char small_help[] = "\n"
-					"-i\t:\tinput file path\n"
-					"-o\t:\toutput file path\n"
-					"-qi\t:\tquantizer index, one for all intra-color planes\n"
-					"-qp\t:\tquantizer index, one for all inter-color planes\n"
-					"-g\t:\tGroup of Pictures size\n"
-					"-w\t:\tamount of work-items on gpu launched simutaneosly\n"
-					"-t\t:\tamount of partitions for boolean encoding (also threads launched at once)\n"
-					"-vx\t:\tmaximum distance for X vector search (in 1/4 pixels)\n"
-					"-vy\t:\tmaximum distance for Y vector search (in 1/4 pixels)\n"
-					"-lt\t:\tloop filter type (0 - normal; 1 - simple)\n"
-					"-ll\t:\tloop filter level (0 - disable)\n"
-					"-ls\t:\tloop filter sharpness\n"
+					"-i\t:  input file path\n"
+					"-o\t:  output file path\n"
+					"-qi\t:  quantizer index, one for all intra-color planes\n"
+					"-qp\t:  quantizer index, one for all inter-color planes\n"
+					"-g\t:  Group of Pictures size\n"
+					"-w\t:  amount of work-items on gpu launched simutaneosly\n"
+					"-t\t:  amount of partitions for boolean encoding (also threads launched at once)\n"
+					"-vx\t:  maximum distance for X vector search (in 1/4 pixels)\n"
+					"-vy\t:  maximum distance for Y vector search (in 1/4 pixels)\n"
+					"-lt\t:  loop filter type (0 - normal; 1 - simple)\n"
+					"-ll\t:  loop filter level (0 - disable)\n"
+					"-ls\t:  loop filter sharpness\n"
 					"\n\n"
 					;
 
@@ -127,7 +127,7 @@ int init_all()
 	}
 	// CPU:
 	printf("reading CPU program...\n");
-	const char cpu_options[] = "-cl-std=CL1.0";
+	const char cpu_options[] = "-cl-std=CL1.0 -cl-opt-disable";
 	program_handle = fopen(CPUPATH, "rb");
 	fseek(program_handle, 0, SEEK_END);
 	program_size = ftell(program_handle);
