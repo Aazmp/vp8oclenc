@@ -46,7 +46,6 @@ void zigzag_block(int16_t *block)
 
 static const int cospi8sqrt2minus1=20091;
 static const int sinpi8sqrt2 =35468;
-
 extern void encode_header(uint8_t* partition);
 
 void entropy_encode()
@@ -70,13 +69,23 @@ void entropy_encode()
 
 	// read calculated values
 	clEnqueueReadBuffer(device.commandQueue_cpu, device.coeff_probs ,CL_TRUE, 0, 11*3*8*4*sizeof(uint32_t), frames.new_probs, 0, NULL, NULL);
+	clEnqueueReadBuffer(device.commandQueue_cpu, device.coeff_probs_denom ,CL_TRUE, 0, 11*3*8*4*sizeof(uint32_t), frames.new_probs_denom, 0, NULL, NULL);
+	{ int i,j,k,l;
+	for (i = 0; i < 4; ++i)
+		for (j = 0; j < 8; ++j)
+			for (k = 0; k < 3; ++k)
+				for (l = 0; l < 11; ++l)
+					if (frames.new_probs_denom[i][j][k][l] < 2) // this situation never happened (no bit encoded with this context)
+						frames.new_probs[i][j][k][l] = k_default_coeff_probs[i][j][k][l];
+	}
+	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_cpu, device.coeff_probs, CL_TRUE, 0, 11*3*8*4*sizeof(uint32_t), frames.new_probs, 0, NULL, NULL);
 
 	t.start = clock();
 	// start of encoding coefficients 
 	clSetKernelArg(device.encode_coefficients, 9, sizeof(int32_t), &frames.prev_is_key_frame);
 	device.state_cpu = clSetKernelArg(device.encode_coefficients, 11, sizeof(int32_t), &frames.skip_prob);
 	clEnqueueNDRangeKernel(device.commandQueue_cpu, device.encode_coefficients, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
-	clFlush(device.commandQueue_cpu); // we don't nedd result until gather_frame(), so no block now
+	clFlush(device.commandQueue_cpu); // we don't need result until gather_frame(), so no block now
 	t.bool_encode_coeffs += clock() - t.start; // this time means something only if encode_coefficients is blocking (followed by clFinish, not clFlush)
 
 	t.start = clock();
@@ -777,7 +786,7 @@ void do_loop_filter()
 	if (video.loop_filter_type == 0) // normal
 	{
 		video.hev_threshold = 0;
-		if (frames.prev_is_key_frame) /* current frame is a key frame */
+		if (frames.prev_is_key_frame) 
 		{
 			if (video.loop_filter_level >= 40)
 				video.hev_threshold = 2;
@@ -802,11 +811,10 @@ void do_loop_filter()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 4, sizeof(int32_t), &video.interior_limit);
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 5, sizeof(int32_t), &video.hev_threshold);
 		int32_t stage, mb_size, plane_width;
-		for (stage = 0; stage <= ((video.mb_width - 1) + 2*(video.mb_height-1)); ++stage) 
+		for (stage = 0; stage < (video.mb_width + (video.mb_height-1)*2); ++stage) 
 		{
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 7, sizeof(int32_t), &stage);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 7, sizeof(int32_t), &stage);
-			device.gpu_work_group_size_per_dim[0] = 64; 
 
 			device.gpu_work_items_per_dim[0] = video.mb_height*16;
 			mb_size = 16;
@@ -814,7 +822,7 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFlush(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
@@ -824,12 +832,12 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(int32_t), &mb_size);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFlush(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
@@ -840,7 +848,7 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFlush(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
@@ -850,12 +858,12 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(int32_t), &mb_size);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 1, sizeof(int32_t), &plane_width);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFlush(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
@@ -874,14 +882,13 @@ void do_loop_filter()
 			device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 4, sizeof(int32_t), &stage);
 			
 			device.gpu_work_items_per_dim[0] = video.mb_height*16;
-			device.gpu_work_group_size_per_dim[0] = 64; 
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 
 			device.gpu_work_items_per_dim[0] = video.mb_height*4;
-			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+			device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.simple_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
@@ -900,13 +907,13 @@ void interpolate()
 	device.gpu_work_items_per_dim[0] = video.wrk_height;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_interpolate_Hx4, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (device.state_gpu != 0)  printf(">error when interpolating luma horizontally : %d", device.state_gpu);
-	device.state_gpu = clFinish(device.commandQueue_gpu);
+	device.state_gpu = clFlush(device.commandQueue_gpu);
 	device.gpu_work_items_per_dim[0] = video.wrk_height/2;
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 1, sizeof(cl_mem), &device.last_frame_U);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Hx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (device.state_gpu != 0)  printf(">error when interpolating U-chroma horizontaly : %d", device.state_gpu);
-	device.state_gpu = clFinish(device.commandQueue_gpu);
+	device.state_gpu = clFlush(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Hx8, 1, sizeof(cl_mem), &device.last_frame_V);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Hx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
@@ -916,11 +923,11 @@ void interpolate()
 	device.gpu_work_items_per_dim[0] = video.wrk_width;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_interpolate_Vx4, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (device.state_gpu != 0)  printf(">error when interpolating luma vertically : %d", device.state_gpu);
-	device.state_gpu = clFinish(device.commandQueue_gpu);
+	device.state_gpu = clFlush(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 0, sizeof(cl_mem), &device.last_frame_U);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Vx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (device.state_gpu != 0)  printf(">error when interpolating U-chroma vertically : %d", device.state_gpu);
-	device.state_gpu = clFinish(device.commandQueue_gpu);
+	device.state_gpu = clFlush(device.commandQueue_gpu);
 	device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 0, sizeof(cl_mem), &device.last_frame_V);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.chroma_interpolate_Vx8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (device.state_gpu != 0)  printf(">error when interpolating V-chroma vertically : %d", device.state_gpu);
@@ -943,7 +950,7 @@ void correct_quant_indexes()
 	video.quantizer_index_y2_dc_p_c = video.quantizer_index_y2_dc_p;
 	video.quantizer_index_y2_ac_p_c = video.quantizer_index_y2_ac_p;
 	video.quantizer_index_uv_dc_p_c = video.quantizer_index_uv_dc_p;
-	video.quantizer_index_uv_ac_p_c = video.quantizer_index_uv_ac_p;
+	video.quantizer_index_uv_ac_p_c = video.quantizer_index_uv_ac_p; return;
 
 	// smoothing quant values in 3 steps frop P-frame to I-frame
 	if (frames.frames_until_key < 4)
@@ -997,7 +1004,7 @@ void inter_transform()
 {
 	clFinish(device.commandQueue_gpu);
 
-	if (video.loop_filter_level > 0) 
+	if (video.loop_filter_level > 0)
 		do_loop_filter();
 
 	interpolate();
@@ -1155,7 +1162,6 @@ void check_SSIM()
 
 	frames.new_SSIM = 0;
 	float min = 2;
-	float max = -2;
 	int mb_num;
 	frames.replaced = 0;
 	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
@@ -1164,7 +1170,6 @@ void check_SSIM()
 			frames.e_data[mb_num].is_inter_mb = test_inter_on_intra(mb_num);
 		frames.new_SSIM += frames.transformed_blocks[mb_num].SSIM;
 		min = (frames.transformed_blocks[mb_num].SSIM < min) ? frames.transformed_blocks[mb_num].SSIM : min;
-		max = (frames.transformed_blocks[mb_num].SSIM > max) ? frames.transformed_blocks[mb_num].SSIM : max;
 	}
 	if (frames.replaced > 0)
 	{
@@ -1174,7 +1179,7 @@ void check_SSIM()
 	}
 
 	frames.new_SSIM /= (float)video.mb_count;
-	printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f; MaxSSIM=%f I:%d\n", frames.frame_number, frames.new_SSIM, min, max, frames.replaced);
+	printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f; replaced:%d\n", frames.frame_number, frames.new_SSIM, min, frames.replaced);
 	return;
 }
 
@@ -1255,7 +1260,7 @@ int main(int argc, char *argv[])
     ++frames.frame_number;
     while (get_yuv420_frame() > 0)
     {
-		// searching for MBs to be skipp		frames.skip_prob = 0;
+		// searching for MBs to be skiped 
 		int mb_num;
 		for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
 		{
@@ -1306,6 +1311,7 @@ int main(int argc, char *argv[])
 			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.current_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
             
 			correct_quant_indexes();
+			// entropy coding is enqueued in inter_transform() after search for vectors
 			inter_transform(); 
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			// copy transformed_blocks to host
