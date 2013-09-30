@@ -1,8 +1,7 @@
 vp8oclenc
 =========
 
-upd: using loop filter (any level) and intrA-codded blocks in intEr frames results in colorful artifacts. Using only intrA blocks or only loop filter doesn't produce visible artifacts. The higher quantizer the more visible artifacts. Searching for problem (order seems correct - filter is being used on fully decoded frame).
-
+upd: normal filter now works. Also only involved coefficient probabilities updated now
 
 main:
 
@@ -39,6 +38,5 @@ No adaptive quant even on frame level.
 Only one reference frame - last one.
 Fixed size of blocks for ME - 8x8
 MV search - full search (but for GPU it's not that bad)
-Encoding is very straightforward, no crafty methods at all.
-Just a toy :)
+Encoding is very straightforward, no crafty methods at all
 
