@@ -7,10 +7,7 @@ char small_help[] = "\n"
 					"-g\t:  Group of Pictures size\n"
 					"-w\t:  amount of work-items on gpu launched simutaneosly\n"
 					"-t\t:  amount of partitions for boolean encoding (also threads launched at once)\n"
-					"-vx\t:  maximum distance for X vector search (in 1/4 pixels)\n"
-					"-vy\t:  maximum distance for Y vector search (in 1/4 pixels)\n"
 					"-lt\t:  loop filter type (0 - normal; 1 - simple)\n"
-					"-ll\t:  loop filter level (0 - disable)\n"
 					"-ls\t:  loop filter sharpness\n"
 					"\n\n"
 					;
@@ -73,7 +70,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.2 -cl-opt-disable";
+		const char gpu_options[] = "-cl-std=CL1.2";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -100,8 +97,14 @@ int init_all()
 			fclose(error_file.handle);
 			return device.state_gpu;
 		}
-		{ char kernel_name[] = "luma_search";
-		device.luma_search = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "reset_vectors";
+		device.reset_vectors = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "luma_search_1step";
+		device.luma_search_1step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "luma_search_2step";
+		device.luma_search_2step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "downsample_x2";
+		device.downsample = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_transform";
 		device.luma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_transform";
@@ -127,7 +130,7 @@ int init_all()
 	}
 	// CPU:
 	printf("reading CPU program...\n");
-	const char cpu_options[] = "-cl-std=CL1.0 -cl-opt-disable";
+	const char cpu_options[] = "-cl-std=CL1.0";
 	program_handle = fopen(CPUPATH, "rb");
 	fseek(program_handle, 0, SEEK_END);
 	program_size = ftell(program_handle);
@@ -216,15 +219,25 @@ int init_all()
 
 	if (video.GOP_size > 1) {
 		device.current_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
 		device.current_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.current_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		device.last_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 16*video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		device.last_frame_Y_interpolated = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 16*video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
 		device.last_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.last_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.reconstructed_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		device.reconstructed_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.reconstructed_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		device.transformed_blocks_gpu = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_gpu);
+		device.vnet1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
+		device.vnet2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
 	}
 	device.transformed_blocks_cpu = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_cpu);
 	device.partitions = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.partition_step, NULL , &device.state_cpu);
@@ -234,40 +247,60 @@ int init_all()
 	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(uint32_t), NULL , &device.state_cpu);
 
 	if (video.GOP_size > 1) {
-	/*__kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
-		void luma_search( 	__global uchar *const current_frame, //0
+		/*__kernel void reset_vectors ( __global macroblock *const MBs) //0*/
+
+		/*__kernel void downsample(__global uchar *const src_frame, //0
+							__global uchar *const dst_frame, //1
+							const signed int src_width, //2
+							const signed int src_height) //3*/
+		// all parameters variable
+
+		/*__kernel void luma_search_1step //when looking into downsampled and original frames
+						( 	__global uchar *const current_frame, //0
 							__global uchar *const prev_frame, //1
-							__global macroblock *const MBs, //2
-							const signed int width, //3
-							const signed int height, //4
-							const signed int first_MBlock_offset, //5
-							const int deltaX, //6
-							const int deltaY, //7
+							__global vector_net *const src_net, //2
+							__global vector_net *const dst_net, //3
+							const signed int net_width, //4 //in 8x8 blocks
+							const signed int width, //5
+							const signed int height, //6
+							const signed int pixel_rate, //7
 							const int dc_q, //8
 							const int ac_q) //9*/
 
-		device.state_gpu = clSetKernelArg(device.luma_search, 0, sizeof(cl_mem), &device.current_frame_Y);
-	    device.state_gpu = clSetKernelArg(device.luma_search, 1, sizeof(cl_mem), &device.last_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_search, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.luma_search, 3, sizeof(int32_t), &video.wrk_width);
-		device.state_gpu = clSetKernelArg(device.luma_search, 4, sizeof(int32_t), &video.wrk_height);
-		// first_block_offset will be variable on kernel launch
-		device.state_gpu = clSetKernelArg(device.luma_search, 6, sizeof(int32_t), &video.max_X_vector_length);
-		device.state_gpu = clSetKernelArg(device.luma_search, 7, sizeof(int32_t), &video.max_Y_vector_length);
+		//frames and nets are set according to downsampling rate
+		int32_t net_width = video.mb_width*2;
+		device.state_gpu = clSetKernelArg(device.luma_search_1step, 4, sizeof(int32_t), &net_width);
+		// sizes, pixel_rate and quantizers will be variable on kernel launch
+
+		/*__kernel void luma_search_2step //searching in interpolated picture
+						( 	__global uchar *const current_frame, //0
+							__global uchar *const prev_frame, //1
+							__global vector_net *const net, //2
+							__global macroblock *const MBs, //3
+							const signed int width, //4
+							const signed int height, //5
+							const int dc_q, //6
+							const int ac_q) //7*/
+
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 0, sizeof(cl_mem), &device.current_frame_Y);
+	    device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.last_frame_Y_interpolated);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.vnet2);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 5, sizeof(int32_t), &video.wrk_height);
 
 		/*___kernel void luma_transform(__global uchar *current_frame, //0
 										__global uchar *recon_frame, //1
 										__global uchar *prev_frame, //2
 										__global macroblock *MBs, //3
 										signed int width, //4
-										signed int first_MBlock_offset, //5
-										int dc_q, //6
-										int ac_q) //7*/
+										int dc_q, //5
+										int ac_q) //6*/
 
 
 		device.state_gpu = clSetKernelArg(device.luma_transform, 0, sizeof(cl_mem), &device.current_frame_Y);
 	    device.state_gpu = clSetKernelArg(device.luma_transform, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_transform, 2, sizeof(cl_mem), &device.last_frame_Y);
+		device.state_gpu = clSetKernelArg(device.luma_transform, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_transform, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.luma_transform, 4, sizeof(int32_t), &video.wrk_width);
 		// first_block_offset will be variable on kernel launch
@@ -297,7 +330,7 @@ int init_all()
 										const int height) //3*/
 
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 1, sizeof(cl_mem), &device.last_frame_Y);
+		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 1, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 2, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Hx4, 3, sizeof(int32_t), &video.wrk_height);
 
@@ -305,7 +338,7 @@ int init_all()
 										const int width, //1
 										const int height) //2*/
 
-		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 0, sizeof(cl_mem), &device.last_frame_Y);
+		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 0, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 1, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_interpolate_Vx4, 2, sizeof(int32_t), &video.wrk_height);
 
@@ -460,7 +493,7 @@ int string_to_value(char *str)
 
 int ParseArgs(int argc, char *argv[])
 {
-    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_vx = 0, f_vy = 0, f_lt = 0, f_ll = 0, f_ls = 0; 
+    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_lt = 0, f_ls = 0; 
 	int i,ii;
     i = 1;
     while (i < argc)
@@ -624,48 +657,6 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
-            if ((argv[i][1] == 'v') && (argv[i][2] == 'x') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.max_X_vector_length = string_to_value(argv[i]);
-					if (video.max_X_vector_length < 0)
-					{
-						printf ("wrong max X vector length format! must be an integer from 0 to 511;\n");
-						return -1;
-					}
-					video.max_X_vector_length = (video.max_X_vector_length > 511) ? 511 : video.max_X_vector_length;
-                    f_vx = 1;
-					++i;
-                }
-                else
-                {
-                    printf ("no value X vector length;\n");
-                    return -1;
-                }
-            }
-			if ((argv[i][1] == 'v') && (argv[i][2] == 'y') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.max_Y_vector_length = string_to_value(argv[i]);
-					if (video.max_Y_vector_length < 0)
-					{
-						printf ("wrong max X vector length format! must be an integer from 0 to 511;\n");
-						return -1;
-					}
-					video.max_Y_vector_length = (video.max_Y_vector_length > 511) ? 511 : video.max_Y_vector_length;
-                    f_vy = 1;
-					++i;
-                }
-                else
-                {
-                    printf ("no value Y vector length;\n");
-                    return -1;
-                }
-            }
 			if ((argv[i][1] == 'l') && (argv[i][2] == 't') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
             {
                 ++i;
@@ -683,27 +674,6 @@ int ParseArgs(int argc, char *argv[])
                 else
                 {
                     printf ("no value for loop_filter_type;\n");
-                    return -1;
-                }
-            }
-			if ((argv[i][1] == 'l') && (argv[i][2] == 'l') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.loop_filter_level = string_to_value(argv[i]);
-					if (video.loop_filter_level < 0)
-					{
-						printf ("wrong format for loop_filter_level! must be an integer from 0 to 63;\n");
-						return -1;
-					} else 
-						video.loop_filter_level = (video.loop_filter_level > 63) ? 63 : video.loop_filter_level;
-                    f_ll = 1;
-					++i;
-                }
-                else
-                {
-                    printf ("no value for loop_filter_level;\n");
                     return -1;
                 }
             }
@@ -735,7 +705,6 @@ int ParseArgs(int argc, char *argv[])
 			return -1;
 		}
 	}
-
     if (f_i == 0)
     {
 		printf("no input file specified;\n");
@@ -781,25 +750,10 @@ int ParseArgs(int argc, char *argv[])
 		printf("no amount of work items on CPU specified - set to 4;\n");
 		video.number_of_partitions = 4;
     }
-	if (f_vx == 0)
-    {
-		printf("no max X vector length specified - set to 0;\n");
-		video.max_X_vector_length = 0;
-    }
-	if (f_vy == 0)
-    {
-		printf("no max Y vector length specified - set to 0;\n");
-		video.max_Y_vector_length = 0;
-    }
 	if (f_lt == 0)
     {
 		printf("no loop filter type is specified - set to 0 (no normal);\n");
 		video.loop_filter_type = 0;
-    }
-	if (f_ll == 0)
-    {
-		printf("no loop filter level is specified - set to 0 (no filtering);\n");
-		video.loop_filter_level = 0;
     }
 	if (f_ls == 0)
     {
