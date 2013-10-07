@@ -140,7 +140,6 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
 	// Y(Row) goes first and uses mvc[0]
 
 	abs_v = (v.d.y < 0) ? (-v.d.y) : v.d.y; // sign and absolute value encoded
-	if (abs_v > 511) printf("found too large Y vector (>511) possible corruption...\n");
 	if (abs_v <= 7)
 	{
 		write_bool(vbe, mvc[0][IS_SHORT], 0); //according to spec-decoder flag '0' for a short range
@@ -179,7 +178,6 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
 
 	// X(Collumn) goes next and uses mvc[1]
 	abs_v = (v.d.x < 0) ? (-v.d.x) : v.d.x; // sign and absolute value encoded
-	if (abs_v > 511) printf("found too large X vector (>511) possible corruption...\n");
 	if (abs_v <= 7)
 	{
 		write_bool(vbe, mvc[1][IS_SHORT], 0); 
@@ -698,8 +696,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	/*  filter_type                                     | L(1)  | */
 	write_flag(vbe, video.loop_filter_type);
     /*  loop_filter_level                               | L(6)  | */
-	{ int32_t lpf = video.loop_filter_level;//(frames.prev_is_key_frame != 0) ? 0 : video.loop_filter_level;
-	write_literal(vbe, lpf, 6); }
+	write_literal(vbe, video.loop_filter_level, 6);
     /*  sharpness_level                                 | L(3)  | */
 	write_literal(vbe, video.loop_filter_sharpness, 3);
 
@@ -750,7 +747,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       uv_ac_delta_sign                            | L(1)  |
     |   }                                               |       | */
     // encode quantizers
-	if (frames.prev_is_key_frame) {
+	if (0) {
 		write_literal(vbe, video.quantizer_index_y_ac_i, 7); // Y AC quantizer index (full 7 bits)
 		write_quantizer_delta(vbe, video.quantizer_index_y_dc_i - video.quantizer_index_y_ac_i); // Y DC index delta
 		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_i - video.quantizer_index_y_ac_i); // Y2 DC index delta
@@ -758,12 +755,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_i - video.quantizer_index_y_ac_i); // C DC index delta
 		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_i - video.quantizer_index_y_ac_i); // C AC index delta
 	} else {
-		write_literal(vbe, video.quantizer_index_y_ac_p_l, 7); // Y AC quantizer index (full 7 bits)
-		write_quantizer_delta(vbe, video.quantizer_index_y_dc_p_l - video.quantizer_index_y_ac_p_l); // Y DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_p_l - video.quantizer_index_y_ac_p_l); // Y2 DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_p_l - video.quantizer_index_y_ac_p_l); // Y2 AC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_p_l - video.quantizer_index_y_ac_p_l); // C DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_p_l - video.quantizer_index_y_ac_p_l); // C AC index delta
+		write_literal(vbe, video.quantizer_index_y_ac_prev, 7); // Y AC quantizer index (full 7 bits)
+		write_quantizer_delta(vbe, video.quantizer_index_y_dc_prev - video.quantizer_index_y_ac_prev); // Y DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_prev - video.quantizer_index_y_ac_prev); // Y2 DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_prev - video.quantizer_index_y_ac_prev); // Y2 AC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_prev - video.quantizer_index_y_ac_prev); // C DC index delta
+		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_prev - video.quantizer_index_y_ac_prev); // C AC index delta
 	}
     /* end of quant_indices() block */
 
@@ -889,11 +886,11 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			write_flag(vbe, 1);
 			new_ymode_prob = B_ymode_prob;
 			for (i = 0; i < 4; ++i)
-				write_literal(vbe, 0, 8); //fexed on B_PRED 
+				write_literal(vbe, 0, 8); //fixed on B_PRED 
 			write_flag(vbe, 1);
 			new_uv_mode_prob = TM_uv_mode_prob;
 			for (i = 0; i < 3; ++i)
-				write_literal(vbe, 0, 8); //fexed on TM_PRED 
+				write_literal(vbe, 0, 8); //fixed on TM_PRED 
 
 		}
 		else {
