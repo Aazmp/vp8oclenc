@@ -9,7 +9,13 @@ typedef struct {
 	int non_zero_coeffs;
 } macroblock;
 
-void weight1(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) //Hadamard
+typedef struct {
+	int vector_x;
+	int vector_y;
+} vector_net;
+
+/* DCT is better
+void weight_wht(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * const __L3, const int * const dc_q, const int * const ac_q) //Hadamard
 {
 	int4 L0, L1, L2, L3;
 	L0 = *__L0 + *__L3;	//a1 = (ip[0] + ip[3]);
@@ -95,9 +101,9 @@ void weight1(int4 * const __L0, int4 * const __L1, int4 * const __L2, int4 * con
 	(*__L3).x + (*__L3).y + (*__L3).z + (*__L3).w;
 	
 	return;
-}
+} */
 
-void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc_q, const int * const ac_q) // -> output DCT Ls
+void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc_q, const int * const ac_q) 
 {
 	int4 L0 = *__L0;
 	int4 L1 = *__L1;
@@ -146,10 +152,12 @@ void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc
 	*__L2 = convert_int4(abs(*__L2));
 	*__L3 = convert_int4(abs(*__L3));
 	
-	(*__L0).x += (*__L0).y + (*__L0).z + (*__L0).w +
+	// just a SATD
+	(*__L0).x +=(*__L0).y + (*__L0).z + (*__L0).w +
 	(*__L1).x + (*__L1).y + (*__L1).z + (*__L1).w +
 	(*__L2).x + (*__L2).y + (*__L2).z + (*__L2).w +
 	(*__L3).x + (*__L3).y + (*__L3).z + (*__L3).w;
+	
 	
 	return;
 }
@@ -277,23 +285,209 @@ void dequant_and_iDCT(int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3
 	return;
 }
 
-#define GROUP_SIZE_FOR_SEARCH 256
-__kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
-		void luma_search( 	__global uchar *const current_frame, //0
+__kernel void reset_vectors ( __global vector_net *const net) //0
+{
+	int b8x8_num = get_global_id(0);
+	net[b8x8_num].vector_x = 0;
+	net[b8x8_num].vector_y = 0;
+	return;
+}
+
+__kernel void downsample_x4(__global uchar *const src_frame, //0
+							__global uchar *const dst_frame, //1
+							const signed int src_width, //2
+							const signed int src_height) //3
+{
+	//each thread takes 4x4 pixl block and downsample it to 1 pixel by average-value
+	int b4x4_num = get_global_id(0);
+	int x = (b4x4_num % (src_width/4))*4;
+	int y = (b4x4_num / (src_width/4))*4;
+	int i = y*src_width + x;
+	int4 L;
+	
+	L = convert_int4(vload4(0, src_frame + i)); i += src_width;
+	L += convert_int4(vload4(0, src_frame + i)); i += src_width;
+	L += convert_int4(vload4(0, src_frame + i)); i += src_width;
+	L += convert_int4(vload4(0, src_frame + i)); 
+	L.x += L.y + L.z + L.w + 8;
+	L.x /= 16;
+	
+	x /= 4; y /= 4;
+	i = y*(src_width/4) + x;
+	
+	dst_frame[i] = L.x;
+	return;
+}
+
+__kernel void downsample_x2(__global uchar *const src_frame, //0
+							__global uchar *const dst_frame, //1
+							const signed int src_width, //2
+							const signed int src_height) //3
+{
+	//each thread takes 2x2 pixl block and downsample it to 1 pixel by average-value
+	int b2x2_num = get_global_id(0);
+	int x = (b2x2_num % (src_width/2))*2;
+	int y = (b2x2_num / (src_width/2))*2;
+	int i = y*src_width + x;
+	int2 L;
+	
+	L = convert_int2(vload2(0, src_frame + i)); i += src_width;
+	L += convert_int2(vload2(0, src_frame + i)); 
+	L.x += L.y + 2;
+	L.x /= 4;
+	
+	x /= 2; y /= 2;
+	i = y*(src_width/2) + x;
+	
+	dst_frame[i] = L.x;
+	return;
+}
+
+__kernel void luma_search_1step //when looking into downsampled and original frames
+						( 	__global uchar *const current_frame, //0
 							__global uchar *const prev_frame, //1
-							__global macroblock *const MBs, //2
-							const signed int width, //3
-							const signed int height, //4
-							const signed int first_MBlock_offset, //5
-							const int deltaX, //6
-							const int deltaY,//7
+							__global vector_net *const src_net, //2
+							__global vector_net *const dst_net, //3
+							const signed int net_width, //4 //in 8x8 blocks
+							const signed int width, //5
+							const signed int height, //6
+							const signed int pixel_rate, //7
 							const int dc_q, //8
 							const int ac_q) //9
-{
-	// do not use <<>> instead of */ on signed integer
-	// even if operands are greater than 0
-	// ...some mysterious shit happens	
+{   
+	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
+	__private uchar8 PL0, PL1, PL2, PL3, PL4, PL5, PL6, PL7;
+	
+	__private int4 DL0, DL1, DL2, DL3;
+	
+	__private int start_x, end_x, start_y, end_y; 
+	__private unsigned int MinDiff, Diff; 
+	__private int px, py, cx, cy;
+	__private int vector_x, vector_y, vector_x0, vector_y0;   
+	__private int ci, pi;   
+	__private int b8x8_num; 
+	__private int cut_width;
+	
+	cut_width = (width / 8) * 8;
+	
+	//first we determine parameters of current stage
+	b8x8_num = get_global_id(0);
+	//b8x8_num == net_index
+	cx = (b8x8_num % (cut_width/8))*8;
+	cy = (b8x8_num / (cut_width/8))*8;
+	
+	vector_x = 0; vector_y = 0;
+	if (pixel_rate < 16) //then we need to read previous stage vector
+	{
+		// we have to determine corresponding parameters of previous stage
+		cx /= 2; cy /=2;
+		b8x8_num = (cy/8)*net_width + (cx/8);
+		// and read vectors
+		vector_x = src_net[b8x8_num].vector_x;
+		vector_y = src_net[b8x8_num].vector_y;
+		vector_x /= pixel_rate;
+		vector_y /= pixel_rate;
+		cx *= 2; cy *=2; //return to current stage position
+	} 
+	//now block numbers in current stage
+	vector_x0 = vector_x; vector_y0 = vector_y;
 
+	b8x8_num = (cy/8)*net_width + (cx/8);
+	ci = cy*width + cx;
+	
+	CL0 = vload8(0, current_frame + ci); ci += width;
+	CL1 = vload8(0, current_frame + ci); ci += width;
+	CL2 = vload8(0, current_frame + ci); ci += width;
+	CL3 = vload8(0, current_frame + ci); ci += width;
+	CL4 = vload8(0, current_frame + ci); ci += width;
+	CL5 = vload8(0, current_frame + ci); ci += width;
+	CL6 = vload8(0, current_frame + ci); ci += width;
+	CL7 = vload8(0, current_frame + ci); 
+
+	MinDiff = 0xffff;
+
+	int delta = 2;
+	//delta = (pixel_rate < 16) ? (delta+1) : delta;
+	//delta = (pixel_rate < 4) ? (delta+1) : delta;
+	
+	start_x	= cx + vector_x - delta;	end_x = cx + vector_x + delta;
+	start_y = cy + vector_y - delta;	end_y = cy + vector_y + delta;
+	
+	start_x = (start_x < 0) ? 0 : start_x;
+	end_x = (end_x > (width - 8)) ? (width - 8) : end_x;
+	start_y = (start_y < 0) ? 0 : start_y;
+	end_y = (end_y > (height - 8)) ? (height - 8) : end_y;
+	
+	//if ((cx + vector_x) > end_x) printf ((__constant char*)"b=%d\tvx=%d\tsx=%d\tex=%d\tw=%d\n",b8x8_num,vector_x,start_x,end_x,width);
+	
+	#pragma unroll 1
+	for (px = start_x; px <= end_x; ++px )
+	{
+		#pragma unroll 1
+		for (py = start_y; py <= end_y; ++py)
+		{ 
+			// 1 full pixel step (fpel)
+			pi = py*width + px;
+			PL0 = vload8(0, prev_frame + pi); pi += width; 
+			PL1 = vload8(0, prev_frame + pi); pi += width;
+			PL2 = vload8(0, prev_frame + pi); pi += width;
+			PL3 = vload8(0, prev_frame + pi); pi += width;
+			PL4 = vload8(0, prev_frame + pi); pi += width;
+			PL5 = vload8(0, prev_frame + pi); pi += width;
+			PL6 = vload8(0, prev_frame + pi); pi += width;
+			PL7 = vload8(0, prev_frame + pi); 
+			// block 00
+			DL0 = convert_int4(CL0.s0123) - convert_int4(PL0.s0123);
+			DL1 = convert_int4(CL1.s0123) - convert_int4(PL1.s0123);
+			DL2 = convert_int4(CL2.s0123) - convert_int4(PL2.s0123);
+			DL3 = convert_int4(CL3.s0123) - convert_int4(PL3.s0123);
+			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff = DL0.x;
+			// block 10			
+			DL0 = convert_int4(CL4.s0123) - convert_int4(PL4.s0123);
+			DL1 = convert_int4(CL5.s0123) - convert_int4(PL5.s0123);
+			DL2 = convert_int4(CL6.s0123) - convert_int4(PL6.s0123);
+			DL3 = convert_int4(CL7.s0123) - convert_int4(PL7.s0123);
+			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			// block 01
+			DL0 = convert_int4(CL0.s4567) - convert_int4(PL0.s4567);
+			DL1 = convert_int4(CL1.s4567) - convert_int4(PL1.s4567);
+			DL2 = convert_int4(CL2.s4567) - convert_int4(PL2.s4567);
+			DL3 = convert_int4(CL3.s4567) - convert_int4(PL3.s4567);
+			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			// block 11
+			DL0 = convert_int4(CL4.s4567) - convert_int4(PL4.s4567);
+			DL1 = convert_int4(CL5.s4567) - convert_int4(PL5.s4567);
+			DL2 = convert_int4(CL6.s4567) - convert_int4(PL6.s4567);
+			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
+			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			
+			//Diff += ((int)abs(px-cx) + (int)abs(py-cy))*4;
+			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*32;
+						
+			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
+			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
+			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;			
+    	} 
+    } 
+	
+	
+	dst_net[b8x8_num].vector_x = (vector_x*pixel_rate);
+	dst_net[b8x8_num].vector_y = (vector_y*pixel_rate);
+	
+	return;
+	
+}
+	
+__kernel void luma_search_2step //searching in interpolated picture
+						( 	__global uchar *const current_frame, //0
+							__global uchar *const prev_frame, //1
+							__global vector_net *const net, //2
+							__global macroblock *const MBs, //3
+							const signed int width, //4
+							const signed int height, //5
+							const int dc_q, //6
+							const int ac_q) //7
+{
 	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
 	
 	__private uchar4 UC00, UC01, UC02, UC03,
@@ -302,21 +496,21 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 							UC30, UC31, UC32, UC33;
 	__private int4 DL0, DL1, DL2, DL3;
 	
-	__private int start_x, end_x, start_y, end_y; 
+	__private int start_x, end_x, start_y, end_y, vector_x, vector_y,vector_x0,vector_y0; 
 	__private unsigned int MinDiff, Diff0, Diff1, Diff2, Diff3;	
-	__private int px, py;
-	__private int cx, cy;
-	__private int vector_x, vector_y;   
-	__private int ci; 
-	__private int pi;   
+	__private int px, py, cx, cy, ci, pi;
 	__private int width_x4 = width*4;
 	__private int width_x4_x4 = width_x4*4;
-	__private int mb_num;
-	__private int b8x8_num;  
+	__private int mb_num, b8x8_num;  
 	
-	// now b8x8_num represents absolute number of 8x8 block
-	b8x8_num = (first_MBlock_offset + get_global_id(0));
-	if (b8x8_num > ((width*height/64)-1)) return;
+	// now b8x8_num represents absolute number of 8x8 block (net_index)
+	b8x8_num = get_global_id(0);
+	vector_x = net[b8x8_num].vector_x;
+	vector_y = net[b8x8_num].vector_y;
+	vector_x *= 4;	vector_y *= 4;
+	vector_x0 = vector_x;
+	vector_y0 = vector_y;
+
 	cx = (b8x8_num % (width/8))*8;
 	cy = (b8x8_num / (width/8))*8;
 	
@@ -336,87 +530,15 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 
 	MinDiff = 0xffff;
 
-	cx *= 4; cy *= 4; //into qpel
+	//printf((__constant char*)"[%d]=%d; %d\n",b8x8_num,vector_x,vector_y);
 	
-	vector_x = 0; vector_y = 0; 
-	start_x = 0; end_x = width_x4 - 20; start_y = 0; end_y = (height*4) - 32;
+	cx *= 4; cy *=4; //into qpel
 	
-	start_x	= cx - deltaX;
-	end_x = cx + deltaX;
-	start_y = cy - deltaY;
-	end_y = cy + deltaY;
+	start_x = cx - 4 + vector_x;	end_x = cx + 3 + vector_x;
+	start_y = cy + vector_y - 3;	end_y = cy + vector_y + 3;
 	
-	start_x = (start_x < 0) ? 0 : start_x;
-	end_x = (end_x > (width_x4 - 32)) ? (width_x4 - 32) : end_x;
-	start_y = (start_y < 0) ? 0 : start_y;
-	end_y = (end_y > ((height*4) - 32)) ? ((height*4) - 32) : end_y;
-	
-	start_x &= ~0x3;
-	start_y &= ~0x3;
-	#pragma unroll 1
-	for (px = start_x; px <= end_x; px+=4 )
-	{
-		#pragma unroll 1
-		for (py = start_y; py <= end_y; py+=4)
-		{ 
-			
-			// 1 full pixel step (fpel)
-			pi = py*width_x4 + px;
-			// block 00
-			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC20 = vload4(0,prev_frame+pi); UC21 = vload4(0,prev_frame+pi+4); UC22 = vload4(0,prev_frame+pi+8); UC23 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC30 = vload4(0,prev_frame+pi); UC31 = vload4(0,prev_frame+pi+4); UC32 = vload4(0,prev_frame+pi+8); UC33 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;			
-			DL0 = convert_int4(CL0.s0123) - convert_int4((uchar4)(UC00.x, UC01.x, UC02.x, UC03.x));
-			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
-			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
-			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 = DL0.x;
-			// block 10			
-			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC20 = vload4(0,prev_frame+pi); UC21 = vload4(0,prev_frame+pi+4); UC22 = vload4(0,prev_frame+pi+8); UC23 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC30 = vload4(0,prev_frame+pi); UC31 = vload4(0,prev_frame+pi+4); UC32 = vload4(0,prev_frame+pi+8); UC33 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			DL0 = convert_int4(CL4.s0123) - convert_int4((uchar4)(UC00.x, UC01.x, UC02.x, UC03.x));
-			DL1 = convert_int4(CL5.s0123) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
-			DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
-			DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
-			pi -= (width_x4<<5);
-			// block 01
-			pi += 16;
-			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC20 = vload4(0,prev_frame+pi); UC21 = vload4(0,prev_frame+pi+4); UC22 = vload4(0,prev_frame+pi+8); UC23 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC30 = vload4(0,prev_frame+pi); UC31 = vload4(0,prev_frame+pi+4); UC32 = vload4(0,prev_frame+pi+8); UC33 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			DL0 = convert_int4(CL0.s4567) - convert_int4((uchar4)(UC00.x, UC01.x, UC02.x, UC03.x));
-			DL1 = convert_int4(CL1.s4567) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
-			DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
-			DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
-			// block 11
-			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC20 = vload4(0,prev_frame+pi); UC21 = vload4(0,prev_frame+pi+4); UC22 = vload4(0,prev_frame+pi+8); UC23 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			UC30 = vload4(0,prev_frame+pi); UC31 = vload4(0,prev_frame+pi+4); UC32 = vload4(0,prev_frame+pi+8); UC33 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
-			DL0 = convert_int4(CL4.s4567) - convert_int4((uchar4)(UC00.x, UC01.x, UC02.x, UC03.x));
-			DL1 = convert_int4(CL5.s4567) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
-			DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
-			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
-
-			Diff0 += abs(px - cx) + abs(py - cy);
-			
-			vector_x = (Diff0 < MinDiff) ? (px - cx) : vector_x;
-			vector_y = (Diff0 < MinDiff) ? (py - cy) : vector_y;
-			MinDiff = (Diff0 < MinDiff) ? Diff0 : MinDiff;
-		} 
-	}  
-	
-	start_x = cx - 4 + vector_x;
-	end_x = cx + 3 + vector_x;
-	start_y = cy + vector_y - 2;
-	end_y = cy + vector_y + 2;
+	vector_x = 0; //in case previous iteration vectors fall out of frame and
+	vector_y = 0; // loops never entered (this should not happen though)
 	
 	start_x = (start_x < 1) ? 1 : start_x;
 	end_x = (end_x > (width_x4 - 33)) ? (width_x4 - 33) : end_x;
@@ -441,7 +563,7 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 = DL0.x;
 			DL0 = convert_int4(CL0.s0123) - convert_int4((uchar4)(UC00.y, UC01.y, UC02.y, UC03.y));
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.y, UC11.y, UC12.y, UC13.y));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.y, UC21.y, UC22.y, UC23.y));
@@ -535,10 +657,14 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
 			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 += DL0.x;
 			
-			Diff0 += abs(px - cx) + abs(py - cy);
-			Diff1 += abs(px+1 - cx) + abs(py - cy);
-			Diff2 += abs(px+2 - cx) + abs(py - cy);
-			Diff3 += abs(px+3 - cx) + abs(py - cy);
+			//Diff0 += abs(px - cx) + abs(py - cy);
+			Diff0 += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*16;
+			//Diff1 += abs(px+1 - cx) + abs(py - cy);
+			Diff1 += (int)(abs((int)abs(px+1-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*16;
+			//Diff2 += abs(px+2 - cx) + abs(py - cy);
+			Diff2 += (int)(abs((int)abs(px+2-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*16;
+			//Diff3 += abs(px+3 - cx) + abs(py - cy);
+			Diff3 += (int)(abs((int)abs(px+3-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*16;
 
 			vector_x = (Diff0 < MinDiff) ? (px - cx) : vector_x;
 			vector_y = (Diff0 < MinDiff) ? (py - cy) : vector_y;
@@ -562,8 +688,9 @@ __kernel __attribute__((reqd_work_group_size(GROUP_SIZE_FOR_SEARCH, 1, 1)))
 	MBs[mb_num].vector_y[b8x8_num] = vector_y;
 	
 	return;
-	
 }
+	
+	
 	
 	
 __kernel void luma_transform( 	__global uchar *current_frame, //0
@@ -2502,13 +2629,4 @@ __kernel void luma_interpolate_Vx4_bl( __global uchar *const frame, //0
 	}
 	return;	
 }
-
-
-
-
-
-
-
-
-
 
