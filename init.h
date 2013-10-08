@@ -70,7 +70,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.2";
+		const char gpu_options[] = "-cl-std=CL1.2 -cl-opt-disable";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -105,8 +105,10 @@ int init_all()
 		device.luma_search_2step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "downsample_x2";
 		device.downsample = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_transform";
-		device.luma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "luma_transform_16x16";
+		device.luma_transform_16x16 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "luma_transform_8x8";
+		device.luma_transform_8x8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_transform";
 		device.chroma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_interpolate_Hx4_bc";
@@ -130,7 +132,7 @@ int init_all()
 	}
 	// CPU:
 	printf("reading CPU program...\n");
-	const char cpu_options[] = "-cl-std=CL1.0";
+	const char cpu_options[] = "-cl-std=CL1.0 -cl-opt-disable";
 	program_handle = fopen(CPUPATH, "rb");
 	fseek(program_handle, 0, SEEK_END);
 	program_size = ftell(program_handle);
@@ -289,7 +291,7 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(int32_t), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 5, sizeof(int32_t), &video.wrk_height);
 
-		/*___kernel void luma_transform(__global uchar *current_frame, //0
+		/*___kernel void luma_transform_8x8(__global uchar *current_frame, //0
 										__global uchar *recon_frame, //1
 										__global uchar *prev_frame, //2
 										__global macroblock *MBs, //3
@@ -297,13 +299,30 @@ int init_all()
 										int dc_q, //5
 										int ac_q) //6*/
 
-
-		device.state_gpu = clSetKernelArg(device.luma_transform, 0, sizeof(cl_mem), &device.current_frame_Y);
-	    device.state_gpu = clSetKernelArg(device.luma_transform, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_transform, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
-		device.state_gpu = clSetKernelArg(device.luma_transform, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.luma_transform, 4, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 0, sizeof(cl_mem), &device.current_frame_Y);
+	    device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 4, sizeof(int32_t), &video.wrk_width);
 		// first_block_offset will be variable on kernel launch
+
+		/*__kernel void luma_transform_16x16(__global uchar *current_frame, //0
+								__global uchar *recon_frame, //1
+								__global uchar *prev_frame, //2
+								__global macroblock *MBs, //3
+								signed int width, //4
+								int y_ac_q, //5
+								int y2_dc_q, //6
+								int y2_ac_q) //7*/
+		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 0, sizeof(cl_mem), &device.current_frame_Y);
+	    device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
+		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 4, sizeof(int32_t), &video.wrk_width);
+
+
+
+
 
 		/*__kernel void chroma_transform(	__global uchar *current_frame, - 0
 											__global uchar *prev_frame, - 1
