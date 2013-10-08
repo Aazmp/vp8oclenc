@@ -1,12 +1,19 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
 #pragma OPENCL EXTENSION cl_amd_printf : enable
 
+typedef enum {
+	are16x16 = 0,
+	are8x8 = 1,
+	are4x4 = 2
+} partition_mode;
+
 typedef struct {
     short coeffs[25][16];
     int vector_x[4];
     int vector_y[4];
 	float SSIM;
 	int non_zero_coeffs;
+	int parts;
 } macroblock;
 
 typedef struct {
@@ -152,6 +159,7 @@ void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc
 	*__L2 = convert_int4(abs(*__L2));
 	*__L3 = convert_int4(abs(*__L3));
 	
+	(*__L0).x /= 4;
 	// just a SATD
 	(*__L0).x +=(*__L0).y + (*__L0).z + (*__L0).w +
 	(*__L1).x + (*__L1).y + (*__L1).z + (*__L1).w +
@@ -162,17 +170,13 @@ void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc
 	return;
 }
 
-void DCT_and_quant(int4 Line0, int4 Line1, int4 Line2, int4 Line3, // <- input differences
-					int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3, const int dc_q, const int ac_q) // -> output DCT Lines
+void DCT_and_quant(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q) 
 {
-	*__Line0 = (int4)(Line0.x, Line1.x, Line2.x, Line3.x);
-	*__Line1 = (int4)(Line0.y, Line1.y, Line2.y, Line3.y);
-	*__Line2 = (int4)(Line0.z, Line1.z, Line2.z, Line3.z);
-	*__Line3 = (int4)(Line0.w, Line1.w, Line2.w, Line3.w);
-	Line0 = *__Line0;
-	Line1 = *__Line1;
-	Line2 = *__Line2;
-	Line3 = *__Line3; // <========================================================================
+	__private int4 Line0, Line1, Line2, Line3;
+	Line0 = (int4)((*__Line0).x, (*__Line1).x, (*__Line2).x, (*__Line3).x);
+	Line1 = (int4)((*__Line0).y, (*__Line1).y, (*__Line2).y, (*__Line3).y);
+	Line2 = (int4)((*__Line0).z, (*__Line1).z, (*__Line2).z, (*__Line3).z);
+	Line3 = (int4)((*__Line0).w, (*__Line1).w, (*__Line2).w, (*__Line3).w);
 
 	*__Line0 = ((Line0 + Line3) << 3);	// a1 = ((ip[0] + ip[3])<<3);
 	*__Line1 = ((Line1 + Line2) << 3);	// b1 = ((ip[1] + ip[2])<<3);
@@ -219,15 +223,14 @@ void DCT_and_quant(int4 Line0, int4 Line1, int4 Line2, int4 Line3, // <- input d
 	return;
 }
 
-void dequant_and_iDCT(int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3,
-					  int4 Line0, int4 Line1, int4 Line2, int4 Line3, const int dc_q, const int ac_q) // <- input DCT lines
+void dequant_and_iDCT(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q) // <- input DCT lines
 {
+	__private int4 Line0, Line1, Line2, Line3;
 	// dequant
-	Line0 *= (int4)(dc_q, ac_q, ac_q, ac_q);
-	Line1 *= ac_q;
-	Line2 *= ac_q;
-	Line3 *= ac_q;
-	
+	Line0 = (*__Line0)*((int4)(dc_q, ac_q, ac_q, ac_q));
+	Line1 = (*__Line1)*ac_q;
+	Line2 = (*__Line2)*ac_q;
+	Line3 = (*__Line3)*ac_q;	
 		
 	*__Line0 = Line0 + Line2;				// a1 = ip[0]+ip[2];
 	*__Line1 = Line0 - Line2;				// b1 = ip[0]-ip[2];
@@ -284,6 +287,153 @@ void dequant_and_iDCT(int4 *__Line0, int4 *__Line1, int4 *__Line2, int4 *__Line3
 
 	return;
 }
+
+void WHT_and_quant(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q)
+{
+	int4 Line0, Line1, Line2, Line3;
+	
+	Line0 = *__Line0 + *__Line3;
+    Line1 = *__Line1 + *__Line2; 
+    Line2 = *__Line1 - *__Line2;
+    Line3 = *__Line0 - *__Line3;
+
+    *__Line0 = Line0 + Line1; 
+    *__Line1 = Line2 + Line3; 
+	*__Line2 = Line0 - Line1;
+    *__Line3 = Line3 - Line2; 
+	
+	Line0.x = (*__Line0).x + (*__Line0).w;
+	Line1.x = (*__Line1).x + (*__Line1).w;	
+	Line2.x = (*__Line2).x + (*__Line2).w;
+	Line3.x = (*__Line3).x + (*__Line3).w;
+	
+    Line0.y = (*__Line0).y + (*__Line0).z;
+	Line1.y = (*__Line1).y + (*__Line1).z;	
+	Line2.y = (*__Line2).y + (*__Line2).z;
+	Line3.y = (*__Line3).y + (*__Line3).z;   
+	
+    Line0.z = (*__Line0).y - (*__Line0).z;
+	Line1.z = (*__Line1).y - (*__Line1).z;	
+	Line2.z = (*__Line2).y - (*__Line2).z;
+	Line3.z = (*__Line3).y - (*__Line3).z;
+    
+	Line0.w = (*__Line0).x - (*__Line0).w;
+	Line1.w = (*__Line1).x - (*__Line1).w;	
+	Line2.w = (*__Line2).x - (*__Line2).w;
+	Line3.w = (*__Line3).x - (*__Line3).w;
+
+    (*__Line0).x = Line0.x + Line0.y; 
+	(*__Line1).x = Line1.x + Line1.y;
+	(*__Line2).x = Line2.x + Line2.y;
+	(*__Line3).x = Line3.x + Line3.y;
+	
+	(*__Line0).y = Line0.z + Line0.w;
+	(*__Line1).y = Line1.z + Line1.w;
+	(*__Line2).y = Line2.z + Line2.w;
+	(*__Line3).y = Line3.z + Line3.w;
+	
+	(*__Line0).z = Line0.x - Line0.y;
+	(*__Line1).z = Line1.x - Line1.y;
+	(*__Line2).z = Line2.x - Line2.y;
+	(*__Line3).z = Line3.x - Line3.y;
+        
+	(*__Line0).w = Line0.w - Line0.z;
+	(*__Line1).w = Line1.w - Line1.z;
+	(*__Line2).w = Line2.w - Line2.z;
+	(*__Line3).w = Line3.w - Line3.z;
+
+    (*__Line0).x += ((*__Line0).x > 0);
+	(*__Line1).x += ((*__Line1).x > 0);
+	(*__Line2).x += ((*__Line2).x > 0);
+	(*__Line3).x += ((*__Line3).x > 0);
+    (*__Line0).y += ((*__Line0).y > 0);
+	(*__Line1).y += ((*__Line1).y > 0);
+	(*__Line2).y += ((*__Line2).y > 0);
+	(*__Line3).y += ((*__Line3).y > 0); 
+    (*__Line0).z += ((*__Line0).z > 0);
+	(*__Line1).z += ((*__Line1).z > 0);
+	(*__Line2).z += ((*__Line2).z > 0);
+	(*__Line3).z += ((*__Line3).z > 0);
+    (*__Line0).w += ((*__Line0).w > 0);
+	(*__Line1).w += ((*__Line1).w > 0);
+	(*__Line2).w += ((*__Line2).w > 0);
+	(*__Line3).w += ((*__Line3).w > 0);
+	
+	*__Line0 >>= 1;
+    *__Line1 >>= 1;
+    *__Line2 >>= 1;
+    *__Line3 >>= 1;
+	
+	*__Line0 /= (int4)(dc_q, ac_q, ac_q, ac_q);
+	*__Line1 /= ac_q;
+	*__Line2 /= ac_q;
+	*__Line3 /= ac_q;
+	
+	return;
+}
+
+void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q)
+{
+	int4 Line0, Line1, Line2, Line3;
+	*__Line0 *= (int4)(dc_q, ac_q, ac_q, ac_q);
+	*__Line1 *= ac_q;
+	*__Line2 *= ac_q;
+	*__Line3 *= ac_q;
+
+	Line0.x = (*__Line0).x + (*__Line0).w;
+	Line1.x = (*__Line1).x + (*__Line1).w;	
+	Line2.x = (*__Line2).x + (*__Line2).w;
+	Line3.x = (*__Line3).x + (*__Line3).w;
+	
+    Line0.y = (*__Line0).y + (*__Line0).z; 
+	Line1.y = (*__Line1).y + (*__Line1).z;	
+	Line2.y = (*__Line2).y + (*__Line2).z;
+	Line3.y = (*__Line3).y + (*__Line3).z;   
+	
+    Line0.z = (*__Line0).y - (*__Line0).z; 
+	Line1.z = (*__Line1).y - (*__Line1).z;	
+	Line2.z = (*__Line2).y - (*__Line2).z;
+	Line3.z = (*__Line3).y - (*__Line3).z;
+    
+	Line0.w = (*__Line0).x - (*__Line0).w; 
+	Line1.w = (*__Line1).x - (*__Line1).w;	
+	Line2.w = (*__Line2).x - (*__Line2).w;
+	Line3.w = (*__Line3).x - (*__Line3).w;
+
+	(*__Line0).x = Line0.x + Line0.y; 
+	(*__Line1).x = Line1.x + Line1.y;
+	(*__Line2).x = Line2.x + Line2.y;
+	(*__Line3).x = Line3.x + Line3.y;
+	
+	(*__Line0).y = Line0.z + Line0.w; 
+	(*__Line1).y = Line1.z + Line1.w;
+	(*__Line2).y = Line2.z + Line2.w;
+	(*__Line3).y = Line3.z + Line3.w;
+	
+	(*__Line0).z = Line0.x - Line0.y;
+	(*__Line1).z = Line1.x - Line1.y;
+	(*__Line2).z = Line2.x - Line2.y;
+	(*__Line3).z = Line3.x - Line3.y;
+        
+	(*__Line0).w = Line0.w - Line0.z; 
+	(*__Line1).w = Line1.w - Line1.z;
+	(*__Line2).w = Line2.w - Line2.z;
+	(*__Line3).w = Line3.w - Line3.z;
+
+    Line0 = *__Line0 + *__Line3;
+    Line1 = *__Line1 + *__Line2;
+    Line2 = *__Line1 - *__Line2;
+    Line3 = *__Line0 - *__Line3;
+
+    *__Line0 = Line0 + Line1; *__Line1 = Line2 + Line3;
+	*__Line2 = Line0 - Line1; *__Line3 = Line3 - Line2;
+
+    *__Line0 += 3; 	*__Line1 += 3;	*__Line2 += 3; *__Line3 += 3;	
+	*__Line0 >>= 3;  *__Line1 >>= 3; *__Line2 >>= 3; *__Line3 >>= 3;	
+
+	return;
+}
+
 
 __kernel void reset_vectors ( __global vector_net *const net) //0
 {
@@ -540,10 +690,10 @@ __kernel void luma_search_2step //searching in interpolated picture
 	vector_x = 0; //in case previous iteration vectors fall out of frame and
 	vector_y = 0; // loops never entered (this should not happen though)
 	
-	start_x = (start_x < 1) ? 1 : start_x;
-	end_x = (end_x > (width_x4 - 33)) ? (width_x4 - 33) : end_x;
-	start_y = (start_y < 1) ? 1 : start_y;
-	end_y = (end_y > ((height*4) - 33)) ? ((height*4) - 33) : end_y;
+	start_x = (start_x < 0) ? 0 : start_x;
+	end_x = (end_x > (width_x4 - 32)) ? (width_x4 - 32) : end_x;
+	start_y = (start_y < 0) ? 0 : start_y;
+	end_y = (end_y > ((height*4) - 32)) ? ((height*4) - 32) : end_y;
 
 	start_x &= ~0x3;
 	#pragma unroll 1
@@ -690,10 +840,489 @@ __kernel void luma_search_2step //searching in interpolated picture
 	return;
 }
 	
+
+__kernel void luma_transform_16x16(__global uchar *current_frame, //0
+								__global uchar *recon_frame, //1
+								__global uchar *prev_frame, //2
+								__global macroblock *MBs, //3
+								signed int width, //4
+								int y_ac_q, //5
+								int y2_dc_q, //6
+								int y2_ac_q) //7
+{	
+	// possible optimization - LOCAL memory for storing predictors until reconstruction
+	// but it's very device specific (GCN has 32kb per work_group, older may has less)
+
+	__private int mb_num, vector_x,vector_y,x,y,condition,i;
+	__private int4 DL0,DL1,DL2,DL3;
+	__private short16 L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14,L15;
+	__private uchar4 buf;
+	
+	mb_num = get_global_id(0);
+	
+	MBs[mb_num].parts = are8x8; 
+	vector_x = MBs[mb_num].vector_x[0];
+	vector_y = MBs[mb_num].vector_y[0];
+	x = MBs[mb_num].vector_x[1];
+	y = MBs[mb_num].vector_y[1];
+	condition = ((vector_x != x) || (vector_y != y)); //XOr optimization possible
+	if (condition) return;
+	x = MBs[mb_num].vector_x[2];
+	y = MBs[mb_num].vector_y[2];
+	condition = ((vector_x != x) || (vector_y != y)); 
+	if (condition) return;
+	x = MBs[mb_num].vector_x[3];
+	y = MBs[mb_num].vector_y[3];
+	condition = ((vector_x != x) || (vector_y != y)); 
+	if (condition) return; 
+	MBs[mb_num].parts = are16x16;
+	
+	x = (mb_num % (width/16))*16;
+	y = (mb_num / (width/16))*16;
+	
+	// now read 16 lines of 16 char elements 
+	i = y*width + x;
+	L0 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L1 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L2 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L3 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L4 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L5 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L6 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L7 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L8 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L9 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L10 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L11 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L12 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L13 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L14 = convert_short16(vload16(0, current_frame+i)); i+= width;
+	L15 = convert_short16(vload16(0, current_frame+i));
 	
 	
+	// now read 16 lines of 16 char elements (unaligned and with 3 char ranges between)
+	//and immediately count the residual into L-lines
+	//also for each four 16pixel-lines we have 4 blocks of 4x4
+	// immediately DCTransform them and place coefficients into L-lines
 	
-__kernel void luma_transform( 	__global uchar *current_frame, //0
+	//blocks 00-03
+	//i = (y*4 + vector_y)*width*4 + (x*4 + vector_x);
+	i = mad24(y,4,vector_y)*mul24(width,4) + mad24(x,4,vector_x);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	DL0 = convert_int4(L0.s0123); DL1 = convert_int4(L1.s0123); DL2 = convert_int4(L2.s0123); DL3 = convert_int4(L3.s0123);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s0123 = convert_short4(DL0);	L1.s0123 = convert_short4(DL1);	L2.s0123 = convert_short4(DL2);	L3.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L0.s4567); DL1 = convert_int4(L1.s4567); DL2 = convert_int4(L2.s4567); DL3 = convert_int4(L3.s4567);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s4567 = convert_short4(DL0);	L1.s4567 = convert_short4(DL1);	L2.s4567 = convert_short4(DL2);	L3.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L0.s89AB); DL1 = convert_int4(L1.s89AB); DL2 = convert_int4(L2.s89AB); DL3 = convert_int4(L3.s89AB);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s89AB = convert_short4(DL0);	L1.s89AB = convert_short4(DL1);	L2.s89AB = convert_short4(DL2);	L3.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L0.sCDEF); DL1 = convert_int4(L1.sCDEF); DL2 = convert_int4(L2.sCDEF); DL3 = convert_int4(L3.sCDEF);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.sCDEF = convert_short4(DL0);	L1.sCDEF = convert_short4(DL1);	L2.sCDEF = convert_short4(DL2);	L3.sCDEF = convert_short4(DL3);
+	//blocks 10-13
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	DL0 = convert_int4(L4.s0123); DL1 = convert_int4(L5.s0123); DL2 = convert_int4(L6.s0123); DL3 = convert_int4(L7.s0123);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s0123 = convert_short4(DL0);	L5.s0123 = convert_short4(DL1);	L6.s0123 = convert_short4(DL2);	L7.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L4.s4567); DL1 = convert_int4(L5.s4567); DL2 = convert_int4(L6.s4567); DL3 = convert_int4(L7.s4567);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s4567 = convert_short4(DL0);	L5.s4567 = convert_short4(DL1);	L6.s4567 = convert_short4(DL2);	L7.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L4.s89AB); DL1 = convert_int4(L5.s89AB); DL2 = convert_int4(L6.s89AB); DL3 = convert_int4(L7.s89AB);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s89AB = convert_short4(DL0);	L5.s89AB = convert_short4(DL1);	L6.s89AB = convert_short4(DL2);	L7.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L4.sCDEF); DL1 = convert_int4(L5.sCDEF); DL2 = convert_int4(L6.sCDEF); DL3 = convert_int4(L7.sCDEF);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.sCDEF = convert_short4(DL0);	L5.sCDEF = convert_short4(DL1);	L6.sCDEF = convert_short4(DL2);	L7.sCDEF = convert_short4(DL3);
+	//blocks 20-23
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	DL0 = convert_int4(L8.s0123); DL1 = convert_int4(L9.s0123); DL2 = convert_int4(L10.s0123); DL3 = convert_int4(L11.s0123);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s0123 = convert_short4(DL0);	L9.s0123 = convert_short4(DL1);	L10.s0123 = convert_short4(DL2);	L11.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L8.s4567); DL1 = convert_int4(L9.s4567); DL2 = convert_int4(L10.s4567); DL3 = convert_int4(L11.s4567);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s4567 = convert_short4(DL0);	L9.s4567 = convert_short4(DL1);	L10.s4567 = convert_short4(DL2);	L11.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L8.s89AB); DL1 = convert_int4(L9.s89AB); DL2 = convert_int4(L10.s89AB); DL3 = convert_int4(L11.s89AB);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s89AB = convert_short4(DL0);	L9.s89AB = convert_short4(DL1);	L10.s89AB = convert_short4(DL2);	L11.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L8.sCDEF); DL1 = convert_int4(L9.sCDEF); DL2 = convert_int4(L10.sCDEF); DL3 = convert_int4(L11.sCDEF);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.sCDEF = convert_short4(DL0);	L9.sCDEF = convert_short4(DL1);	L10.sCDEF = convert_short4(DL2);	L11.sCDEF = convert_short4(DL3);
+	//blocks 30-33
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.sCDEF -= convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s0123 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s4567 -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s89AB -= convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.sCDEF -= convert_short4(buf); 
+	DL0 = convert_int4(L12.s0123); DL1 = convert_int4(L13.s0123); DL2 = convert_int4(L14.s0123); DL3 = convert_int4(L15.s0123);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s0123 = convert_short4(DL0);	L13.s0123 = convert_short4(DL1);	L14.s0123 = convert_short4(DL2);	L15.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L12.s4567); DL1 = convert_int4(L13.s4567); DL2 = convert_int4(L14.s4567); DL3 = convert_int4(L15.s4567);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s4567 = convert_short4(DL0);	L13.s4567 = convert_short4(DL1);	L14.s4567 = convert_short4(DL2);	L15.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L12.s89AB); DL1 = convert_int4(L13.s89AB); DL2 = convert_int4(L14.s89AB); DL3 = convert_int4(L15.s89AB);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s89AB = convert_short4(DL0);	L13.s89AB = convert_short4(DL1);	L14.s89AB = convert_short4(DL2);	L15.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L12.sCDEF); DL1 = convert_int4(L13.sCDEF); DL2 = convert_int4(L14.sCDEF); DL3 = convert_int4(L15.sCDEF);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.sCDEF = convert_short4(DL0);	L13.sCDEF = convert_short4(DL1);	L14.sCDEF = convert_short4(DL2);	L15.sCDEF = convert_short4(DL3);
+	
+	//now we need to WHTransform DC-coefficients
+	DL0=convert_int4((short4)(L0.s0, L0.s4, L0.s8, L0.sC));
+	DL1=convert_int4((short4)(L4.s0, L4.s4, L4.s8, L4.sC));
+	DL2=convert_int4((short4)(L8.s0, L8.s4, L8.s8, L8.sC));
+	DL3=convert_int4((short4)(L12.s0,L12.s4,L12.s8,L12.sC));
+	WHT_and_quant(&DL0, &DL1, &DL2, &DL3, y2_dc_q, y2_ac_q);
+	
+	//now fill transformed bloks data
+	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
+	//mb_row 0
+	//block 00
+	                                             MBs[mb_num].coeffs[0][inv_zigzag[1]]=L0.s1;  MBs[mb_num].coeffs[0][inv_zigzag[2]]=L0.s2;  MBs[mb_num].coeffs[0][inv_zigzag[3]]=L0.s3;
+	MBs[mb_num].coeffs[0][inv_zigzag[4]]=L1.s0;	 MBs[mb_num].coeffs[0][inv_zigzag[5]]=L1.s1;  MBs[mb_num].coeffs[0][inv_zigzag[6]]=L1.s2;  MBs[mb_num].coeffs[0][inv_zigzag[7]]=L1.s3;
+	MBs[mb_num].coeffs[0][inv_zigzag[8]]=L2.s0;	 MBs[mb_num].coeffs[0][inv_zigzag[9]]=L2.s1;  MBs[mb_num].coeffs[0][inv_zigzag[10]]=L2.s2; MBs[mb_num].coeffs[0][inv_zigzag[11]]=L2.s3;
+	MBs[mb_num].coeffs[0][inv_zigzag[12]]=L3.s0; MBs[mb_num].coeffs[0][inv_zigzag[13]]=L3.s1; MBs[mb_num].coeffs[0][inv_zigzag[14]]=L3.s2; MBs[mb_num].coeffs[0][inv_zigzag[15]]=L3.s3;
+	//block 01
+	                                             MBs[mb_num].coeffs[1][inv_zigzag[1]]=L0.s5;  MBs[mb_num].coeffs[1][inv_zigzag[2]]=L0.s6;  MBs[mb_num].coeffs[1][inv_zigzag[3]]=L0.s7;
+	MBs[mb_num].coeffs[1][inv_zigzag[4]]=L1.s4;	 MBs[mb_num].coeffs[1][inv_zigzag[5]]=L1.s5;  MBs[mb_num].coeffs[1][inv_zigzag[6]]=L1.s6;  MBs[mb_num].coeffs[1][inv_zigzag[7]]=L1.s7;
+	MBs[mb_num].coeffs[1][inv_zigzag[8]]=L2.s4;	 MBs[mb_num].coeffs[1][inv_zigzag[9]]=L2.s5;  MBs[mb_num].coeffs[1][inv_zigzag[10]]=L2.s6; MBs[mb_num].coeffs[1][inv_zigzag[11]]=L2.s7;
+	MBs[mb_num].coeffs[1][inv_zigzag[12]]=L3.s4; MBs[mb_num].coeffs[1][inv_zigzag[13]]=L3.s5; MBs[mb_num].coeffs[1][inv_zigzag[14]]=L3.s6; MBs[mb_num].coeffs[1][inv_zigzag[15]]=L3.s7;
+	//block 02
+	                                             MBs[mb_num].coeffs[2][inv_zigzag[1]]=L0.s9;  MBs[mb_num].coeffs[2][inv_zigzag[2]]=L0.sA;  MBs[mb_num].coeffs[2][inv_zigzag[3]]=L0.sB;
+	MBs[mb_num].coeffs[2][inv_zigzag[4]]=L1.s8;	 MBs[mb_num].coeffs[2][inv_zigzag[5]]=L1.s9;  MBs[mb_num].coeffs[2][inv_zigzag[6]]=L1.sA;  MBs[mb_num].coeffs[2][inv_zigzag[7]]=L1.sB;
+	MBs[mb_num].coeffs[2][inv_zigzag[8]]=L2.s8;	 MBs[mb_num].coeffs[2][inv_zigzag[9]]=L2.s9;  MBs[mb_num].coeffs[2][inv_zigzag[10]]=L2.sA; MBs[mb_num].coeffs[2][inv_zigzag[11]]=L2.sB;
+	MBs[mb_num].coeffs[2][inv_zigzag[12]]=L3.s8; MBs[mb_num].coeffs[2][inv_zigzag[13]]=L3.s9; MBs[mb_num].coeffs[2][inv_zigzag[14]]=L3.sA; MBs[mb_num].coeffs[2][inv_zigzag[15]]=L3.sB;
+	//block 03
+	                                             MBs[mb_num].coeffs[3][inv_zigzag[1]]=L0.sD;  MBs[mb_num].coeffs[3][inv_zigzag[2]]=L0.sE;  MBs[mb_num].coeffs[3][inv_zigzag[3]]=L0.sF;
+	MBs[mb_num].coeffs[3][inv_zigzag[4]]=L1.sC;	 MBs[mb_num].coeffs[3][inv_zigzag[5]]=L1.sD;  MBs[mb_num].coeffs[3][inv_zigzag[6]]=L1.sE;  MBs[mb_num].coeffs[3][inv_zigzag[7]]=L1.sF;
+	MBs[mb_num].coeffs[3][inv_zigzag[8]]=L2.sC;	 MBs[mb_num].coeffs[3][inv_zigzag[9]]=L2.sD;  MBs[mb_num].coeffs[3][inv_zigzag[10]]=L2.sE; MBs[mb_num].coeffs[3][inv_zigzag[11]]=L2.sF;
+	MBs[mb_num].coeffs[3][inv_zigzag[12]]=L3.sC; MBs[mb_num].coeffs[3][inv_zigzag[13]]=L3.sD; MBs[mb_num].coeffs[3][inv_zigzag[14]]=L3.sE; MBs[mb_num].coeffs[3][inv_zigzag[15]]=L3.sF;
+	//mb_row 1
+	//block 10
+	                                             MBs[mb_num].coeffs[4][inv_zigzag[1]]=L4.s1;  MBs[mb_num].coeffs[4][inv_zigzag[2]]=L4.s2;  MBs[mb_num].coeffs[4][inv_zigzag[3]]=L4.s3;
+	MBs[mb_num].coeffs[4][inv_zigzag[4]]=L5.s0;	 MBs[mb_num].coeffs[4][inv_zigzag[5]]=L5.s1;  MBs[mb_num].coeffs[4][inv_zigzag[6]]=L5.s2;  MBs[mb_num].coeffs[4][inv_zigzag[7]]=L5.s3;
+	MBs[mb_num].coeffs[4][inv_zigzag[8]]=L6.s0;	 MBs[mb_num].coeffs[4][inv_zigzag[9]]=L6.s1;  MBs[mb_num].coeffs[4][inv_zigzag[10]]=L6.s2; MBs[mb_num].coeffs[4][inv_zigzag[11]]=L6.s3;
+	MBs[mb_num].coeffs[4][inv_zigzag[12]]=L7.s0; MBs[mb_num].coeffs[4][inv_zigzag[13]]=L7.s1; MBs[mb_num].coeffs[4][inv_zigzag[14]]=L7.s2; MBs[mb_num].coeffs[4][inv_zigzag[15]]=L7.s3;
+	//block 11
+	                                             MBs[mb_num].coeffs[5][inv_zigzag[1]]=L4.s5;  MBs[mb_num].coeffs[5][inv_zigzag[2]]=L4.s6;  MBs[mb_num].coeffs[5][inv_zigzag[3]]=L4.s7;
+	MBs[mb_num].coeffs[5][inv_zigzag[4]]=L5.s4;	 MBs[mb_num].coeffs[5][inv_zigzag[5]]=L5.s5;  MBs[mb_num].coeffs[5][inv_zigzag[6]]=L5.s6;  MBs[mb_num].coeffs[5][inv_zigzag[7]]=L5.s7;
+	MBs[mb_num].coeffs[5][inv_zigzag[8]]=L6.s4;	 MBs[mb_num].coeffs[5][inv_zigzag[9]]=L6.s5;  MBs[mb_num].coeffs[5][inv_zigzag[10]]=L6.s6; MBs[mb_num].coeffs[5][inv_zigzag[11]]=L6.s7;
+	MBs[mb_num].coeffs[5][inv_zigzag[12]]=L7.s4; MBs[mb_num].coeffs[5][inv_zigzag[13]]=L7.s5; MBs[mb_num].coeffs[5][inv_zigzag[14]]=L7.s6; MBs[mb_num].coeffs[5][inv_zigzag[15]]=L7.s7;
+	//block 12
+	                                             MBs[mb_num].coeffs[6][inv_zigzag[1]]=L4.s9;  MBs[mb_num].coeffs[6][inv_zigzag[2]]=L4.sA;  MBs[mb_num].coeffs[6][inv_zigzag[3]]=L4.sB;
+	MBs[mb_num].coeffs[6][inv_zigzag[4]]=L5.s8;	 MBs[mb_num].coeffs[6][inv_zigzag[5]]=L5.s9;  MBs[mb_num].coeffs[6][inv_zigzag[6]]=L5.sA;  MBs[mb_num].coeffs[6][inv_zigzag[7]]=L5.sB;
+	MBs[mb_num].coeffs[6][inv_zigzag[8]]=L6.s8;	 MBs[mb_num].coeffs[6][inv_zigzag[9]]=L6.s9;  MBs[mb_num].coeffs[6][inv_zigzag[10]]=L6.sA; MBs[mb_num].coeffs[6][inv_zigzag[11]]=L6.sB;
+	MBs[mb_num].coeffs[6][inv_zigzag[12]]=L7.s8; MBs[mb_num].coeffs[6][inv_zigzag[13]]=L7.s9; MBs[mb_num].coeffs[6][inv_zigzag[14]]=L7.sA; MBs[mb_num].coeffs[6][inv_zigzag[15]]=L7.sB;
+	//block 13
+	                                             MBs[mb_num].coeffs[7][inv_zigzag[1]]=L4.sD;  MBs[mb_num].coeffs[7][inv_zigzag[2]]=L4.sE;  MBs[mb_num].coeffs[7][inv_zigzag[3]]=L4.sF;
+	MBs[mb_num].coeffs[7][inv_zigzag[4]]=L5.sC;	 MBs[mb_num].coeffs[7][inv_zigzag[5]]=L5.sD;  MBs[mb_num].coeffs[7][inv_zigzag[6]]=L5.sE;  MBs[mb_num].coeffs[7][inv_zigzag[7]]=L5.sF;
+	MBs[mb_num].coeffs[7][inv_zigzag[8]]=L6.sC;	 MBs[mb_num].coeffs[7][inv_zigzag[9]]=L6.sD;  MBs[mb_num].coeffs[7][inv_zigzag[10]]=L6.sE; MBs[mb_num].coeffs[7][inv_zigzag[11]]=L6.sF;
+	MBs[mb_num].coeffs[7][inv_zigzag[12]]=L7.sC; MBs[mb_num].coeffs[7][inv_zigzag[13]]=L7.sD; MBs[mb_num].coeffs[7][inv_zigzag[14]]=L7.sE; MBs[mb_num].coeffs[7][inv_zigzag[15]]=L7.sF;
+	//mb_row 2
+	//block 20
+	                                             MBs[mb_num].coeffs[8][inv_zigzag[1]]=L8.s1;  MBs[mb_num].coeffs[8][inv_zigzag[2]]=L8.s2;  MBs[mb_num].coeffs[8][inv_zigzag[3]]=L8.s3;
+	MBs[mb_num].coeffs[8][inv_zigzag[4]]=L9.s0;	 MBs[mb_num].coeffs[8][inv_zigzag[5]]=L9.s1;  MBs[mb_num].coeffs[8][inv_zigzag[6]]=L9.s2;  MBs[mb_num].coeffs[8][inv_zigzag[7]]=L9.s3;
+	MBs[mb_num].coeffs[8][inv_zigzag[8]]=L10.s0; MBs[mb_num].coeffs[8][inv_zigzag[9]]=L10.s1; MBs[mb_num].coeffs[8][inv_zigzag[10]]=L10.s2;MBs[mb_num].coeffs[8][inv_zigzag[11]]=L10.s3;
+	MBs[mb_num].coeffs[8][inv_zigzag[12]]=L11.s0;MBs[mb_num].coeffs[8][inv_zigzag[13]]=L11.s1;MBs[mb_num].coeffs[8][inv_zigzag[14]]=L11.s2;MBs[mb_num].coeffs[8][inv_zigzag[15]]=L11.s3;
+	//block 21
+	                                             MBs[mb_num].coeffs[9][inv_zigzag[1]]=L8.s5;  MBs[mb_num].coeffs[9][inv_zigzag[2]]=L8.s6;  MBs[mb_num].coeffs[9][inv_zigzag[3]]=L8.s7;
+	MBs[mb_num].coeffs[9][inv_zigzag[4]]=L9.s4;	 MBs[mb_num].coeffs[9][inv_zigzag[5]]=L9.s5;  MBs[mb_num].coeffs[9][inv_zigzag[6]]=L9.s6;  MBs[mb_num].coeffs[9][inv_zigzag[7]]=L9.s7;
+	MBs[mb_num].coeffs[9][inv_zigzag[8]]=L10.s4; MBs[mb_num].coeffs[9][inv_zigzag[9]]=L10.s5; MBs[mb_num].coeffs[9][inv_zigzag[10]]=L10.s6;MBs[mb_num].coeffs[9][inv_zigzag[11]]=L10.s7;
+	MBs[mb_num].coeffs[9][inv_zigzag[12]]=L11.s4;MBs[mb_num].coeffs[9][inv_zigzag[13]]=L11.s5;MBs[mb_num].coeffs[9][inv_zigzag[14]]=L11.s6;MBs[mb_num].coeffs[9][inv_zigzag[15]]=L11.s7;
+	//block 22
+	                                              MBs[mb_num].coeffs[10][inv_zigzag[1]]=L8.s9;  MBs[mb_num].coeffs[10][inv_zigzag[2]]=L8.sA;  MBs[mb_num].coeffs[10][inv_zigzag[3]]=L8.sB;
+	MBs[mb_num].coeffs[10][inv_zigzag[4]]=L9.s8;  MBs[mb_num].coeffs[10][inv_zigzag[5]]=L9.s9;  MBs[mb_num].coeffs[10][inv_zigzag[6]]=L9.sA;  MBs[mb_num].coeffs[10][inv_zigzag[7]]=L9.sB;
+	MBs[mb_num].coeffs[10][inv_zigzag[8]]=L10.s8; MBs[mb_num].coeffs[10][inv_zigzag[9]]=L10.s9; MBs[mb_num].coeffs[10][inv_zigzag[10]]=L10.sA;MBs[mb_num].coeffs[10][inv_zigzag[11]]=L10.sB;
+	MBs[mb_num].coeffs[10][inv_zigzag[12]]=L11.s8;MBs[mb_num].coeffs[10][inv_zigzag[13]]=L11.s9;MBs[mb_num].coeffs[10][inv_zigzag[14]]=L11.sA;MBs[mb_num].coeffs[10][inv_zigzag[15]]=L11.sB;
+	//block 23
+	                                              MBs[mb_num].coeffs[11][inv_zigzag[1]]=L8.sD;  MBs[mb_num].coeffs[11][inv_zigzag[2]]=L8.sE;  MBs[mb_num].coeffs[11][inv_zigzag[3]]=L8.sF;
+	MBs[mb_num].coeffs[11][inv_zigzag[4]]=L9.sC;  MBs[mb_num].coeffs[11][inv_zigzag[5]]=L9.sD;  MBs[mb_num].coeffs[11][inv_zigzag[6]]=L9.sE;  MBs[mb_num].coeffs[11][inv_zigzag[7]]=L9.sF;
+	MBs[mb_num].coeffs[11][inv_zigzag[8]]=L10.sC; MBs[mb_num].coeffs[11][inv_zigzag[9]]=L10.sD; MBs[mb_num].coeffs[11][inv_zigzag[10]]=L10.sE;MBs[mb_num].coeffs[11][inv_zigzag[11]]=L10.sF;
+	MBs[mb_num].coeffs[11][inv_zigzag[12]]=L11.sC;MBs[mb_num].coeffs[11][inv_zigzag[13]]=L11.sD;MBs[mb_num].coeffs[11][inv_zigzag[14]]=L11.sE;MBs[mb_num].coeffs[11][inv_zigzag[15]]=L11.sF;
+	//mb_row 3
+	//block 30
+	                                              MBs[mb_num].coeffs[12][inv_zigzag[1]]=L12.s1; MBs[mb_num].coeffs[12][inv_zigzag[2]]=L12.s2; MBs[mb_num].coeffs[12][inv_zigzag[3]]=L12.s3;
+	MBs[mb_num].coeffs[12][inv_zigzag[4]]=L13.s0; MBs[mb_num].coeffs[12][inv_zigzag[5]]=L13.s1; MBs[mb_num].coeffs[12][inv_zigzag[6]]=L13.s2; MBs[mb_num].coeffs[12][inv_zigzag[7]]=L13.s3;
+	MBs[mb_num].coeffs[12][inv_zigzag[8]]=L14.s0; MBs[mb_num].coeffs[12][inv_zigzag[9]]=L14.s1; MBs[mb_num].coeffs[12][inv_zigzag[10]]=L14.s2;MBs[mb_num].coeffs[12][inv_zigzag[11]]=L14.s3;
+	MBs[mb_num].coeffs[12][inv_zigzag[12]]=L15.s0;MBs[mb_num].coeffs[12][inv_zigzag[13]]=L15.s1;MBs[mb_num].coeffs[12][inv_zigzag[14]]=L15.s2;MBs[mb_num].coeffs[12][inv_zigzag[15]]=L15.s3;
+	//block 31
+	                                              MBs[mb_num].coeffs[13][inv_zigzag[1]]=L12.s5; MBs[mb_num].coeffs[13][inv_zigzag[2]]=L12.s6; MBs[mb_num].coeffs[13][inv_zigzag[3]]=L12.s7;
+	MBs[mb_num].coeffs[13][inv_zigzag[4]]=L13.s4; MBs[mb_num].coeffs[13][inv_zigzag[5]]=L13.s5; MBs[mb_num].coeffs[13][inv_zigzag[6]]=L13.s6; MBs[mb_num].coeffs[13][inv_zigzag[7]]=L13.s7;
+	MBs[mb_num].coeffs[13][inv_zigzag[8]]=L14.s4; MBs[mb_num].coeffs[13][inv_zigzag[9]]=L14.s5; MBs[mb_num].coeffs[13][inv_zigzag[10]]=L14.s6;MBs[mb_num].coeffs[13][inv_zigzag[11]]=L14.s7;
+	MBs[mb_num].coeffs[13][inv_zigzag[12]]=L15.s4;MBs[mb_num].coeffs[13][inv_zigzag[13]]=L15.s5;MBs[mb_num].coeffs[13][inv_zigzag[14]]=L15.s6;MBs[mb_num].coeffs[13][inv_zigzag[15]]=L15.s7;
+	//block 32
+	                                              MBs[mb_num].coeffs[14][inv_zigzag[1]]=L12.s9; MBs[mb_num].coeffs[14][inv_zigzag[2]]=L12.sA; MBs[mb_num].coeffs[14][inv_zigzag[3]]=L12.sB;
+	MBs[mb_num].coeffs[14][inv_zigzag[4]]=L13.s8; MBs[mb_num].coeffs[14][inv_zigzag[5]]=L13.s9; MBs[mb_num].coeffs[14][inv_zigzag[6]]=L13.sA; MBs[mb_num].coeffs[14][inv_zigzag[7]]=L13.sB;
+	MBs[mb_num].coeffs[14][inv_zigzag[8]]=L14.s8; MBs[mb_num].coeffs[14][inv_zigzag[9]]=L14.s9; MBs[mb_num].coeffs[14][inv_zigzag[10]]=L14.sA;MBs[mb_num].coeffs[14][inv_zigzag[11]]=L14.sB;
+	MBs[mb_num].coeffs[14][inv_zigzag[12]]=L15.s8;MBs[mb_num].coeffs[14][inv_zigzag[13]]=L15.s9;MBs[mb_num].coeffs[14][inv_zigzag[14]]=L15.sA;MBs[mb_num].coeffs[14][inv_zigzag[15]]=L15.sB;
+	//block 33
+	                                              MBs[mb_num].coeffs[15][inv_zigzag[1]]=L12.sD; MBs[mb_num].coeffs[15][inv_zigzag[2]]=L12.sE; MBs[mb_num].coeffs[15][inv_zigzag[3]]=L12.sF;
+	MBs[mb_num].coeffs[15][inv_zigzag[4]]=L13.sC; MBs[mb_num].coeffs[15][inv_zigzag[5]]=L13.sD; MBs[mb_num].coeffs[15][inv_zigzag[6]]=L13.sE; MBs[mb_num].coeffs[15][inv_zigzag[7]]=L13.sF;
+	MBs[mb_num].coeffs[15][inv_zigzag[8]]=L14.sC; MBs[mb_num].coeffs[15][inv_zigzag[9]]=L14.sD; MBs[mb_num].coeffs[15][inv_zigzag[10]]=L14.sE;MBs[mb_num].coeffs[15][inv_zigzag[11]]=L14.sF;
+	MBs[mb_num].coeffs[15][inv_zigzag[12]]=L15.sC;MBs[mb_num].coeffs[15][inv_zigzag[13]]=L15.sD;MBs[mb_num].coeffs[15][inv_zigzag[14]]=L15.sE;MBs[mb_num].coeffs[15][inv_zigzag[15]]=L15.sF;
+	
+	//block Y2
+	MBs[mb_num].coeffs[24][inv_zigzag[0]]=DL0.x;  MBs[mb_num].coeffs[24][inv_zigzag[1]]=DL0.y;  MBs[mb_num].coeffs[24][inv_zigzag[2]]=DL0.z;  MBs[mb_num].coeffs[24][inv_zigzag[3]]=DL0.w;
+	MBs[mb_num].coeffs[24][inv_zigzag[4]]=DL1.x;  MBs[mb_num].coeffs[24][inv_zigzag[5]]=DL1.y;  MBs[mb_num].coeffs[24][inv_zigzag[6]]=DL1.z;  MBs[mb_num].coeffs[24][inv_zigzag[7]]=DL1.w;
+	MBs[mb_num].coeffs[24][inv_zigzag[8]]=DL2.x;  MBs[mb_num].coeffs[24][inv_zigzag[9]]=DL2.y;  MBs[mb_num].coeffs[24][inv_zigzag[10]]=DL2.z; MBs[mb_num].coeffs[24][inv_zigzag[11]]=DL2.w;
+	MBs[mb_num].coeffs[24][inv_zigzag[12]]=DL3.x; MBs[mb_num].coeffs[24][inv_zigzag[13]]=DL3.y; MBs[mb_num].coeffs[24][inv_zigzag[14]]=DL3.z; MBs[mb_num].coeffs[24][inv_zigzag[15]]=DL3.w;
+	
+	//and now inverse
+	//iWHT
+    dequant_and_iWHT(&DL0, &DL1, &DL2, &DL3, y2_dc_q, y2_ac_q);
+	L0.s0=DL0.x;  L0.s4=DL0.y; L0.s8=DL0.z; L0.sC=DL0.w;
+	L4.s0=DL1.x;  L4.s4=DL1.y; L4.s8=DL1.z; L4.sC=DL1.w;
+	L8.s0=DL2.x;  L8.s4=DL2.y; L8.s8=DL2.z; L8.sC=DL2.w;
+	L12.s0=DL3.x; L12.s4=DL3.y;L12.s8=DL3.z;L12.sC=DL3.w;
+
+	//iDCT and reconstruct
+	//blocks 00-03
+	i = mad24(y,4,vector_y)*mul24(width,4) + mad24(x,4,vector_x);
+	DL0 = convert_int4(L0.s0123); DL1 = convert_int4(L1.s0123); DL2 = convert_int4(L2.s0123); DL3 = convert_int4(L3.s0123);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s0123 = convert_short4(DL0);	L1.s0123 = convert_short4(DL1);	L2.s0123 = convert_short4(DL2);	L3.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L0.s4567); DL1 = convert_int4(L1.s4567); DL2 = convert_int4(L2.s4567); DL3 = convert_int4(L3.s4567);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s4567 = convert_short4(DL0);	L1.s4567 = convert_short4(DL1);	L2.s4567 = convert_short4(DL2);	L3.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L0.s89AB); DL1 = convert_int4(L1.s89AB); DL2 = convert_int4(L2.s89AB); DL3 = convert_int4(L3.s89AB);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.s89AB = convert_short4(DL0);	L1.s89AB = convert_short4(DL1);	L2.s89AB = convert_short4(DL2);	L3.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L0.sCDEF); DL1 = convert_int4(L1.sCDEF); DL2 = convert_int4(L2.sCDEF); DL3 = convert_int4(L3.sCDEF);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L0.sCDEF = convert_short4(DL0);	L1.sCDEF = convert_short4(DL1);	L2.sCDEF = convert_short4(DL2);	L3.sCDEF = convert_short4(DL3);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L0.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L1.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L2.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L3.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	//blocks 10-13
+	DL0 = convert_int4(L4.s0123); DL1 = convert_int4(L5.s0123); DL2 = convert_int4(L6.s0123); DL3 = convert_int4(L7.s0123);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s0123 = convert_short4(DL0);	L5.s0123 = convert_short4(DL1);	L6.s0123 = convert_short4(DL2);	L7.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L4.s4567); DL1 = convert_int4(L5.s4567); DL2 = convert_int4(L6.s4567); DL3 = convert_int4(L7.s4567);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s4567 = convert_short4(DL0);	L5.s4567 = convert_short4(DL1);	L6.s4567 = convert_short4(DL2);	L7.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L4.s89AB); DL1 = convert_int4(L5.s89AB); DL2 = convert_int4(L6.s89AB); DL3 = convert_int4(L7.s89AB);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.s89AB = convert_short4(DL0);	L5.s89AB = convert_short4(DL1);	L6.s89AB = convert_short4(DL2);	L7.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L4.sCDEF); DL1 = convert_int4(L5.sCDEF); DL2 = convert_int4(L6.sCDEF); DL3 = convert_int4(L7.sCDEF);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L4.sCDEF = convert_short4(DL0);	L5.sCDEF = convert_short4(DL1);	L6.sCDEF = convert_short4(DL2);	L7.sCDEF = convert_short4(DL3);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L4.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L5.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L6.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L7.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	//blocks 20-23
+	DL0 = convert_int4(L8.s0123); DL1 = convert_int4(L9.s0123); DL2 = convert_int4(L10.s0123); DL3 = convert_int4(L11.s0123);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s0123 = convert_short4(DL0);	L9.s0123 = convert_short4(DL1);	L10.s0123 = convert_short4(DL2);	L11.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L8.s4567); DL1 = convert_int4(L9.s4567); DL2 = convert_int4(L10.s4567); DL3 = convert_int4(L11.s4567);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s4567 = convert_short4(DL0);	L9.s4567 = convert_short4(DL1);	L10.s4567 = convert_short4(DL2);	L11.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L8.s89AB); DL1 = convert_int4(L9.s89AB); DL2 = convert_int4(L10.s89AB); DL3 = convert_int4(L11.s89AB);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.s89AB = convert_short4(DL0);	L9.s89AB = convert_short4(DL1);	L10.s89AB = convert_short4(DL2);	L11.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L8.sCDEF); DL1 = convert_int4(L9.sCDEF); DL2 = convert_int4(L10.sCDEF); DL3 = convert_int4(L11.sCDEF);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L8.sCDEF = convert_short4(DL0);	L9.sCDEF = convert_short4(DL1);	L10.sCDEF = convert_short4(DL2);	L11.sCDEF = convert_short4(DL3);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L8.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L9.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L10.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L11.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	//blocks 30-33
+	DL0 = convert_int4(L12.s0123); DL1 = convert_int4(L13.s0123); DL2 = convert_int4(L14.s0123); DL3 = convert_int4(L15.s0123);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s0123 = convert_short4(DL0);	L13.s0123 = convert_short4(DL1);	L14.s0123 = convert_short4(DL2);	L15.s0123 = convert_short4(DL3);
+	DL0 = convert_int4(L12.s4567); DL1 = convert_int4(L13.s4567); DL2 = convert_int4(L14.s4567); DL3 = convert_int4(L15.s4567);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s4567 = convert_short4(DL0);	L13.s4567 = convert_short4(DL1);	L14.s4567 = convert_short4(DL2);	L15.s4567 = convert_short4(DL3);
+	DL0 = convert_int4(L12.s89AB); DL1 = convert_int4(L13.s89AB); DL2 = convert_int4(L14.s89AB); DL3 = convert_int4(L15.s89AB);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.s89AB = convert_short4(DL0);	L13.s89AB = convert_short4(DL1);	L14.s89AB = convert_short4(DL2);	L15.s89AB = convert_short4(DL3);
+	DL0 = convert_int4(L12.sCDEF); DL1 = convert_int4(L13.sCDEF); DL2 = convert_int4(L14.sCDEF); DL3 = convert_int4(L15.sCDEF);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
+	L12.sCDEF = convert_short4(DL0);	L13.sCDEF = convert_short4(DL1);	L14.sCDEF = convert_short4(DL2);	L15.sCDEF = convert_short4(DL3);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L12.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L13.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L14.sCDEF += convert_short4(buf); i = mad24(width,16,i-48);
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s0123 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s4567 += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.s89AB += convert_short4(buf); i += 16;
+	buf.x = prev_frame[i]; buf.y = prev_frame[i+4]; buf.z = prev_frame[i+8]; buf.w = prev_frame[i+12]; L15.sCDEF += convert_short4(buf); 
+	
+	//now place results in reconstruction frame
+	i = y*width + x;
+	buf = convert_uchar4_sat(L0.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L0.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L0.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L0.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L1.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L1.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L1.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L1.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L2.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L2.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L2.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L2.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L3.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L3.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L3.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L3.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L4.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L4.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L4.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L4.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L5.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L5.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L5.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L5.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L6.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L6.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L6.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L6.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L7.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L7.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L7.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L7.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L8.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L8.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L8.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L8.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L9.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L9.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L9.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L9.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L10.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L10.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L10.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L10.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L11.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L11.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L11.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L11.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L12.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L12.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L12.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L12.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L13.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L13.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L13.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L13.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L14.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L14.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L14.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L14.sCDEF); vstore4(buf, 0, recon_frame+i+12); i+=width;
+	buf = convert_uchar4_sat(L15.s0123); vstore4(buf, 0, recon_frame+i);
+	buf = convert_uchar4_sat(L15.s4567); vstore4(buf, 0, recon_frame+i+4);
+	buf = convert_uchar4_sat(L15.s89AB); vstore4(buf, 0, recon_frame+i+8);
+	buf = convert_uchar4_sat(L15.sCDEF); vstore4(buf, 0, recon_frame+i+12);
+
+	return;
+}
+
+	
+__kernel void luma_transform_8x8(__global uchar *current_frame, //0
 								__global uchar *recon_frame, //1
 								__global uchar *prev_frame, //2
 								__global macroblock *MBs, //3
@@ -704,12 +1333,12 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	
 {
 	__private int4 DL0, DL1, DL2, DL3;
-	__private int4 BDL0, BDL1, BDL2, BDL3;
+
 	__private short8 DCTLine0, DCTLine1, DCTLine2, DCTLine3,
 					  DCTLine4, DCTLine5, DCTLine6, DCTLine7;
 	__private uchar4 CL, PL;
 	
-    	__private int cx, cy, px, py, vector_x, vector_y;	
+   	__private int cx, cy, px, py, vector_x, vector_y;	
 	__private int ci, pi; 
 	__private int mb_num, b8x8_num, b4x4_in_mb,b8x8_in_mb;
 	__private int width_x4 = width*4;		
@@ -718,6 +1347,8 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	cx = (b8x8_num % (width/8))*8;
 	cy = (b8x8_num / (width/8))*8;
 	mb_num = (cy/16)*(width/16) + (cx/16);
+	
+	if (MBs[mb_num].parts != are8x8) return;
 	
 	ci = cy*width + cx; 
 	b4x4_in_mb = ((cy%16)/4)*4 + (cx%16)/4;
@@ -738,18 +1369,18 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	// block 00
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL0 = convert_int4(CL) - convert_int4(PL);
+	DL0 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL1 = convert_int4(CL) - convert_int4(PL);
+	DL1 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL2 = convert_int4(CL) - convert_int4(PL);
+	DL2 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL3 = convert_int4(CL) - convert_int4(PL);
+	DL3 = convert_int4(CL) - convert_int4(PL);
 	ci -= (width*4); pi -= (width_x4*16);
-	DCT_and_quant(BDL0, BDL1, BDL2, BDL3, &DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	DCTLine0.s0123 = convert_short4(DL0);
 	DCTLine1.s0123 = convert_short4(DL1);
 	DCTLine2.s0123 = convert_short4(DL2);
@@ -758,18 +1389,18 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	ci += 4; pi += 16;
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL0 = convert_int4(CL) - convert_int4(PL);
+	DL0 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL1 = convert_int4(CL) - convert_int4(PL);
+	DL1 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL2 = convert_int4(CL) - convert_int4(PL);
+	DL2 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL3 = convert_int4(CL) - convert_int4(PL);
+	DL3 = convert_int4(CL) - convert_int4(PL);
 	ci -= 4; pi -= 16;
-	DCT_and_quant(BDL0, BDL1, BDL2, BDL3, &DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	DCTLine0.s4567 = convert_short4(DL0);
 	DCTLine1.s4567 = convert_short4(DL1);
 	DCTLine2.s4567 = convert_short4(DL2);
@@ -777,18 +1408,18 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	// block 10
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL0 = convert_int4(CL) - convert_int4(PL);
+	DL0 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL1 = convert_int4(CL) - convert_int4(PL);
+	DL1 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL2 = convert_int4(CL) - convert_int4(PL);
+	DL2 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL3 = convert_int4(CL) - convert_int4(PL);
+	DL3 = convert_int4(CL) - convert_int4(PL);
 	ci -= (width*4); pi -= (width_x4*16);
-	DCT_and_quant(BDL0, BDL1, BDL2, BDL3, &DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	DCTLine4.s0123 = convert_short4(DL0);
 	DCTLine5.s0123 = convert_short4(DL1);
 	DCTLine6.s0123 = convert_short4(DL2);
@@ -797,17 +1428,17 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	ci += 4; pi += 16;
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL0 = convert_int4(CL) - convert_int4(PL);
+	DL0 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL1 = convert_int4(CL) - convert_int4(PL);
+	DL1 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL2 = convert_int4(CL) - convert_int4(PL);
+	DL2 = convert_int4(CL) - convert_int4(PL);
 	CL = vload4(0, &current_frame[ci]); ci += width;
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
-	BDL3 = convert_int4(CL) - convert_int4(PL);
-	DCT_and_quant(BDL0, BDL1, BDL2, BDL3, &DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	DL3 = convert_int4(CL) - convert_int4(PL);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	DCTLine4.s4567 = convert_short4(DL0);
 	DCTLine5.s4567 = convert_short4(DL1);
 	DCTLine6.s4567 = convert_short4(DL2);
@@ -885,10 +1516,11 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	MBs[mb_num].coeffs[b4x4_in_mb + 5][inv_zigzag[15]]=DCTLine7.s7;
 	
 	// block 00
-	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, convert_int4(DCTLine0.s0123), 
-											 convert_int4(DCTLine1.s0123),
-											 convert_int4(DCTLine2.s0123), 
-											 convert_int4(DCTLine3.s0123), dc_q, ac_q);
+	DL0 = convert_int4(DCTLine0.s0123);
+	DL1 = convert_int4(DCTLine1.s0123);
+	DL2 = convert_int4(DCTLine2.s0123);
+	DL3 = convert_int4(DCTLine3.s0123);	
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
 	DL0 += convert_int4(PL);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;	
@@ -904,10 +1536,11 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	ci-=(width*4); pi -= (width_x4*16);
 	// block 01
 	ci+=4; pi += 16;
-	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, convert_int4(DCTLine0.s4567), 
-											 convert_int4(DCTLine1.s4567),
-											 convert_int4(DCTLine2.s4567), 
-											 convert_int4(DCTLine3.s4567), dc_q, ac_q);
+	DL0 = convert_int4(DCTLine0.s4567);
+	DL1 = convert_int4(DCTLine1.s4567);
+	DL2 = convert_int4(DCTLine2.s4567);
+	DL3 = convert_int4(DCTLine3.s4567);	
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
 	DL0 += convert_int4(PL);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
@@ -922,10 +1555,11 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	*(__global uchar4*)(&recon_frame[ci]) = (convert_uchar4_sat(DL3)); ci+=width;
 	ci-=4; pi -= 16;
 	// block 10
-	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, convert_int4(DCTLine4.s0123), 
-											 convert_int4(DCTLine5.s0123),
-											 convert_int4(DCTLine6.s0123), 
-											 convert_int4(DCTLine7.s0123), dc_q, ac_q);
+	DL0 = convert_int4(DCTLine4.s0123);
+	DL1 = convert_int4(DCTLine5.s0123);
+	DL2 = convert_int4(DCTLine6.s0123);
+	DL3 = convert_int4(DCTLine7.s0123);	
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
 	DL0 += convert_int4(PL);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
@@ -941,10 +1575,11 @@ __kernel void luma_transform( 	__global uchar *current_frame, //0
 	ci-=(width*4); pi -= (width_x4*16);
 	// block 01
 	ci+=4; pi += 16;
-	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, convert_int4(DCTLine4.s4567), 
-											 convert_int4(DCTLine5.s4567),
-											 convert_int4(DCTLine6.s4567), 
-											 convert_int4(DCTLine7.s4567), dc_q, ac_q);
+	DL0 = convert_int4(DCTLine4.s4567);
+	DL1 = convert_int4(DCTLine5.s4567);
+	DL2 = convert_int4(DCTLine6.s4567);
+	DL3 = convert_int4(DCTLine7.s4567);	
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
 	DL0 += convert_int4(PL);
 	PL.x = prev_frame[pi]; PL.y = prev_frame[pi+4]; PL.z = prev_frame[pi+8]; PL.w = prev_frame[pi+12]; pi += width_x4*4;
@@ -1026,47 +1661,44 @@ __kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame 
 	PredictorLine3.z = prev_frame[(py + 24)*chroma_width_x8 + px + 16];
 	PredictorLine3.w = prev_frame[(py + 24)*chroma_width_x8 + px + 24];
 	
-	__private int4 BestDiffLine0, BestDiffLine1, BestDiffLine2, BestDiffLine3;
-	__private int4 DiffLine0, DiffLine1, DiffLine2, DiffLine3;
+	__private int4 DL0, DL1, DL2, DL3;
 	
-	BestDiffLine0 = convert_int4(CurrentLine0) - convert_int4(PredictorLine0);
-	BestDiffLine1 = convert_int4(CurrentLine1) - convert_int4(PredictorLine1);
-	BestDiffLine2 = convert_int4(CurrentLine2) - convert_int4(PredictorLine2);
-	BestDiffLine3 = convert_int4(CurrentLine3) - convert_int4(PredictorLine3);
+	DL0 = convert_int4(CurrentLine0) - convert_int4(PredictorLine0);
+	DL1 = convert_int4(CurrentLine1) - convert_int4(PredictorLine1);
+	DL2 = convert_int4(CurrentLine2) - convert_int4(PredictorLine2);
+	DL3 = convert_int4(CurrentLine3) - convert_int4(PredictorLine3);
 	
-	DCT_and_quant(BestDiffLine0, BestDiffLine1, BestDiffLine2, BestDiffLine3,
-					&DiffLine0, &DiffLine1, &DiffLine2, &DiffLine3, dc_q, ac_q);
+	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[0]]=(short)DiffLine0.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[1]]=(short)DiffLine0.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[2]]=(short)DiffLine0.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[3]]=(short)DiffLine0.w;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[4]]=(short)DiffLine1.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[5]]=(short)DiffLine1.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[6]]=(short)DiffLine1.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[7]]=(short)DiffLine1.w;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[8]]=(short)DiffLine2.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[9]]=(short)DiffLine2.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[10]]=(short)DiffLine2.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[11]]=(short)DiffLine2.w;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[12]]=(short)DiffLine3.x;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[13]]=(short)DiffLine3.y;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[14]]=(short)DiffLine3.z;
-	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[15]]=(short)DiffLine3.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[0]]=(short)DL0.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[1]]=(short)DL0.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[2]]=(short)DL0.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[3]]=(short)DL0.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[4]]=(short)DL1.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[5]]=(short)DL1.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[6]]=(short)DL1.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[7]]=(short)DL1.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[8]]=(short)DL2.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[9]]=(short)DL2.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[10]]=(short)DL2.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[11]]=(short)DL2.w;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[12]]=(short)DL3.x;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[13]]=(short)DL3.y;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[14]]=(short)DL3.z;
+	MBs[mb_num].coeffs[block_in_mb][inv_zigzag[15]]=(short)DL3.w;
 	
-	dequant_and_iDCT(&BestDiffLine0, &BestDiffLine1, &BestDiffLine2, &BestDiffLine3, 
-					DiffLine0, DiffLine1, DiffLine2, DiffLine3, dc_q, ac_q);
+	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	
-	BestDiffLine0 += convert_int4(PredictorLine0);
-	BestDiffLine1 += convert_int4(PredictorLine1);
-	BestDiffLine2 += convert_int4(PredictorLine2);
-	BestDiffLine3 += convert_int4(PredictorLine3);
+	DL0 += convert_int4(PredictorLine0);
+	DL1 += convert_int4(PredictorLine1);
+	DL2 += convert_int4(PredictorLine2);
+	DL3 += convert_int4(PredictorLine3);
 	
-	CurrentLine0 = (convert_uchar4_sat(BestDiffLine0));
-	CurrentLine1 = (convert_uchar4_sat(BestDiffLine1));
-	CurrentLine2 = (convert_uchar4_sat(BestDiffLine2));
-	CurrentLine3 = (convert_uchar4_sat(BestDiffLine3));
+	CurrentLine0 = (convert_uchar4_sat(DL0));
+	CurrentLine1 = (convert_uchar4_sat(DL1));
+	CurrentLine2 = (convert_uchar4_sat(DL2));
+	CurrentLine3 = (convert_uchar4_sat(DL3));
 	vstore4(CurrentLine0, 0 , recon_frame + ci00);
 	vstore4(CurrentLine1, 0 , recon_frame + ci10);
 	vstore4(CurrentLine2, 0 , recon_frame + ci20);
