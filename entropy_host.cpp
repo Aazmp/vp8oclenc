@@ -221,8 +221,10 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 
 	imaginary_edata.base_mv.raw = 0;
 	imaginary_edata.is_inter_mb = 0; 
+	imaginary_edata.parts = are16x16;
 
 	mb_edata = &(frames.e_data[mb_num]);
+	mb_edata->parts=frames.transformed_blocks[mb_num].parts;
 	mb_edata->base_mv.d.x = frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = frames.transformed_blocks[mb_num].vector_y[3];
 	if (mb_row>0) above_edata = &(frames.e_data[mb_num-video.mb_width]);
@@ -297,7 +299,11 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		if (mb_mv->raw == mb_mv_list[1].raw)
 			cnt[1] += 1;
 	// cnt[CNT_SPLITMV] = ((above->base.y_mode == SPLITMV) + (left->base.y_mode == SPLITMV)) * 2 + (aboveleft->base.y_mode == SPLITMV);
-	cnt[3] = ((above_edata->is_inter_mb == 1) + (left_edata->is_inter_mb == 1))*2 + (above_left_edata->is_inter_mb == 1); 
+	cnt[3] = (
+		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		)*2 + 
+		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
 	if (cnt[2] > cnt[1])
 	{
 		int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
@@ -316,86 +322,116 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 
 	encoding_symbol s_tmp;
 
-	// encode SPLITMV mode
-	s_tmp.bits = 15; // "1111"
-	s_tmp.size = 4;
-	write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
-
-	// encode sub_mv_mode
-	s_tmp.bits = 2; // mv_quarters = "10" 
-	s_tmp.size = 2;
-	write_symbol(vbe, s_tmp, split_mv_probs, split_mv_tree);
-	
-	int32_t b_num;
-	for (b_num = 0; b_num < 4; ++b_num)
+	if (frames.transformed_blocks[mb_num].parts == are8x8)
 	{
-		// b_num being part number and block number
-		union mv left_mv, above_mv, this_mv;
-		int32_t b_col, b_row;
-		b_row = b_num / 2; b_col = b_num % 2;
-		// read previous vectors (they are already updated, or zeros if it's border case)
-		if (b_col > 0) {
-			left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
-			left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+		// encode SPLITMV mode
+		s_tmp.bits = 15; // "1111"
+		s_tmp.size = 4;
+		write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+
+		// encode sub_mv_mode
+		s_tmp.bits = 2; // mv_quarters = "10" 
+		s_tmp.size = 2;
+		write_symbol(vbe, s_tmp, split_mv_probs, split_mv_tree);
+		
+		int32_t b_num;
+		for (b_num = 0; b_num < 4; ++b_num)
+		{
+			// b_num being part number and block number
+			union mv left_mv, above_mv, this_mv;
+			int32_t b_col, b_row;
+			b_row = b_num / 2; b_col = b_num % 2;
+			// read previous vectors (they are already updated, or zeros if it's border case)
+			if (b_col > 0) {
+				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+			}
+			else if (left_edata->is_inter_mb == 1) {
+				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
+			} 
+			else {
+				left_mv.d.x = 0; // because there are zeroes there
+				left_mv.d.y = 0;
+			}
+			if (b_row > 0) {
+				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
+			}
+			else if (above_edata->is_inter_mb == 1) {
+				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
+			} 
+			else {
+				above_mv.d.x = 0; 
+				above_mv.d.y = 0;
+			}
+			// here we take out computed vectors and update them to refence to previous
+			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
+			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
+			int32_t lez = !(left_mv.raw); // flags for context for decoding submv
+			int32_t aez = !(above_mv.raw);
+			int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			int32_t ctx = 0;
+			if (lea&&lez) ctx = 4; 
+			else if (lea) ctx = 3;
+			else if (aez) ctx = 2; // it seems above ha higher priority here
+			else if (lez) ctx = 1;
+			if (this_mv.raw == left_mv.raw) {// LEFT = "0" 
+				s_tmp.bits = 0;
+				s_tmp.size = 1;
+				//write_symbol(encoder, symbol, *probs, tree[])
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else if (this_mv.raw == above_mv.raw) { // ABOVE = "10" 
+				s_tmp.bits = 2;
+				s_tmp.size = 2;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else if (this_mv.raw == 0) { // ZERO = "110"
+				s_tmp.bits = 6;
+				s_tmp.size = 3;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else { // NEW = "111" 
+				s_tmp.bits = 7;
+				s_tmp.size = 3;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+				// and here we subtract best_mv found for this macroblock and stored in mb_mv_list[0]
+				this_mv.d.x -= mb_mv_list[0].d.x;
+				this_mv.d.y -= mb_mv_list[0].d.y;
+				write_mv(vbe, this_mv, new_mv_context);
+			}
+
 		}
-		else if (left_edata->is_inter_mb == 1) {
-			left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
-			left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
-		} 
-		else {
-			left_mv.d.x = 0; // because there are zeroes there
-			left_mv.d.y = 0;
-		}
-		if (b_row > 0) {
-			above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
-			above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
-		}
-		else if (above_edata->is_inter_mb == 1) {
-			above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
-			above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
-		} 
-		else {
-			above_mv.d.x = 0; 
-			above_mv.d.y = 0;
-		}
-		// here we take out computed vectors and update them to refence to previous
-		this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
-		this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-		int32_t lez = !(left_mv.raw); // flags for context for decoding submv
-		int32_t aez = !(above_mv.raw);
-		int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
-		int32_t ctx = 0;
-		if (lea&&lez) ctx = 4; 
-		else if (lea) ctx = 3;
-		else if (aez) ctx = 2; // it seems above ha higher priority here
-		else if (lez) ctx = 1;
-		if (this_mv.raw == left_mv.raw) {// LEFT = "0" 
+	}
+	else if (frames.transformed_blocks[mb_num].parts == are16x16)
+	{
+		if (mb_edata->base_mv.raw == 0) {
 			s_tmp.bits = 0;
 			s_tmp.size = 1;
-			//write_symbol(encoder, symbol, *probs, tree[])
-			write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
-		}
-		else if (this_mv.raw == above_mv.raw) { // ABOVE = "10" 
-			s_tmp.bits = 2;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else if (mb_edata->base_mv.raw == mb_mv_list[1].raw) {
+			s_tmp.bits = 2; 
 			s_tmp.size = 2;
-			write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
-		}
-		else if (this_mv.raw == 0) { // ZERO = "110"
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else if (mb_edata->base_mv.raw == mb_mv_list[2].raw) {
 			s_tmp.bits = 6;
 			s_tmp.size = 3;
-			write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else {
+			s_tmp.bits = 14; 
+			s_tmp.size = 4;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+			union mv mv_delta;
+			mv_delta.d.x = mb_edata->base_mv.d.x - mb_mv_list[0].d.x;
+			mv_delta.d.y = mb_edata->base_mv.d.y - mb_mv_list[0].d.y;
+			write_mv(vbe, mv_delta, new_mv_context);
 		}
-		else { // NEW = "111" 
-			s_tmp.bits = 7;
-			s_tmp.size = 3;
-			write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
-			// and here we subtract best_mv found for this macroblock and stored in mb_mv_list[0]
-			this_mv.d.x -= mb_mv_list[0].d.x;
-			this_mv.d.y -= mb_mv_list[0].d.y;
-			write_mv(vbe, this_mv, new_mv_context);
-		}
-
 	}
+	else printf("\nUnsupported macroblock partitioning %d! (encoding)\n",frames.transformed_blocks[mb_num].parts);
+
+
 	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
 	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
@@ -513,8 +549,10 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	macroblock_extra_data imaginary_edata;
 
 	imaginary_edata.base_mv.raw = 0;
+	imaginary_edata.parts = are16x16;
 
 	mb_edata = &(frames.e_data[mb_num]);
+	mb_edata->parts = frames.transformed_blocks[mb_num].parts;
 	mb_edata->base_mv.d.x = frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = frames.transformed_blocks[mb_num].vector_y[3];
 	if (mb_row>0) above_edata = &(frames.e_data[mb_num-video.mb_width]);
@@ -563,10 +601,15 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 			*cntx += 1;
 		} else cnt[0] += 1;
 	}
+
 	if (cnt[3]) 
 		if (mb_mv->raw == mb_mv_list[1].raw)
 			cnt[1] += 1;
-	cnt[3] = 0; 
+	cnt[3] = (
+		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		)*2 + 
+		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
 	if (cnt[2] > cnt[1])
 	{
 		int32_t tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
@@ -583,65 +626,79 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	// -		we count only now
 	// encode sub_mv_mode
 	// -
-	
-	int32_t b_num;
-	for (b_num = 0; b_num < 4; ++b_num)
+	if (frames.transformed_blocks[mb_num].parts == are8x8)
 	{
-		// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
-		// b_num being part number and block number
-		union mv left_mv, above_mv, this_mv;
-		int32_t b_col, b_row;
-		b_row = b_num / 2; b_col = b_num % 2;
-		// read previous vectors (they are already updated, or zeros if it's border case)
-		if (b_col > 0) {
-			left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
-			left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+		int32_t b_num;
+		for (b_num = 0; b_num < 4; ++b_num)
+		{
+			// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
+			// b_num being part number and block number
+			union mv left_mv, above_mv, this_mv;
+			int32_t b_col, b_row;
+			b_row = b_num / 2; b_col = b_num % 2;
+			// read previous vectors (they are already updated, or zeros if it's border case)
+			if (b_col > 0) {
+				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+			}
+			else if (left_edata->is_inter_mb == 1) {
+				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
+			} 
+			else {
+				left_mv.d.x = 0; // because there are zeroes there
+				left_mv.d.y = 0;
+			}
+			if (b_row > 0) {
+				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
+			}
+			else if (above_edata->is_inter_mb == 1) {
+				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
+			} 
+			else {
+				above_mv.d.x = 0; 
+				above_mv.d.y = 0;
+			}
+			// here we take out computed vectors and update them to refence to previous
+			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
+			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
+			int32_t lez = !(left_mv.raw); // flags for context for decoding submv
+			int32_t aez = !(above_mv.raw);
+			int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			int32_t ctx = 0;
+			if (lea&&lez) ctx = 4; 
+			else if (lea) ctx = 3;
+			else if (aez) ctx = 2;
+			else if (lez) ctx = 1;
+			if ((this_mv.raw != left_mv.raw) &&
+				(this_mv.raw != above_mv.raw) &&
+				(this_mv.raw != 0)) 
+			{ // NEW = "111" 
+				this_mv.d.x -= mb_mv_list[0].d.x;
+				this_mv.d.y -= mb_mv_list[0].d.y;
+				count_mv(vbe, this_mv, num_mv_context, denom_mv_context);
+			}
 		}
-		else if (left_edata->is_inter_mb == 1) {
-			left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
-			left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
-		} 
-		else {
-			left_mv.d.x = 0; // because there are zeroes there
-			left_mv.d.y = 0;
-		}
-		if (b_row > 0) {
-			above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
-			above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
-		}
-		else if (above_edata->is_inter_mb == 1) {
-			above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
-			above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
-		} 
-		else {
-			above_mv.d.x = 0; 
-			above_mv.d.y = 0;
-		}
-		// here we take out computed vectors and update them to refence to previous
-		this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
-		this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-		int32_t lez = !(left_mv.raw); // flags for context for decoding submv
-		int32_t aez = !(above_mv.raw);
-		int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
-		int32_t ctx = 0;
-		if (lea&&lez) ctx = 4; 
-		else if (lea) ctx = 3;
-		else if (aez) ctx = 2;
-		else if (lez) ctx = 1;
-		if ((this_mv.raw != left_mv.raw) &&
-			(this_mv.raw != above_mv.raw) &&
-			(this_mv.raw != 0)) 
-		{ // NEW = "111" 
-			this_mv.d.x -= mb_mv_list[0].d.x;
-			this_mv.d.y -= mb_mv_list[0].d.y;
-			count_mv(vbe, this_mv, num_mv_context, denom_mv_context);
-		}
-
 	}
+	else if (frames.transformed_blocks[mb_num].parts == are16x16)
+	{
+		if ((mb_edata->base_mv.raw != 0) && 
+			(mb_edata->base_mv.raw != mb_mv_list[1].raw) &&
+			(mb_edata->base_mv.raw != mb_mv_list[2].raw)) {
+			union mv mv_delta;
+			mv_delta.d.x = mb_edata->base_mv.d.x - mb_mv_list[0].d.x;
+			mv_delta.d.y = mb_edata->base_mv.d.y - mb_mv_list[0].d.y;
+			count_mv(vbe, mv_delta, num_mv_context, denom_mv_context);
+		}
+	}
+	else printf("\nUnsupported macroblock partitioning %d! (counting)\n",frames.transformed_blocks[mb_num].parts);
 	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
 	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
 	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
+	return;
 }
 
 
@@ -911,8 +968,9 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 				num_mv_context[i][j] = 0;
 				denom_mv_context[i][j] = 1;
 			}
-		for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
-			count_mv_probs(vbe, mb_num);
+		for (mb_num = 0; mb_num < video.mb_count; ++mb_num) {
+			if (frames.e_data[mb_num].is_inter_mb) count_mv_probs(vbe, mb_num);
+		}
 		for (i = 0; i < 2; ++i)
 			for (j = 0; j < 19; ++j) {
 				write_bool(vbe, vp8_mv_update_probs[i][j], 1);
