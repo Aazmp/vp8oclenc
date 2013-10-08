@@ -368,6 +368,7 @@ static void WHT_quant_4x4(int32_t mb_num)
 
 void predict_and_transform_mb(int32_t mb_num)
 {
+	frames.transformed_blocks[mb_num].parts = are4x4;
 	// prepare predictors (TM_B_PRED) and transform each block
     uint32_t i;
     uint32_t mb_row, mb_col, b_num, b_col, b_row;
@@ -563,21 +564,6 @@ float count_SSIM_16x16(uint8_t *frame1, int32_t width1, uint8_t *frame2, int32_t
 	return (num/denom);
 }
 
-int chroma_corrupted(uint8_t* frame1, int32_t width1, uint8_t *frame2, int32_t width2)
-{
-	int32_t i,j, sum1 = 0, sum2 = 0;
-	for(i = 0; i < 8; ++i)
-		for(j = 0; j < 8; ++j)
-			sum1 += (int)frame1[i*width1 + j];
-	for(i = 0; i < 8; ++i)
-		for(j = 0; j < 8; ++j)
-			sum2 += (int)frame2[i*width2 + j];
-	sum1 = sum1 - sum2;
-	sum1 = (sum1 < 0) ? -sum1 : sum1;
-	sum1 = (sum1 > 2560); 
-	return sum1; 
-}
-
 int test_inter_on_intra(int32_t mb_num)
 {
 	macroblock test_mb;
@@ -706,9 +692,8 @@ int test_inter_on_intra(int32_t mb_num)
 	
 	test_mb.SSIM = count_SSIM_16x16(test_recon_Y, test_width, frames.current_Y + Y_offset, video.wrk_width);
 	if (test_mb.SSIM > frames.transformed_blocks[mb_num].SSIM)
-	//	&& (!chroma_corrupted(test_recon_U, test_width>>1, frames.current_U  + UV_offset, video.wrk_width>>1)) 
-	//	&& (!chroma_corrupted(test_recon_V, test_width>>1, frames.current_V  + UV_offset, video.wrk_width>>1)))
 	{
+		test_mb.parts = are4x4;
 		//then we replace inter encoded and reconstructed MB with intra
 		++frames.replaced;
 		// replace residual
@@ -1113,8 +1098,12 @@ void inter_transform()
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 6, sizeof(int32_t), &video.quantizer_y_dc_p);
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 7, sizeof(int32_t), &video.quantizer_y_ac_p);
 
-	device.state_gpu = clSetKernelArg(device.luma_transform, 6, sizeof(int32_t), &video.quantizer_y_dc_p);
-	device.state_gpu = clSetKernelArg(device.luma_transform, 7, sizeof(int32_t), &video.quantizer_y_ac_p);
+	device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 6, sizeof(int32_t), &video.quantizer_y_dc_p);
+	device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 7, sizeof(int32_t), &video.quantizer_y_ac_p);
+
+	device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 5, sizeof(int32_t), &video.quantizer_y_ac_p);
+	device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 6, sizeof(int32_t), &video.quantizer_y2_dc_p);
+	device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 7, sizeof(int32_t), &video.quantizer_y2_ac_p);
 
 	device.state_gpu = clSetKernelArg(device.chroma_transform, 7, sizeof(int32_t), &video.quantizer_uv_dc_p);
 	device.state_gpu = clSetKernelArg(device.chroma_transform, 8, sizeof(int32_t), &video.quantizer_uv_ac_p);
@@ -1209,12 +1198,16 @@ void inter_transform()
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 
 	entropy_encode(); // entropy coding of previous frame
-	
+
+	device.state_gpu = clFinish(device.commandQueue_gpu);
+	device.gpu_work_items_per_dim[0] = video.mb_count;
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_transform_16x16, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+
 	blocks_to_be_done = video.mb_count*4;
 	for (blocks_done = 0; blocks_done < blocks_to_be_done; /*counter increased inside cycle*/)
     {	
 		first_block_offset = blocks_done;
-		device.state_gpu = clSetKernelArg(device.luma_transform, 5, sizeof(int32_t), &first_block_offset);
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 5, sizeof(int32_t), &first_block_offset);
         if ((size_t)(blocks_to_be_done - blocks_done) > device.gpu_work_items_limit)
         {
             device.gpu_work_items_per_dim[0] = device.gpu_work_items_limit;
@@ -1226,7 +1219,7 @@ void inter_transform()
             blocks_done += blocks_to_be_done - blocks_done;
         }
 		device.state_gpu = clFinish(device.commandQueue_gpu);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_transform, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.luma_transform_8x8, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		device.state_gpu = clFlush(device.commandQueue_gpu);
     }
 
@@ -1329,7 +1322,7 @@ void check_SSIM()
 	}
 
 	frames.new_SSIM /= (float)video.mb_count;
-	//printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f; replaced:%d\n", frames.frame_number, frames.new_SSIM, min, frames.replaced);
+	printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f; replaced:%d\n", frames.frame_number, frames.new_SSIM, min, frames.replaced);
 	return;
 }
 
@@ -1416,13 +1409,15 @@ int main(int argc, char *argv[])
 		{
 			frames.transformed_blocks[mb_num].non_zero_coeffs = 0;
 			int b_num, coeff_num;
-			int b_last = 24;
-			int first_coeff = 0;
-			for (b_num = 0; b_num < b_last; ++b_num)
+			int b_last = (frames.transformed_blocks[mb_num].parts == are16x16) ? 25 : 24;
+			for (b_num = 0; b_num < b_last; ++b_num) {
+				int first_coeff = (frames.transformed_blocks[mb_num].parts == are16x16) ? 1 : 0;
+				first_coeff = (b_num >= 16) ? 0 : first_coeff;
 				for (coeff_num = first_coeff; coeff_num < 16; ++coeff_num)
 					frames.transformed_blocks[mb_num].non_zero_coeffs += (frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num] < 0) ?
 																			-frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num] :	
 																			frames.transformed_blocks[mb_num].coeffs[b_num][coeff_num];
+			}
 			if (frames.transformed_blocks[mb_num].non_zero_coeffs > 0) ++frames.skip_prob;
 		}
 		frames.skip_prob *= 256;
@@ -1467,7 +1462,7 @@ int main(int argc, char *argv[])
 			device.state_gpu = clFinish(device.commandQueue_gpu);
 			// copy transformed_blocks to host
 			device.state_gpu = clEnqueueReadBuffer(device.commandQueue_gpu, device.transformed_blocks_gpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
-			
+
 			for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
 				frames.e_data[mb_num].is_inter_mb = 1;
 
@@ -1555,7 +1550,8 @@ void finalize()
 		clReleaseKernel(device.downsample);
 		clReleaseKernel(device.luma_search_1step);
 		clReleaseKernel(device.luma_search_2step);
-		clReleaseKernel(device.luma_transform);
+		clReleaseKernel(device.luma_transform_8x8);
+		clReleaseKernel(device.luma_transform_16x16);
 		clReleaseKernel(device.chroma_transform);
 		clReleaseCommandQueue(device.commandQueue_gpu);
 		clReleaseProgram(device.program_gpu);
