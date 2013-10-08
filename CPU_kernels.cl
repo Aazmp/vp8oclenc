@@ -11,12 +11,19 @@ typedef uint8_t Prob;
 typedef int8_t tree_index;
 typedef const tree_index Tree[];
 
+typedef enum {
+	are16x16 = 0,
+	are8x8 = 1,
+	are4x4 = 2
+} partition_mode;
+
 typedef struct {
     int16_t coeffs[25][16];
     int32_t vector_x[4];
     int32_t vector_y[4];
 	float SSIM;
 	int non_zero_coeffs;
+	int parts;
 } macroblock;
 
 typedef struct {
@@ -318,8 +325,6 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 	int first_context;
 	vp8_bool_encoder vbe[1];
 	
-	int has_Y2 = 0;
-	
 	token tokens[16];
 	
 	init_bool_encoder(vbe, output + partition_step*part_num);
@@ -331,13 +336,15 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 			mb_num = mb_col + mb_row * mb_width;
 			if (MBs[mb_num].non_zero_coeffs == 0) 
 				continue;
-			if (has_Y2)
+			if (MBs[mb_num].parts == are16x16)
 			{
 				first_context = 1; // for Y2
 				tokenize_block(MBs, mb_num, 24, tokens); 
 				encode_block(vbe, coeff_probs, mb_num, 24, tokens, first_context, *(third_context + mb_num*25 + 24));
 				first_context = 0; //for Y, when Y2 exists
-			} else first_context = 3; //for Y, when Y2 is absent
+			} else {
+				first_context = 3; //for Y, when Y2 is absent
+			}
 			// then always goes Y
 			// 16 of them
 			for (b_num = 0; b_num < 16; ++b_num)
@@ -432,12 +439,12 @@ void tokenize_block_cut(__global macroblock *MBs, int mb_num, int b_num, token t
 }
 
 
-void count_probs_in_block(	__global uint *coeff_probs,
-							__global uint *coeff_probs_denom,
-							int part_num,
-							int mb_num, int b_num, 
+void count_probs_in_block(	__global uint *const coeff_probs,
+							__global uint *const coeff_probs_denom,
+							const int part_num,
+							const int mb_num, const int b_num, 
 							token *tokens, 
-							int ctx1, int ctx3)
+							const int ctx1,const int in_ctx3)
 {
 	// ctx1 = 0 for Y beggining at coefficient 1 (when y2 exists)
 	//		= 1 for Y2
@@ -450,6 +457,7 @@ void count_probs_in_block(	__global uint *coeff_probs,
 	// 		= for next coefficients it equals: to 0, when previous is zero: to 1, when previous is +1 or -1; to 2 in other cases
 	// ctx4 = token tree position
 	int ctx2;
+	int ctx3 = in_ctx3;
 	tree_index ctx4;
 	
 	int i = ((ctx1 == 0) ? 1 : 0); // maybe (!ctx1)
@@ -506,10 +514,8 @@ __kernel void count_probs(	__global macroblock *MBs,
 	int mb_row, mb_num, mb_col, b_num;
 	int prev_mb, prev_b;
 	int i;
-	int first_context;
+	int first_context, firstCoeff;
 	token tokens[16];
-	
-	int has_Y2 = 0;
 	
 	{ 
 		// we have to work with 1-dimensional array in global memory, so
@@ -524,7 +530,7 @@ __kernel void count_probs(	__global macroblock *MBs,
 						coeff_probs_denom[((((part_num<<5) + (ctx1<<3)) + ctx2)*3 + ctx3)*11 + ctx4] = 1;
 					}
 	}
-	
+
 	for (mb_row = part_num; mb_row < mb_height; mb_row+= num_partitions)
 	{
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
@@ -532,35 +538,45 @@ __kernel void count_probs(	__global macroblock *MBs,
 			mb_num = mb_col + mb_row * mb_width;
 			if (MBs[mb_num].non_zero_coeffs == 0) 
 				continue;
-			if (has_Y2)
-			{
+			if (MBs[mb_num].parts == are16x16)
+			{ 
 				first_context = 1; // for Y2
 				*(third_context + mb_num*25 + 24) = 0;
-				if (mb_row > 0) { // check if above Y2 has non zero
-					prev_mb = mb_num - mb_width;
-					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[24][i] != 0) {
-							++(*(third_context + mb_num*25 + 24));
-							break;
-						}
+				if (mb_row > 0) { // check if "above" Y2 has non zero
+					// we go up until we find MB with Y2 mode enabled
+					prev_mb = mb_num-mb_width;
+					while(prev_mb>=0) {
+						if (MBs[prev_mb].parts == are16x16) break;
+						prev_mb-=mb_width;
 					}
+					if (prev_mb >= 0)
+						for (i = 0; i < 16; ++i) {
+							if (MBs[prev_mb].coeffs[24][i] != 0) {
+								++(*(third_context + mb_num*25 + 24));
+								break;
+							}
+						}
 				} 
-				if (mb_col > 0) { // check if left Y2 has non zero
-					prev_mb = mb_num - 1;
-					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[24][i] != 0) {
-							++(*(third_context + mb_num*25 + 24));
-							break;
-						}
+				if (mb_col > 0) { // check if "left" Y2 has non zero
+					prev_mb = mb_num-1;
+					while (prev_mb >= (mb_row*mb_width)) {
+						if (MBs[prev_mb].parts == are16x16) break;
+						--prev_mb;
 					}
+					if (prev_mb >= (mb_row*mb_width))
+						for (i = 0; i < 16; ++i) { 
+							if (MBs[prev_mb].coeffs[24][i] != 0) {
+								++(*(third_context + mb_num*25 + 24));
+								break;
+							}
+						}
 				}
 				tokenize_block_cut(MBs, mb_num, 24, tokens); 
-				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, 24, tokens, first_context, *(third_context + mb_num*25 + b_num));
+				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, 24, tokens, first_context, *(third_context + mb_num*25 + 24));
 				first_context = 0; //for Y, when Y2 exists
 			} else first_context = 3; //for Y, when Y2 is absent
 			// then always goes Y
 			// 16 of them
-			int firstCoeff = has_Y2;
 			for (b_num = 0; b_num < 16; ++b_num)
 			{
 				*(third_context + mb_num*25 + b_num) = 0;
@@ -575,6 +591,7 @@ __kernel void count_probs(	__global macroblock *MBs,
 					prev_b = b_num + 12;
 				}
 				if (prev_mb >= 0) {
+					firstCoeff = (MBs[prev_mb].parts == are16x16) ? 1 : 0;
 					for (i = firstCoeff; i < 16; ++i) {
 						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
@@ -593,6 +610,7 @@ __kernel void count_probs(	__global macroblock *MBs,
 					prev_b = b_num + 3;
 				}
 				if (prev_mb >= 0) {
+					firstCoeff = (MBs[prev_mb].parts == are16x16) ? 1 : 0;
 					for (i = firstCoeff; i < 16; ++i) {
 						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
