@@ -50,13 +50,22 @@ union mv {
 		int16_t x, y;
 	} d;
 };
+
+typedef enum {
+	are16x16 = 0,
+	are8x8 = 1,
+	are4x4 = 2
+} partition_mode;
+
 typedef struct {
     int16_t coeffs[25][16];
     int32_t vector_x[4];
     int32_t vector_y[4];
 	float SSIM;
 	int32_t non_zero_coeffs;
+	int32_t parts; //16x16 == 0; 8x8 == 1;
 } macroblock;
+
 typedef struct {
 	int32_t vector_x;
 	int32_t vector_y;
@@ -65,6 +74,7 @@ typedef struct
 {
 	union mv base_mv;
 	int32_t is_inter_mb;
+	int32_t parts;
 } macroblock_extra_data;
 
 struct deviceContext
@@ -84,7 +94,8 @@ struct deviceContext
 	cl_kernel luma_search_1step;
 	cl_kernel luma_search_2step;
 	cl_kernel downsample;
-	cl_kernel luma_transform;
+	cl_kernel luma_transform_8x8;
+	cl_kernel luma_transform_16x16;
 	cl_kernel chroma_transform;
 	cl_kernel encode_coefficients;
 	cl_kernel count_probs;
