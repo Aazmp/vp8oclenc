@@ -57,13 +57,20 @@ typedef enum {
 	are4x4 = 2
 } partition_mode;
 
-typedef struct {
+typedef enum {
+	LAST = 0,
+	GOLDEN = 1,
+	ALTREF = 2
+} ref_frame;
+
+typedef struct { //in future resize to short or chars!!!
     int16_t coeffs[25][16];
     int32_t vector_x[4];
     int32_t vector_y[4];
 	float SSIM;
 	int32_t non_zero_coeffs;
 	int32_t parts; //16x16 == 0; 8x8 == 1;
+	int32_t reference_frame;
 } macroblock;
 
 typedef struct {
@@ -94,6 +101,7 @@ struct deviceContext
 	cl_kernel luma_search_1step;
 	cl_kernel luma_search_2step;
 	cl_kernel downsample;
+	cl_kernel try_golden_reference;
 	cl_kernel luma_transform_8x8;
 	cl_kernel luma_transform_16x16;
 	cl_kernel chroma_transform;
@@ -104,11 +112,10 @@ struct deviceContext
 	cl_kernel luma_interpolate_Vx4;
 	cl_kernel chroma_interpolate_Hx8;
 	cl_kernel chroma_interpolate_Vx8;
-	cl_kernel simple_loop_filter_MBH;
-	cl_kernel simple_loop_filter_MBV;
 	cl_kernel normal_loop_filter_MBH;
 	cl_kernel normal_loop_filter_MBV;
 	cl_kernel count_SSIM;
+	cl_kernel prepare_filter_mask;
     /* add kernels */
 
     // these are frame data padded to be devisible by 16 and converted to normalized int16
@@ -130,8 +137,13 @@ struct deviceContext
     cl_mem reconstructed_frame_Y;
     cl_mem reconstructed_frame_U;
     cl_mem reconstructed_frame_V;
+	cl_mem golden_frame_Y;
+    cl_mem golden_frame_U;
+    cl_mem golden_frame_V;
 	cl_mem vnet1; //vector
 	cl_mem vnet2; //nets
+	cl_mem mb_metrics;
+	cl_mem mb_mask;
 	cl_mem third_context;
 	cl_mem coeff_probs;
 	cl_mem coeff_probs_denom;
