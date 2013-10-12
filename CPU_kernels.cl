@@ -17,6 +17,12 @@ typedef enum {
 	are4x4 = 2
 } partition_mode;
 
+typedef enum {
+	LAST = 0,
+	GOLDEN = 1,
+	ALTREF = 2
+} ref_frame;
+
 typedef struct {
     int16_t coeffs[25][16];
     int32_t vector_x[4];
@@ -24,6 +30,7 @@ typedef struct {
 	float SSIM;
 	int non_zero_coeffs;
 	int parts;
+	int reference_frame;
 } macroblock;
 
 typedef struct {
