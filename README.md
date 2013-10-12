@@ -1,9 +1,10 @@
 vp8oclenc
 =========
 
-upd: full search has been replaced with hierarchical search - lowest limit of bitrate become lower, but still is rather high(just bitrate, not quality :) ). 
-vx,vy,ll options removed. 
-Filter level is set according to quantizer value for a frame;
+upd: 1) added holden frame referencing. Now for each P-frame it search for vector best in LAST buffer and compare it to (0;0 - displacement) macroblock in GOLDEN. 
+Only key frames are set as GOLDEN now. Gives much better quality at static background with moving object over it. And little less bits to encode.
+2) Vector search still for 8x8 pixel blocks, but macroblocks with four equal vectors are not partitioned any more (not split_mv mode). Gives a little bit less bits and little higher quality when DC-residual is present(quantizing of WHT a little bit more sensitive).
+3) Deleted bilinear interpolation filter and simple loop filter.
 
 main:
 
@@ -26,12 +27,12 @@ Intra coding is done in usual host code part. Has almost no error checking.
 
 If input_file is set as @ it will be set to stdin
 
-Features:
-Only one reference frame - last one;
-Fixed size of blocks for ME - 8x8;
-MV search - hierarchical search with fullsearch in small areal on downsampled areas (1/4, 1, 2, 4, 8, 16);
-Normal loop filter (simple is present in code) with loop_filter_level set according to uantizer value;
-Bicubic interpolation (bilinear is in code too);
+Features.
+Two reference frames, but only one is search for vectors, the other one uses ZEROMV only.
+Motion estimation for 8x8 blocks, but with grouping them into 16x16 if they have equal vectors. 
+MV search - hierarchical search with fullsearch in small area on downsampled areas (1/4, 1, 2, 4, 8, 16).
+Normal loop filter with loop_filter_level set according to quantizer value.
+Bicubic interpolation.
 Used probabilities are calculated and set in each frame.
 
 P.S. No benchmarks, because there is no need in them :) Quality of material can't compete with any good encoder.
