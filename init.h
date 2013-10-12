@@ -7,7 +7,6 @@ char small_help[] = "\n"
 					"-g\t:  Group of Pictures size\n"
 					"-w\t:  amount of work-items on gpu launched simutaneosly\n"
 					"-t\t:  amount of partitions for boolean encoding (also threads launched at once)\n"
-					"-lt\t:  loop filter type (0 - normal; 1 - simple)\n"
 					"-ls\t:  loop filter sharpness\n"
 					"\n\n"
 					;
@@ -70,7 +69,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.2 -cl-opt-disable";
+		const char gpu_options[] = "-cl-std=CL1.2";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -105,12 +104,16 @@ int init_all()
 		device.luma_search_2step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "downsample_x2";
 		device.downsample = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "try_golden_reference";
+		device.try_golden_reference = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_transform_16x16";
 		device.luma_transform_16x16 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_transform_8x8";
 		device.luma_transform_8x8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_transform";
 		device.chroma_transform = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+		{ char kernel_name[] = "prepare_filter_mask"; //and non zero coeffs count
+		device.prepare_filter_mask = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_interpolate_Hx4_bc";
 		device.luma_interpolate_Hx4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "luma_interpolate_Vx4_bc";
@@ -119,10 +122,6 @@ int init_all()
 		device.chroma_interpolate_Hx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "chroma_interpolate_Vx8_bc";
 		device.chroma_interpolate_Vx8 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "simple_loop_filter_MBH";
-		device.simple_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "simple_loop_filter_MBV";
-		device.simple_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "normal_loop_filter_MBH";
 		device.normal_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "normal_loop_filter_MBV";
@@ -132,7 +131,7 @@ int init_all()
 	}
 	// CPU:
 	printf("reading CPU program...\n");
-	const char cpu_options[] = "-cl-std=CL1.0 -cl-opt-disable";
+	const char cpu_options[] = "-cl-std=CL1.0";
 	program_handle = fopen(CPUPATH, "rb");
 	fseek(program_handle, 0, SEEK_END);
 	program_size = ftell(program_handle);
@@ -218,28 +217,57 @@ int init_all()
 		frames.current_V = frames.last_V;
 	} // later these buffers are being reassigned
 
-
 	if (video.GOP_size > 1) {
 		device.current_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y\n", device.state_gpu); return -1; }
 		device.current_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
 		device.current_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
 		device.current_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
 		device.current_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
 		device.current_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_U\n", device.state_gpu); return -1; }
 		device.current_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_V\n", device.state_gpu); return -1; }
 		device.last_frame_Y_interpolated = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 16*video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_interpolated\n", device.state_gpu); return -1; }
 		device.last_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
 		device.last_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
 		device.last_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
 		device.last_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
 		device.last_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_U\n", device.state_gpu); return -1; }
 		device.last_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, 64*video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_V\n", device.state_gpu); return -1; }
 		device.reconstructed_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_Y\n", device.state_gpu); return -1; }
 		device.reconstructed_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_U\n", device.state_gpu); return -1; }
 		device.reconstructed_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_V\n", device.state_gpu); return -1; }
+		device.golden_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y\n", device.state_gpu); return -1; }
+		device.golden_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_U\n", device.state_gpu); return -1; }
+		device.golden_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_V\n", device.state_gpu); return -1; }
 		device.transformed_blocks_gpu = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with transformed_blocks_gpu\n", device.state_gpu); return -1; }
 		device.vnet1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with vnet1\n", device.state_gpu); return -1; }
 		device.vnet2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with vnet2\n", device.state_gpu); return -1; }
+		device.mb_metrics = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(int32_t)*video.mb_count*4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with mb_metrics\n", device.state_gpu); return -1; }
+		device.mb_mask = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(int32_t)*video.mb_count, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with mb_mask\n", device.state_gpu); return -1; }
 	}
 	device.transformed_blocks_cpu = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_cpu);
 	device.partitions = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.partition_step, NULL , &device.state_cpu);
@@ -279,17 +307,51 @@ int init_all()
 							__global uchar *const prev_frame, //1
 							__global vector_net *const net, //2
 							__global macroblock *const MBs, //3
-							const signed int width, //4
-							const signed int height, //5
-							const int dc_q, //6
-							const int ac_q) //7*/
+							__global macroblock_metrics *const MBdiff, //4
+							const signed int width, //5
+							const signed int height, //6
+							const int dc_q, //7
+							const int ac_q) //8*/
 
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 0, sizeof(cl_mem), &device.current_frame_Y);
 	    device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.vnet2);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(int32_t), &video.wrk_width);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 5, sizeof(int32_t), &video.wrk_height);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.mb_metrics);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 5, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.luma_search_2step, 6, sizeof(int32_t), &video.wrk_height);
+
+		/*__kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
+								__global uchar *const golden_frame_Y, //1
+								__global uchar *const recon_frame_Y, //2
+								__global uchar *const current_frame_U, //3
+								__global uchar *const golden_frame_U, //4
+								__global uchar *const recon_frame_U, //5
+								__global uchar *const current_frame_V, //6
+								__global uchar *const golden_frame_V, //7
+								__global uchar *const recon_frame_V, //8
+								__global macroblock *const MBs, //9
+								__global int4 *const MBdiff, //10
+								const int width, //11
+								const int y_ac_q, //12
+								int y2_dc_q, //13
+								int y2_ac_q, //14
+								int uv_dc_q, //15
+								int uv_ac_q) //16 */
+
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 1, sizeof(cl_mem), &device.golden_frame_Y);
+	    device.state_gpu = clSetKernelArg(device.try_golden_reference, 2, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 3, sizeof(cl_mem), &device.current_frame_U);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 4, sizeof(cl_mem), &device.golden_frame_U);
+	    device.state_gpu = clSetKernelArg(device.try_golden_reference, 5, sizeof(cl_mem), &device.reconstructed_frame_U);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 6, sizeof(cl_mem), &device.current_frame_V);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 7, sizeof(cl_mem), &device.golden_frame_V);
+	    device.state_gpu = clSetKernelArg(device.try_golden_reference, 8, sizeof(cl_mem), &device.reconstructed_frame_V);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 9, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 10, sizeof(cl_mem), &device.mb_metrics);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 11, sizeof(int32_t), &video.wrk_width);
+
 
 		/*___kernel void luma_transform_8x8(__global uchar *current_frame, //0
 										__global uchar *recon_frame, //1
@@ -319,10 +381,6 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 4, sizeof(int32_t), &video.wrk_width);
-
-
-
-
 
 		/*__kernel void chroma_transform(	__global uchar *current_frame, - 0
 											__global uchar *prev_frame, - 1
@@ -379,25 +437,11 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 1, sizeof(int32_t), &chroma_width);
 		device.state_gpu = clSetKernelArg(device.chroma_interpolate_Vx8, 2, sizeof(int32_t), &chroma_height);
 
+		/*__kernel prepare_filter_mask(__global macroblock *const MBs,
+								__global int *const mb_mask)*/
 
-		/*__kernel void simple_loop_filter_MBH(	__global uchar * const frame, //0
-												const int width, // 1
-												const int mbedge_limit, // 2
-												const int sub_edge_limit, // 3
-												const int stage) // 4 */
-
-		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBH, 1, sizeof(int32_t), &video.wrk_width);
-		// mb_col is incremented during launches, filter parameters are set before launch
-
-		/*__kernel void simple_loop_filter_MBV(	__global uchar * const frame, //0
-												const int width, // 1
-												const int mbedge_limit, // 2
-												const int sub_edge_limit, // 3
-												const int stage) // 4 */
-
-		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.simple_loop_filter_MBV, 1, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 1, sizeof(cl_mem), &device.mb_mask);
 
 		/*__kernel void normal_loop_filter_MBH(	__global uchar * const frame, //0
 												const int width, //1
@@ -406,9 +450,10 @@ int init_all()
 												const int interior_limit, //4
 												const int hev_threshold, //5
 												const int mb_size, //6
-												const int stage) //7 */
+												const int stage, //7 
+												__global int *const mb_mask) //8 */
 
-		// no params at init time
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 8, sizeof(cl_mem), &device.mb_mask);
 
 		/*__kernel void normal_loop_filter_MBV(	__global uchar * const frame, //0
 												const int width, //1
@@ -417,9 +462,9 @@ int init_all()
 												const int interior_limit, //4
 												const int hev_threshold, //5
 												const int mb_size, //6
-												const int stage) //7 */
-
-		// no params at init time
+												const int stage, //7
+												__global int *const mb_mask) //8 */
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 8, sizeof(cl_mem), &device.mb_mask);
 
 		/*__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 					void count_SSIM(__global uchar *current_frame, //0
@@ -512,7 +557,7 @@ int string_to_value(char *str)
 
 int ParseArgs(int argc, char *argv[])
 {
-    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_lt = 0, f_ls = 0; 
+    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_ls = 0; 
 	int i,ii;
     i = 1;
     while (i < argc)
@@ -676,26 +721,6 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
-			if ((argv[i][1] == 'l') && (argv[i][2] == 't') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.loop_filter_type = string_to_value(argv[i]);
-					if ((video.loop_filter_type < 0) || (video.loop_filter_type > 1))
-					{
-						printf ("wrong loop_filter_type! must be 0 - normal or 1 - simple;\n");
-						return -1;
-					} 
-                    f_lt = 1;
-					++i;
-                }
-                else
-                {
-                    printf ("no value for loop_filter_type;\n");
-                    return -1;
-                }
-            }
 			if ((argv[i][1] == 'l') && (argv[i][2] == 's') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
             {
                 ++i;
@@ -769,16 +794,13 @@ int ParseArgs(int argc, char *argv[])
 		printf("no amount of work items on CPU specified - set to 4;\n");
 		video.number_of_partitions = 4;
     }
-	if (f_lt == 0)
-    {
-		printf("no loop filter type is specified - set to 0 (no normal);\n");
-		video.loop_filter_type = 0;
-    }
 	if (f_ls == 0)
     {
 		printf("no loop filter sharpness is specified - set to 0;\n");
 		video.loop_filter_sharpness = 0;
     }
+
+	video.loop_filter_type = 0; //this is fixed now
     return 0;
 }
 
