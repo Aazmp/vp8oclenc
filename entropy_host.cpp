@@ -704,7 +704,9 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 
 void encode_header(uint8_t* partition) // return  size of encoded header
 {
-	int32_t prob_intra, prob_last;
+	// TODO: move all functions used to count probabilities from root to additional function
+
+	int32_t prob_intra, prob_last, prob_gf, mb_num;
 	const Prob *new_ymode_prob = ymode_prob;
 	const Prob *new_uv_mode_prob = uv_mode_prob;
 
@@ -849,9 +851,8 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     /*      sign_bias_golden                            | L(1)  |
     |       sign_bias_alternate                         | L(1)  |*/
 	//These values are used to control the sign of the motion vectors when
-        //a golden frame or an altref frame are not used as the reference frame for
-        //a macroblock.
-		write_flag(vbe, 0); // so any would do
+	// golden or altref frames are referenced
+		write_flag(vbe, 0);
 		write_flag(vbe, 0); 
     /*      refresh_entropy_probs                       | L(1)  | */
 		write_flag(vbe, 0); // no updating probabilities now
@@ -922,11 +923,19 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		write_literal(vbe, prob_intra, 8); 
     /*      prob_last                                   | L(8)  |*/
 		// probability of last frame used as reference  for inter encoding
-		prob_last = 255; // flag value for last is ZERO; prob of flag being ZERO 
-		write_literal(vbe, prob_last, 8); // we use only last
+		prob_last = 0; // flag value for last is ZERO; prob of flag being ZERO 
+		for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
+			if ((frames.transformed_blocks[mb_num].reference_frame == LAST) && (frames.e_data[mb_num].is_inter_mb))
+				++prob_last;
+		prob_last /= (video.mb_count - frames.replaced);
+		prob_last = (prob_last < 45) ? 45 : prob_last; //range 2..254 gives worse result.... why...?
+		prob_last = (prob_last > 205) ? 205 : prob_last;
+		prob_last = 255 - prob_last; // confused i am about this line, why does it help?
+		write_literal(vbe, prob_last, 8); // we use lasts and goldens
     /*      prob_gf                                     | L(8)  |*/
 		// probability of golden frame used as reference  for inter encoding
-		write_literal(vbe, 0, 8); // we don't use goldens
+		prob_gf = 255;
+		write_literal(vbe, prob_gf, 8); // we don't use altrefs
     /*      intra_16x16_prob_update_flag                | L(1)  |*/
 		// indicates if the branch probabilities used in the decoding of the luma intra-prediction(for inter-frames only) mode are updated
     /*      if (intra_16x16_prob_update_flag) {         |       |
@@ -997,7 +1006,6 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |   residual_data()                                 |       | <---- this in 1..8 next patitions */
     // encode mode for each macroblock
     // vertical mode for the first pass
-	int32_t mb_num;
 	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
 	{
         /*  start of macroblock_header() block  */
@@ -1032,12 +1040,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
         |       mb_ref_frame_sel1                       | B(p)  |*/
 			//selects the reference frame to be used; last frame (0), golden/alternate (1)
 			//we have set probability of this flag being ZERO equal to prob_intra
-			//we use only last as references, so it's always zero	
-			write_bool(vbe, prob_last, 0);
+			int ref = !(frames.transformed_blocks[mb_num].reference_frame == LAST);
+			write_bool(vbe, prob_last, ref);
 
 		/*      if (mb_ref_frame_sel1)                  |       |
         |           mb_ref_frame_sel2                   | B(p)  |*/
-			// no choosing between golden and altref
+			if (ref == 1)
+				write_bool(vbe, prob_gf, 0);
 
         /*      mv_mode                                 |   T   |// determines the macroblock motion vectormode
         |       if (mv_mode == SPLITMV) {               |       |
