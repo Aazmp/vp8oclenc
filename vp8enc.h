@@ -41,8 +41,8 @@ static const int16_t vp8_ac_qlookup[128] =
 
 
 #define ERRORPATH "clErrors.txt"
-#define CPUPATH "..\\Release\\CPU_kernels.cl"
-#define GPUPATH "..\\Release\\GPU_kernels.cl"
+#define CPUPATH "CPU_kernels.cl"
+#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	uint32_t raw;
