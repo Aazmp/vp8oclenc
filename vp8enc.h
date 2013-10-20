@@ -41,8 +41,8 @@ static const int16_t vp8_ac_qlookup[128] =
 
 
 #define ERRORPATH "clErrors.txt"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
 
 union mv {
 	uint32_t raw;
@@ -82,6 +82,7 @@ typedef struct
 	union mv base_mv;
 	int32_t is_inter_mb;
 	int32_t parts;
+	int32_t mode[16];
 } macroblock_extra_data;
 
 struct deviceContext
