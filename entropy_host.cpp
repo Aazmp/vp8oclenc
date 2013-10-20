@@ -947,7 +947,8 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |           for (i = 0; i < 3; i++)                 |       |
     |               intra_chroma_prob                   | L(8)  |
     |       }                                           |       |*/
-		if (frames.replaced > 7) {
+		if (frames.replaced > 7) 
+		{
 			int32_t i;
 			write_flag(vbe, 1);
 			new_ymode_prob = B_ymode_prob;
@@ -1081,20 +1082,46 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			s_tmp.bits = 0; // B_PRED = "0" in spec in kf_mode
 			s_tmp.size = 1; 
 			write_symbol(vbe, s_tmp, kf_ymode_prob, kf_ymode_tree);
-			{ int b_num, ctx1, ctx2;
+			{ int b_num, ctx1, ctx2, bp, mbp; //"p" for "previous"
 			for(b_num = 0; b_num < 16; ++b_num)
 			{
-				// all other blocks encoded with B_TM_PRED too
-				ctx1 = B_TM_PRED;
-				ctx2 = B_TM_PRED;
-				// but imaginary blocks outside frame - B_DC_PRED
+				// imaginary blocks outside frame - B_DC_PRED
 				if ( (mb_num < video.mb_width) && (b_num < 4) )
 					ctx1 = B_DC_PRED;
+				else {
+					if (b_num < 4) {
+						mbp = mb_num - video.mb_width;
+						bp = b_num + 12;
+					} 
+					else {
+						mbp = mb_num;
+						bp = b_num - 4;
+					}
+					ctx1 = frames.e_data[mbp].mode[bp];
+				}
 				if ( ((mb_num % video.mb_width) == 0) && ((b_num & 0x3) == 0) )
 					ctx2 = B_DC_PRED;
+				else {
+					if ((b_num & 0x3) == 0) {
+						mbp = mb_num - 1;
+						bp = b_num + 3;
+					} 
+					else {
+						mbp = mb_num;
+						bp = b_num - 1;
+					}
+					ctx2 = frames.e_data[mbp].mode[bp];
+				}
 
-				s_tmp.bits = 2; /* B_TM_PRED = "10" */
-				s_tmp.size = 2;
+				// in spec there is a bmode_tree
+				// while the tree itself is correct, 
+				// HU, HD, VL and LD tokens in comments have one extra "1"
+				// so read the trees, not the spec :)
+				const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
+				const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
+
+				s_tmp.bits = bmode_bits[frames.e_data[mb_num].mode[b_num]];
+				s_tmp.size = bmode_size[frames.e_data[mb_num].mode[b_num]];
 				write_symbol(vbe, s_tmp, kf_bmode_prob[ctx1][ctx2], bmode_tree);
 			} }
 
@@ -1113,10 +1140,12 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			s_tmp.size = 3; 
 			write_symbol(vbe, s_tmp, new_ymode_prob, ymode_tree);
 			int32_t b_num;
+			const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
+			const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
 			for(b_num = 0; b_num < 16; ++b_num)
 			{
-				s_tmp.bits = 2; /* B_TM_PRED = "10" */
-				s_tmp.size = 2;
+				s_tmp.bits = bmode_bits[frames.e_data[mb_num].mode[b_num]];
+				s_tmp.size = bmode_size[frames.e_data[mb_num].mode[b_num]];
 				write_symbol(vbe, s_tmp, bmode_prob, bmode_tree);
 			}
 			// chroma tree is the same for I and P, but probs are different
