@@ -353,11 +353,29 @@ void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Li
 }
 
 
-__kernel void reset_vectors ( __global vector_net *const net) //0
+__kernel void reset_vectors ( __global vector_net *const net1, //0
+								__global vector_net *const net2, //1
+								__global macroblock *const MBs) //2
 {
-	int b8x8_num = get_global_id(0);
-	net[b8x8_num].vector_x = 0;
-	net[b8x8_num].vector_y = 0;
+	int mb_num = get_global_id(0);
+	net1[mb_num + 0].vector_x = 0;
+	net1[mb_num + 0].vector_y = 0;
+	net1[mb_num + 1].vector_x = 0;
+	net1[mb_num + 1].vector_y = 0;
+	net1[mb_num + 2].vector_x = 0;
+	net1[mb_num + 2].vector_y = 0;
+	net1[mb_num + 3].vector_x = 0;
+	net1[mb_num + 3].vector_y = 0;
+	net2[mb_num + 0].vector_x = 0;
+	net2[mb_num + 0].vector_y = 0;
+	net2[mb_num + 1].vector_x = 0;
+	net2[mb_num + 1].vector_y = 0;
+	net2[mb_num + 2].vector_x = 0;
+	net2[mb_num + 2].vector_y = 0;
+	net2[mb_num + 3].vector_x = 0;
+	net2[mb_num + 3].vector_y = 0;
+	MBs[mb_num].reference_frame = LAST;
+	
 	return;
 }
 
@@ -748,10 +766,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 								__global int *const MBdiff, //10
 								const int width, //11
 								const int y_ac_q, //12
-								int y2_dc_q, //13
-								int y2_ac_q, //14
-								int uv_dc_q, //15
-								int uv_ac_q) //16
+								const int y2_dc_q, //13
+								const int y2_ac_q, //14
+								const int uv_dc_q, //15
+								const int uv_ac_q) //16
 {
 	//this kernel try to compare difference from search  to difference resulting from vector(0;0) into golden frame
 	//if golden reference is better kernel does DCT and WHT on luma and chroma also
@@ -761,7 +779,6 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	__private short16 L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14,L15;
 	
 	mb_num = get_global_id(0);
-	MBs[mb_num].reference_frame = LAST; 
 	x = (mb_num % (width/16))*16;
 	y = (mb_num / (width/16))*16;
 	
@@ -868,8 +885,8 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL1 += convert_int4(abs(convert_int4(L13.s0123)) + abs(convert_int4(L13.s4567)) + abs(convert_int4(L13.s89AB)) + abs(convert_int4(L13.sCDEF)));
 	DL2 += convert_int4(abs(convert_int4(L14.s0123)) + abs(convert_int4(L14.s4567)) + abs(convert_int4(L14.s89AB)) + abs(convert_int4(L14.sCDEF)));
 	DL3 += convert_int4(abs(convert_int4(L15.s0123)) + abs(convert_int4(L15.s4567)) + abs(convert_int4(L15.s89AB)) + abs(convert_int4(L15.sCDEF)));
-	DL0.x /= 16; DL0+=DL1+DL2+DL3; 
-	DL0.x+=DL0.y+DL0.z+DL0.w; //golden reference metrics
+	DL0.x /= 4; DL0+=DL1+DL2+DL3; 
+	DL0.x+=DL0.y+DL0.z+DL0.w+1; //golden reference metrics
 	DL1.x = MBdiff[mb_num*4];
 	DL1.x += MBdiff[mb_num*4+1];
 	DL1.x += MBdiff[mb_num*4+2];
@@ -909,7 +926,6 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	//now fill transformed bloks data
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
 	//mb_row 0
-	//block 00
 	                                             MBs[mb_num].coeffs[0][inv_zigzag[1]]=L0.s1;  MBs[mb_num].coeffs[0][inv_zigzag[2]]=L0.s2;  MBs[mb_num].coeffs[0][inv_zigzag[3]]=L0.s3;
 	MBs[mb_num].coeffs[0][inv_zigzag[4]]=L1.s0;	 MBs[mb_num].coeffs[0][inv_zigzag[5]]=L1.s1;  MBs[mb_num].coeffs[0][inv_zigzag[6]]=L1.s2;  MBs[mb_num].coeffs[0][inv_zigzag[7]]=L1.s3;
 	MBs[mb_num].coeffs[0][inv_zigzag[8]]=L2.s0;	 MBs[mb_num].coeffs[0][inv_zigzag[9]]=L2.s1;  MBs[mb_num].coeffs[0][inv_zigzag[10]]=L2.s2; MBs[mb_num].coeffs[0][inv_zigzag[11]]=L2.s3;
@@ -1154,7 +1170,7 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	L4.s0123 = convert_short4(DL0);	L5.s0123 = convert_short4(DL1);	L6.s0123 = convert_short4(DL2);	L7.s0123 = convert_short4(DL3);
 	DL0 = convert_int4(L4.s4567); DL1 = convert_int4(L5.s4567); DL2 = convert_int4(L6.s4567); DL3 = convert_int4(L7.s4567);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, uv_dc_q, uv_ac_q);
-	L4.s4567 = convert_short4(DL0);	L5.s4567 = convert_short4(DL1);	L6.s4567 = convert_short4(DL2);	L7.s4567 = convert_short4(DL3);	
+	L4.s4567 = convert_short4(DL0);	L5.s4567 = convert_short4(DL1);	L6.s4567 = convert_short4(DL2);	L7.s4567 = convert_short4(DL3);
 	//transform V
 	DL0 = convert_int4(L0.s89AB); DL1 = convert_int4(L1.s89AB); DL2 = convert_int4(L2.s89AB); DL3 = convert_int4(L3.s89AB);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, uv_dc_q, uv_ac_q);
@@ -1176,10 +1192,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	MBs[mb_num].coeffs[16][inv_zigzag[8]]=L2.s0;  MBs[mb_num].coeffs[16][inv_zigzag[9]]=L2.s1;  MBs[mb_num].coeffs[16][inv_zigzag[10]]=L2.s2; MBs[mb_num].coeffs[16][inv_zigzag[11]]=L2.s3;
 	MBs[mb_num].coeffs[16][inv_zigzag[12]]=L3.s0; MBs[mb_num].coeffs[16][inv_zigzag[13]]=L3.s1; MBs[mb_num].coeffs[16][inv_zigzag[14]]=L3.s2; MBs[mb_num].coeffs[16][inv_zigzag[15]]=L3.s3;
 	//block U01
-	MBs[mb_num].coeffs[17][inv_zigzag[0]]=L0.s4;  MBs[mb_num].coeffs[17][inv_zigzag[1]]=L0.s5;  MBs[mb_num].coeffs[17][inv_zigzag[2]]=L0.s6;  MBs[mb_num].coeffs[1][inv_zigzag[3]]=L0.s7;
-	MBs[mb_num].coeffs[17][inv_zigzag[4]]=L1.s4;  MBs[mb_num].coeffs[17][inv_zigzag[5]]=L1.s5;  MBs[mb_num].coeffs[17][inv_zigzag[6]]=L1.s6;  MBs[mb_num].coeffs[1][inv_zigzag[7]]=L1.s7;
-	MBs[mb_num].coeffs[17][inv_zigzag[8]]=L2.s4;  MBs[mb_num].coeffs[17][inv_zigzag[9]]=L2.s5;  MBs[mb_num].coeffs[17][inv_zigzag[10]]=L2.s6; MBs[mb_num].coeffs[1][inv_zigzag[11]]=L2.s7;
-	MBs[mb_num].coeffs[17][inv_zigzag[12]]=L3.s4; MBs[mb_num].coeffs[17][inv_zigzag[13]]=L3.s5; MBs[mb_num].coeffs[17][inv_zigzag[14]]=L3.s6; MBs[mb_num].coeffs[1][inv_zigzag[15]]=L3.s7;
+	MBs[mb_num].coeffs[17][inv_zigzag[0]]=L0.s4;  MBs[mb_num].coeffs[17][inv_zigzag[1]]=L0.s5;  MBs[mb_num].coeffs[17][inv_zigzag[2]]=L0.s6;  MBs[mb_num].coeffs[17][inv_zigzag[3]]=L0.s7;
+	MBs[mb_num].coeffs[17][inv_zigzag[4]]=L1.s4;  MBs[mb_num].coeffs[17][inv_zigzag[5]]=L1.s5;  MBs[mb_num].coeffs[17][inv_zigzag[6]]=L1.s6;  MBs[mb_num].coeffs[17][inv_zigzag[7]]=L1.s7;
+	MBs[mb_num].coeffs[17][inv_zigzag[8]]=L2.s4;  MBs[mb_num].coeffs[17][inv_zigzag[9]]=L2.s5;  MBs[mb_num].coeffs[17][inv_zigzag[10]]=L2.s6; MBs[mb_num].coeffs[17][inv_zigzag[11]]=L2.s7;
+	MBs[mb_num].coeffs[17][inv_zigzag[12]]=L3.s4; MBs[mb_num].coeffs[17][inv_zigzag[13]]=L3.s5; MBs[mb_num].coeffs[17][inv_zigzag[14]]=L3.s6; MBs[mb_num].coeffs[17][inv_zigzag[15]]=L3.s7;
 	//block U10
 	MBs[mb_num].coeffs[18][inv_zigzag[0]]=L4.s0;  MBs[mb_num].coeffs[18][inv_zigzag[1]]=L4.s1;  MBs[mb_num].coeffs[18][inv_zigzag[2]]=L4.s2;  MBs[mb_num].coeffs[18][inv_zigzag[3]]=L4.s3;
 	MBs[mb_num].coeffs[18][inv_zigzag[4]]=L5.s0;  MBs[mb_num].coeffs[18][inv_zigzag[5]]=L5.s1;  MBs[mb_num].coeffs[18][inv_zigzag[6]]=L5.s2;  MBs[mb_num].coeffs[18][inv_zigzag[7]]=L5.s3;
@@ -1279,7 +1295,7 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 								const int y2_ac_q) //7
 {	
 	// possible optimization - LOCAL memory for storing predictors until reconstruction
-	// but it's very device specific (GCN has 32kb per work_group, older may has less)
+	// but it's very device specific (HD6000-HD7000 has 32kb per work_group, older may has less)
 
 	__private int mb_num, vector_x,vector_y,x,y,condition,i;
 	__private int4 DL0,DL1,DL2,DL3;
@@ -1290,6 +1306,7 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 
 	if (MBs[mb_num].reference_frame != LAST) return;
 	MBs[mb_num].parts = are8x8;
+		
 	vector_x = MBs[mb_num].vector_x[0];
 	vector_y = MBs[mb_num].vector_y[0];
 	x = MBs[mb_num].vector_x[1];
@@ -1751,14 +1768,13 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 }
 
 	
-__kernel void luma_transform_8x8(__global uchar *current_frame, //0
-								__global uchar *recon_frame, //1
-								__global uchar *prev_frame, //2
-								__global macroblock *MBs, //3
-								signed int width, //4
-								signed int first_MBlock_offset, //5
-								int dc_q, //6
-								int ac_q) //7
+__kernel void luma_transform_8x8(__global uchar *const current_frame, //0
+								__global uchar *const recon_frame, //1
+								__global uchar *const prev_frame, //2
+								__global macroblock *const MBs, //3
+								const signed int width, //4
+								const int dc_q, //5
+								const int ac_q) //6
 	
 {
 	__private int4 DL0, DL1, DL2, DL3;
@@ -1772,7 +1788,7 @@ __kernel void luma_transform_8x8(__global uchar *current_frame, //0
 	__private int mb_num, b8x8_num, b4x4_in_mb,b8x8_in_mb;
 	__private int width_x4 = width*4;		
 	
-	b8x8_num = first_MBlock_offset + get_global_id(0); 
+	b8x8_num = get_global_id(0); 
 	cx = (b8x8_num % (width/8))*8;
 	cy = (b8x8_num / (width/8))*8;
 	mb_num = (cy/16)*(width/16) + (cx/16);
@@ -2026,23 +2042,22 @@ __kernel void luma_transform_8x8(__global uchar *current_frame, //0
 	return;
 }
 
-__kernel void chroma_transform( 	__global uchar *current_frame, //0 input frame (the one being encoded)
-									__global uchar *prev_frame, //1 reference frame for predictors
-									__global uchar *recon_frame, //2 reconstructed current frame after DCT-quant/dequant-iDCT
-									__global macroblock *MBs, //3 here it's an input
-									signed int chroma_width, //4 
-									signed int chroma_height, //5 
-									signed int first_block_offset, //6
-									int dc_q, //7
-									int ac_q, //8
-									int block_place) //9
+__kernel void chroma_transform( 	__global uchar *const current_frame, //0 input frame (the one being encoded)
+									__global uchar *const prev_frame, //1 reference frame for predictors
+									__global uchar *const recon_frame, //2 reconstructed current frame after DCT-quant/dequant-iDCT
+									__global macroblock *const MBs, //3 here it's an input
+									const signed int chroma_width, //4 
+									const signed int chroma_height, //5 
+									const int dc_q, //6
+									const int ac_q, //7
+									const int block_place) //8
 {  
 	__private int chroma_block_num;
 	__private int chroma_width_x8 = chroma_width*8;
 	__private int cx, cy, px, py;
 	__private int mb_num, block_in_mb;
 	
-	chroma_block_num = first_block_offset + get_global_id(0); 
+	chroma_block_num = get_global_id(0); 
 
 	cx = (chroma_block_num % (chroma_width/4))*4;
 	cy = (chroma_block_num / (chroma_width/4))*4; 
@@ -2176,8 +2191,7 @@ __kernel void prepare_filter_mask(__global macroblock *const MBs,
 	return;
 }
 
-__kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
-		void normal_loop_filter_MBH(__global uchar * const frame, //0
+__kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
 									const int width, //1
 									const int mbedge_limit, //2
 									const int sub_bedge_limit, //3
@@ -2266,7 +2280,11 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 		R = convert_uchar4_sat(Q + 128);
 		L = convert_uchar4_sat(P + 128);
 		vstore4(L, 0, frame + i - 4);
+		//vstore4(R, 0, frame + i); it will be stored as L later
+	}
+	if (subblock_mask == 0) {
 		vstore4(R, 0, frame + i);
+		return;
 	}
 	
 	// and 3 more times for edges between blocks in MB
@@ -2283,7 +2301,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= ((int)abs(Q.w - Q.z) > interior_limit);
 	mask |= (((int)abs(P.w - Q.x) * 2 + (int)abs(P.z - Q.y) / 2) > sub_bedge_limit);
 	mask -= 1;
-	mask &= subblock_mask;
 	hev = ((int)abs(P.z - P.w) > hev_threshold);
 	hev |= ((int)abs(Q.y - Q.x) > hev_threshold);
 	hev *= -1;
@@ -2313,9 +2330,12 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	R = convert_uchar4_sat(Q + 128);
 	L = convert_uchar4_sat(P + 128);
 	vstore4(L, 0, frame + i - 4);
-	vstore4(R, 0, frame + i);
+	//vstore4(R, 0, frame + i);
 	
-	if (mb_size < 16) return; // we were doing chroma
+	if (mb_size < 16) { // we were doing chroma
+		vstore4(R, 0, frame + i);
+		return;
+	}
 	
 	L = R;
 	i += 4;
@@ -2330,7 +2350,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= ((int)abs(Q.w - Q.z) > interior_limit);
 	mask |= (((int)abs(P.w - Q.x) * 2 + (int)abs(P.z - Q.y) / 2) > sub_bedge_limit);
 	mask -= 1;
-	mask &= subblock_mask;
 	hev = ((int)abs(P.z - P.w) > hev_threshold);
 	hev |= ((int)abs(Q.y - Q.x) > hev_threshold);
 	hev *= -1; 
@@ -2360,7 +2379,7 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	R = convert_uchar4_sat(Q + 128);
 	L = convert_uchar4_sat(P + 128);
 	vstore4(L, 0, frame + i - 4);
-	vstore4(R, 0, frame + i);
+	//vstore4(R, 0, frame + i);
 	
 	L = R;
 	i += 4;
@@ -2375,7 +2394,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= ((int)abs(Q.w - Q.z) > interior_limit);
 	mask |= (((int)abs(P.w - Q.x) * 2 + (int)abs(P.z - Q.y) / 2) > sub_bedge_limit);
 	mask -= 1;
-	mask &= subblock_mask;
 	hev = ((int)abs(P.z - P.w) > hev_threshold);
 	hev |= ((int)abs(Q.y - Q.x) > hev_threshold);
 	hev *= -1; 
@@ -2523,6 +2541,8 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 		vstore4(ucQ2, 0, frame + i + 2*width);
 	}
 	
+	if (subblock_mask == 0) return;
+	
 	// and 3 more times for edges between blocks in MB
 	i += width*4;
 	ucP3 = ucQ0;
@@ -2550,7 +2570,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= (convert_int4(abs(q3 - q2)) > interior_limit);
 	mask |= ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  > sub_bedge_limit);
 	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
-	mask &= subblock_mask;
 	hev = (convert_int4(abs(p1 - p0)) > hev_threshold);
 	hev |= (convert_int4(abs(q1 - q0)) > hev_threshold);
 	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
@@ -2613,7 +2632,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= (convert_int4(abs(q3 - q2)) > interior_limit);
 	mask |= ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  > sub_bedge_limit);
 	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
-	mask &= subblock_mask;
 	hev = (convert_int4(abs(p1 - p0)) > hev_threshold);
 	hev |= (convert_int4(abs(q1 - q0)) > hev_threshold);
 	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
@@ -2674,7 +2692,6 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	mask |= (convert_int4(abs(q3 - q2)) > interior_limit);
 	mask |= ((convert_int4(abs(p0 - q0)) * 2 + convert_int4(abs(p1 - q1)) / 2)  > sub_bedge_limit);
 	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
-	mask &= subblock_mask;
 	hev = (convert_int4(abs(p1 - p0)) > hev_threshold);
 	hev |= (convert_int4(abs(q1 - q0)) > hev_threshold);
 	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
