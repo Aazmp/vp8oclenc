@@ -277,7 +277,12 @@ int init_all()
 	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(uint32_t), NULL , &device.state_cpu);
 
 	if (video.GOP_size > 1) {
-		/*__kernel void reset_vectors ( __global macroblock *const MBs) //0*/
+		/*__kernel void reset_vectors ( __global vector_net *const net1, //0
+								__global vector_net *const net2, //1
+								__global macroblock *const MBs) //2*/
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 0, sizeof(cl_mem), &device.vnet1);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 1, sizeof(cl_mem), &device.vnet2);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
 
 		/*__kernel void downsample(__global uchar *const src_frame, //0
 							__global uchar *const dst_frame, //1
@@ -388,10 +393,9 @@ int init_all()
 											__global struct macroblock *MBs, - 3
 											signed int chroma_width, - 4
 											signed int chroma_height, - 5
-											signed int first_block_offset, - 6
-											int dc_q, - 7
-											int ac_q, - 8 
-											int block_place) - 9 */
+											int dc_q, - 6
+											int ac_q, - 7 
+											int block_place) - 8 */
 		
 		int32_t chroma_width = video.wrk_width/2;
 		int32_t chroma_height = video.wrk_height/2;
