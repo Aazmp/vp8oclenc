@@ -1,18 +1,13 @@
 vp8oclenc
 =========
 
-upd: 1) added holden frame referencing. Now for each P-frame it search for vector best in LAST buffer and compare it to (0;0 - displacement) macroblock in GOLDEN. 
-Only key frames are set as GOLDEN now. Gives much better quality at static background with moving object over it. And little less bits to encode.
-2) Vector search still for 8x8 pixel blocks, but macroblocks with four equal vectors are not partitioned any more (not split_mv mode). Gives a little bit less bits and little higher quality when DC-residual is present(quantizing of WHT a little bit more sensitive).
-3) Deleted bilinear interpolation filter and simple loop filter.
+upd: 
+1) Implemented all B_PRED modes in inter- and intra-frames (before was only B_TM_PRED). Adding B_DC_PRED gives less bits to encode (token for mode itself is shorter). But other modes compensate these bits(hopefully with higher quality). Chroma still use only TM_PRED. No whole macroblock prediction mode for luma.
+2) Removed GOLDEN reference for second frame in GOP (because previous is LAST and GOLDEN at the same time).
 
 main:
-
 Don't know what to write here...
-...
-
-This is a VP8 encoder.
-Simple and not effective.
+This is a VP8 encoder. Simple and not effective.
 
 Used (and copied :)) sources: 
 http://www.webmproject.org/; http://multimedia.cx/eggs/category/vp8/;
