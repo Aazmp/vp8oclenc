@@ -706,7 +706,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 {
 	// TODO: move all functions used to count probabilities from root to additional function
 
-	int32_t prob_intra, prob_last, prob_gf, mb_num;
+	int32_t prob_intra, prob_last, prob_gf, mb_num, segmentation_enabled;
 	const Prob *new_ymode_prob = ymode_prob;
 	const Prob *new_uv_mode_prob = uv_mode_prob;
 
@@ -727,7 +727,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// start of encoding header
 	// at the start of every partition - init
 	int32_t bool_offset;
-	if (!frames.prev_is_key_frame) 
+	if (!frames.current_is_key_frame) 
 		bool_offset = 3;
 	else 
 		bool_offset = 10;
@@ -738,24 +738,96 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       color_space                                 | L(1)  |
     |       clamping_type                               | L(1)  |
     |   }                                               |       |*/
-	if (frames.prev_is_key_frame)
+	if (frames.current_is_key_frame)
 	{
 		write_flag(vbe, 0); //YUV (no other options at this time)
 		write_flag(vbe, 0); // decoder have to clamp reconstructed values
 	}
 
-	/*  segmentation_enabled                            | L(1)  | */
-    write_flag(vbe, 0);     // segmentation disabled
-
-	/*  if (segmentation_enabled)                       |       |
-    /* start of update_segmentation() block	*/
-    //   skip block description, it's disabled			|		|
+	/*  segmentation_enabled                            | L(1)  | 
+	|  if (segmentation_enabled)						|       | 
+    | start of update_segmentation() block	
+    |		update_segmentation()						| Type	|
+	| ------------------------------------------------- | ----- | 
+	|		update_mb_segmentation_map					| L(1)	| 
+	|		update_segment_feature_data					| L(1)	| 
+	|		if (update_segment_feature_data) {			|		| 
+	|			segment_feature_mode					| L(1)	| 
+	|			for (i = 0; i < 4; i++) {				|		| 
+	|				quantizer_update					| L(1)	| 
+	|				if (quantizer_update) {				|		| 
+	|					quantizer_update_value			| L(7)	| 
+	|					quantizer_update_sign			| L(1)	| 
+	|				}									|		| 
+	|			}										|		| 
+	|			for (i = 0; i < 4; i++) {				|		| 
+	|				loop_filter_update					| L(1)	|
+	|				if (loop_filter_update) {			|		|
+	|					lf_update_value					| L(6)	|
+	|					lf_update_sign					| L(1)	|
+	|				}									|		|
+	|			}										|		| 
+	|		}											|		|
+	|		if (update_mb_segmentation_map) {			|		|
+	|			for (i = 0; i < 3; i++) {				|		|
+	|				segment_prob_update					| L(1)	|
+	|				if (segment_prob_update)			|		|
+	|					segment_prob					| L(8)	|
+	|			}										|		|
+	|		}											|		| */
+	segmentation_enabled = !frames.current_is_key_frame; //only for inter frames;
+    write_flag(vbe, segmentation_enabled);     // segmentation test
+	if (segmentation_enabled) 
+	{
+		int32_t update_mb_segmentation_map, update_segment_feature_data;
+		update_mb_segmentation_map = 1;
+		update_segment_feature_data = 1;
+		write_flag(vbe, update_mb_segmentation_map);
+		write_flag(vbe, update_segment_feature_data);
+		if (update_segment_feature_data) 
+		{
+			write_flag(vbe, 1); // 1 - absolute; 0 - delta
+			int i;
+			for (i = 0; i < 4; ++i)
+			{ 
+				write_flag(vbe, 1);//always update
+				write_literal(vbe, frames.segments_data[i].y_ac_i, 7);
+				write_flag(vbe, 0); // sign for absolute values is 0
+			}
+			for (i = 0; i < 4; ++i)
+			{ 
+				write_flag(vbe, 1);//always update
+				write_literal(vbe, frames.segments_data[i].loop_filter_level, 6);
+				write_flag(vbe, 0); // sign for absolute values is 0
+			}
+		}
+		if (update_mb_segmentation_map) 
+		{
+			int i,seg_count[4];
+			seg_count[0] = seg_count[1] = seg_count[2] = seg_count[3] = 0;
+			for (i = 0; i < video.mb_count; ++i)
+				++seg_count[frames.transformed_blocks[i].segment_id];
+			// 1 bit choose between 0,1 (0) and 2,3 (1) segments
+			i = (seg_count[0]+seg_count[1])/video.mb_count;
+			new_segment_prob[0] = i;
+			// 2 bit :  0 (0) and 1 (1) segments
+			i = (seg_count[0]+seg_count[1]); i+=(i==0); i = seg_count[0]/i;
+			new_segment_prob[1] = i;
+			// 3 bit :  2 (0) and 3 (1) segments
+			i = (seg_count[2]+seg_count[3]); i+=(i==0); i = seg_count[2]/i;
+			new_segment_prob[2] = i;
+			
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[0], 8); 
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[1], 8); 
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[2], 8); 
+		}
+	}
     /* end of update_segmentation() block	*/
 
 	/*  filter_type                                     | L(1)  | */
 	write_flag(vbe, video.loop_filter_type);
     /*  loop_filter_level                               | L(6)  | */
-	write_literal(vbe, video.loop_filter_level, 6);
+	write_literal(vbe, frames.segments_data[0].loop_filter_level, 6);
     /*  sharpness_level                                 | L(3)  | */
 	write_literal(vbe, video.loop_filter_sharpness, 3);
 
@@ -806,21 +878,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       uv_ac_delta_sign                            | L(1)  |
     |   }                                               |       | */
     // encode quantizers
-	if (0) {
-		write_literal(vbe, video.quantizer_index_y_ac_i, 7); // Y AC quantizer index (full 7 bits)
-		write_quantizer_delta(vbe, video.quantizer_index_y_dc_i - video.quantizer_index_y_ac_i); // Y DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_i - video.quantizer_index_y_ac_i); // Y2 DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_i - video.quantizer_index_y_ac_i); // Y2 AC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_i - video.quantizer_index_y_ac_i); // C DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_i - video.quantizer_index_y_ac_i); // C AC index delta
-	} else {
-		write_literal(vbe, video.quantizer_index_y_ac_prev, 7); // Y AC quantizer index (full 7 bits)
-		write_quantizer_delta(vbe, video.quantizer_index_y_dc_prev - video.quantizer_index_y_ac_prev); // Y DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_dc_prev - video.quantizer_index_y_ac_prev); // Y2 DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_y2_ac_prev - video.quantizer_index_y_ac_prev); // Y2 AC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_dc_prev - video.quantizer_index_y_ac_prev); // C DC index delta
-		write_quantizer_delta(vbe, video.quantizer_index_uv_ac_prev - video.quantizer_index_y_ac_prev); // C AC index delta
-	}
+	write_literal(vbe, frames.segments_data[0].y_ac_i, 7); // Y AC quantizer index (full 7 bits)
+	write_quantizer_delta(vbe, frames.segments_data[0].y_dc_idelta); // Y DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].y2_dc_idelta); // Y2 DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].y2_ac_idelta); // Y2 AC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].uv_dc_idelta); // UV DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].uv_ac_idelta); // UV AC index delta
+
     /* end of quant_indices() block */
 
 	/*  if (key_frame)                                  |       |
@@ -833,7 +897,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     //1. When refresh_entropy_probs flag is 1, the updated combined probabilities become the new baseline for next frame.
     //2. When refresh_entropy_probs flag is 0, current frame's probability updates are discarded after coefficient decoding is completed for the frame .
     //      The baseline probabilities prior to this frame's probability updates are then used as the baseline for the next frame.
-    if (frames.prev_is_key_frame)
+    if (frames.current_is_key_frame)
 		write_flag(vbe, 0); // no updatng probabilities now
 	else
 	{
@@ -912,7 +976,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	write_literal(vbe, frames.skip_prob, 8);
 
 	/*  if (!key_frame) {                               |       |*/
-	if (!frames.prev_is_key_frame)
+	if (!frames.current_is_key_frame)
 	{
     /*      prob_intra                                  | L(8)  |*/
 		// probability, that block intra encoded. We use only inter in not-key frames
@@ -927,7 +991,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
 			if ((frames.transformed_blocks[mb_num].reference_frame == LAST) && (frames.e_data[mb_num].is_inter_mb))
 				++prob_last;
-		prob_last /= (video.mb_count - frames.replaced);
+		prob_last = ((video.mb_count - frames.replaced) == 0) ? 0 : (prob_last / (video.mb_count - frames.replaced));
 		prob_last = (prob_last < 45) ? 45 : prob_last; //range 2..254 gives worse result.... why...?
 		prob_last = (prob_last > 205) ? 205 : prob_last;
 		prob_last = 255 - prob_last; // confused i am about this line, why does it help?
@@ -1014,7 +1078,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
         | --------------------------------------------- | ----- |
         |   if (update_mb_segmentation_map)             |       |
         |       segment_id                              |   T   | */
-        // segmentation disabled here
+        if (segmentation_enabled)
+		{
+			encoding_symbol s_tmp;
+			s_tmp.bits = frames.transformed_blocks[mb_num].segment_id;
+			s_tmp.size = 2;
+			write_symbol(vbe, s_tmp, new_segment_prob, mb_segment_tree);
+		}
 
         /*  if (mb_no_skip_coeff)                       |       |
         |       mb_skip_coeff                           | B(p)  | */
@@ -1033,9 +1103,9 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 					zero-probability prob_intra is set by field J of the frame header.*/
 			// we've encoded prob_intra as 0 (ZERO probability of in_inter_mb being ZERO)
 			// and all our blocks are inter
-		if (frames.prev_is_key_frame == 0) 
+		if (frames.current_is_key_frame == 0) 
 			write_bool(vbe, prob_intra, (frames.e_data[mb_num].is_inter_mb == 1));
-		if ((frames.prev_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
+		if ((frames.current_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
 		{
 		/*  if (is_inter_mb) {                          |       |
         |       mb_ref_frame_sel1                       | B(p)  |*/
@@ -1067,7 +1137,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			// part for only inter over
 		}
         /*  } else { /* intra mb                        |       | */
-		else if (frames.prev_is_key_frame == 1)
+		else if (frames.current_is_key_frame == 1)
 		{
         /*      intra_y_mode                            |   T   | */
         /*      if (intra_y_mode == B_PRED) {           |       |
@@ -1172,7 +1242,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
 	uint32_t buf;
-	buf = (frames.prev_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
+	buf = (frames.current_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
 	buf |= (0 << 1); /* version 0 in bits 3-1 */
 	// version 0 - bicubic interpolation
 	// version 1-2 - bilinear
@@ -1185,7 +1255,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	partition[1] = (uint8_t)((buf>>8) & 0xff);
 	partition[2] = (uint8_t)((buf>>16) & 0xff);
 
-	if (frames.prev_is_key_frame)
+	if (frames.current_is_key_frame)
 	{
 		partition[3] = 0x9d;
 		partition[4] = 0x01;
