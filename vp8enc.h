@@ -41,8 +41,8 @@ static const int16_t vp8_ac_qlookup[128] =
 
 
 #define ERRORPATH "clErrors.txt"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
 
 union mv {
 	uint32_t raw;
@@ -63,6 +63,27 @@ typedef enum {
 	ALTREF = 2
 } ref_frame;
 
+typedef enum {
+	intra_segment = 0,
+	HQ_segment = 1,
+	AQ_segment = 2,
+	LQ_segment = 3
+} segment_ids;
+
+typedef struct {
+	int32_t y_ac_i; 
+	int32_t y_dc_idelta;
+	int32_t y2_dc_idelta;
+	int32_t y2_ac_idelta;
+	int32_t uv_dc_idelta;
+	int32_t uv_ac_idelta;
+	int32_t loop_filter_level;
+	int32_t mbedge_limit;
+	int32_t sub_bedge_limit;
+	int32_t interior_limit;
+	int32_t hev_threshold;
+} segment_data;
+
 typedef struct { //in future resize to short or chars!!!
     int16_t coeffs[25][16];
     int32_t vector_x[4];
@@ -71,6 +92,7 @@ typedef struct { //in future resize to short or chars!!!
 	int32_t non_zero_coeffs;
 	int32_t parts; //16x16 == 0; 8x8 == 1;
 	int32_t reference_frame;
+	segment_ids segment_id;
 } macroblock;
 
 typedef struct {
@@ -145,6 +167,7 @@ struct deviceContext
 	cl_mem vnet2; //nets
 	cl_mem mb_metrics;
 	cl_mem mb_mask;
+	cl_mem segments_data;
 	cl_mem third_context;
 	cl_mem coeff_probs;
 	cl_mem coeff_probs_denom;
@@ -185,55 +208,12 @@ struct videoContext
     int32_t mb_count;
     int32_t GOP_size;
 
-    int32_t quantizer_index_y_dc_i;
-    int32_t quantizer_index_y_ac_i;
-    int32_t quantizer_index_y2_dc_i;
-    int32_t quantizer_index_y2_ac_i;
-    int32_t quantizer_index_uv_dc_i;
-    int32_t quantizer_index_uv_ac_i;
-
-	int32_t quantizer_index_y_dc_p;
-    int32_t quantizer_index_y_ac_p;
-    int32_t quantizer_index_y2_dc_p;
-    int32_t quantizer_index_y2_ac_p;
-    int32_t quantizer_index_uv_dc_p;
-    int32_t quantizer_index_uv_ac_p;
-
-	int32_t quantizer_index_y_dc_p_c;
-    int32_t quantizer_index_y_ac_p_c;
-    int32_t quantizer_index_y2_dc_p_c;
-    int32_t quantizer_index_y2_ac_p_c;
-    int32_t quantizer_index_uv_dc_p_c;
-    int32_t quantizer_index_uv_ac_p_c;
-
-	int32_t quantizer_index_y_dc_prev;
-    int32_t quantizer_index_y_ac_prev;
-    int32_t quantizer_index_y2_dc_prev;
-    int32_t quantizer_index_y2_ac_prev;
-    int32_t quantizer_index_uv_dc_prev;
-    int32_t quantizer_index_uv_ac_prev;
-
-    int32_t quantizer_y_dc_i;
-    int32_t quantizer_y_ac_i;
-    int32_t quantizer_y2_dc_i;
-    int32_t quantizer_y2_ac_i;
-    int32_t quantizer_uv_dc_i;
-    int32_t quantizer_uv_ac_i;
-
-	int32_t quantizer_y_dc_p;
-    int32_t quantizer_y_ac_p;
-    int32_t quantizer_y2_dc_p;
-    int32_t quantizer_y2_ac_p;
-    int32_t quantizer_uv_dc_p;
-    int32_t quantizer_uv_ac_p; 
-
+    int32_t qi_min; 
+    int32_t qi_max;
+	int32_t qi[4];
+    
 	int32_t loop_filter_type;
-	int32_t loop_filter_level;
 	int32_t loop_filter_sharpness;
-	int32_t mbedge_limit;
-	int32_t sub_bedge_limit;
-	int32_t interior_limit;
-	int32_t hev_threshold;
 
 	int32_t number_of_partitions;
 	int32_t partition_step;
@@ -241,6 +221,8 @@ struct videoContext
 	uint32_t timestep;
 	uint32_t timescale;
 	uint32_t framerate;
+
+	float SSIM_target;
 
 };
 
@@ -264,6 +246,7 @@ struct hostFrameBuffers
     uint8_t *last_V;
     macroblock *transformed_blocks;
 	macroblock_extra_data *e_data;
+	segment_data segments_data[4];
     uint8_t *encoded_frame;
 	uint32_t encoded_frame_size;
     uint8_t *current_frame_pos_in_pack;
@@ -279,6 +262,8 @@ struct hostFrameBuffers
 
 	uint32_t new_probs[4][8][3][11];
 	uint32_t new_probs_denom[4][8][3][11];
+
+	int32_t y_dc_q[4], y_ac_q[4], y2_dc_q[4], y2_ac_q[4], uv_dc_q[4], uv_ac_q[4];
 };
 
 struct fileContext
@@ -287,24 +272,6 @@ struct fileContext
     char * path;
     int cur_pos;
 };
-
-struct times 
-{
-	clock_t init,
-			start,
-			read, 
-			write,
-			count_probs,
-			bool_encode_header, 
-			bool_encode_coeffs,
-			inter_transform, 
-			intra_transform,
-			loop_filter,
-			interpolate,
-			all;
-};
-
-
 
 static const unsigned char k_default_coeff_probs [4][8][3][11] =
 {
