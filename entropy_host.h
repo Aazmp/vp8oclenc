@@ -11,7 +11,7 @@ typedef struct {
 
 typedef enum
 {
-  DC_PRED, /* predict DC using row above and column to the left */
+	DC_PRED, /* predict DC using row above and column to the left */
 	V_PRED, /* predict rows using row above */
 	H_PRED, /* predict columns using column to the left */
 	TM_PRED, /* propagate second differences a la "True Motion" */
@@ -34,6 +34,10 @@ typedef enum
 	num_intra_bmodes
 }
 intra_bmode;
+const tree_index mb_segment_tree [2 * (4-1)] = { 2, 4, /* root: "0", "1" subtrees */
+												-0, -1, /* "00" = 0th value, "01" = 1st value */
+												-2, -3 /* "10" = 2nd value, "11" = 3rd value */
+												};
 //const tree_index ymode_tree [2 * (num_ymodes - 1)] = {	-DC_PRED, 2, /* root: DC_PRED = "0", "1" subtree */
 //														4, 6, /* "1" subtree has 2 descendant subtrees */
 //														-V_PRED, -H_PRED, /* "10" subtree: V_PRED = "100", H_PRED = "101" */
@@ -44,6 +48,11 @@ const tree_index kf_ymode_tree[2*(num_ymodes-1)] = {-B_PRED, 2, /* root: B_PRED 
 													-DC_PRED, -V_PRED, /* "10" subtree: DC_PRED = "100", V_PRED = "101" */
 													-H_PRED, -TM_PRED /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
 												   };
+const tree_index ymode_tree [2 * (num_ymodes - 1)] = {	-DC_PRED, 2, /* root: DC_PRED = "0", "1" subtree */
+														4, 6, /* "1" subtree has 2 descendant subtrees */
+														-V_PRED, -H_PRED, /* "10" subtree: V_PRED = "100",H_PRED = "101" */
+														-TM_PRED, -B_PRED /* "11" subtree: TM_PRED = "110",B_PRED = "111" */
+													 };
 const tree_index uv_mode_tree [2 * (num_uv_modes - 1)] = {	-DC_PRED, 2, /* root: DC_PRED = "0", "1" subtree */
 															-V_PRED, 4, /* "1" subtree: V_PRED = "10", "11" subtree */
 															-H_PRED, -TM_PRED /* "11" subtree: H_PRED = "110", TM_PRED = "111" */
@@ -58,10 +67,14 @@ const tree_index bmode_tree [2 * (num_intra_bmodes - 1)] = {-B_DC_PRED, 2, /* B_
 															-B_VL_PRED, 16, /* B_VL_PRED = "1111110" */
 															-B_HD_PRED, -B_HU_PRED /* HD = "11111110", HU = "11111111" */
 														   };
-Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
+Prob new_segment_prob[4] = { 128, 128, 128, 128 };
+const Prob kf_ymode_prob [num_ymodes - 1] = { 145, 156, 163, 128};
+const Prob ymode_prob [num_ymodes - 1] = { 112, 86, 140, 37}; //default
+const Prob B_ymode_prob [num_ymodes - 1] = { 0, 0, 0, 0}; //adapted fo B_PRED = "111"
 const Prob kf_uv_mode_prob [num_uv_modes - 1] = { 142, 114, 183};
-const Prob kf_bmode_prob [num_intra_bmodes] [num_intra_bmodes]
-[num_intra_bmodes-1] =
+const Prob uv_mode_prob [num_uv_modes - 1] = { 162, 101, 204}; // default
+const Prob TM_uv_mode_prob [num_uv_modes - 1] = { 0, 0, 0}; // adapted for TM_PRED = "111"
+const Prob kf_bmode_prob [num_intra_bmodes][num_intra_bmodes][num_intra_bmodes-1] =
 {
 	{
 		{ 231, 120, 48, 89, 115, 113, 120, 152, 112},
@@ -184,6 +197,7 @@ const Prob kf_bmode_prob [num_intra_bmodes] [num_intra_bmodes]
 		{ 112, 19, 12, 61, 195, 128, 48, 4, 24}
 	}
 };
+const Prob bmode_prob [num_intra_bmodes - 1] = { 120, 90, 79, 133, 87, 85, 80, 111, 151 };
 
 
 
@@ -471,7 +485,5 @@ const Prob vp8_mv_update_probs[2][19] =
         254, 254, 254, 254, 254, 251, 251, 254, 254, 254
     }
 };
-
-
 
 
