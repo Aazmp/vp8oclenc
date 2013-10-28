@@ -2,8 +2,26 @@ vp8oclenc
 =========
 
 upd: 
-1) Implemented all B_PRED modes in inter- and intra-frames (before was only B_TM_PRED). Adding B_DC_PRED gives less bits to encode (token for mode itself is shorter). But other modes compensate these bits(hopefully with higher quality). Chroma still use only TM_PRED. No whole macroblock prediction mode for luma.
-2) Removed GOLDEN reference for second frame in GOP (because previous is LAST and GOLDEN at the same time).
+1) Added segmentation (now it's used only on intrA MB in intEr frame).
+-qi -qp options deleted; 
+-qmin -qmax added (set a range for Y AC index quantizer); 
+for intEr frame UV indexes are set as (Y_AC_index-15) and Y_DC_index =(Y_AC_index+15);
+intrA frames are not segmented;
+intEr MBs use last 4th [segment index 3] segment.
+2) deleted pipelining bool_coder with GPU computings - now it converts frame after frame with no overlapping.
+(makes easier to improve)
+other) some code rewritings, some bugs fixed, etc
+
+TODO:
+1) Interpolation. (on HD7850 ~1/4 of encoding time is spent here)
+Consumes a lot(!) of memory because of keeping interpolated buffers. 
+Threads are not distributed across stream cores effectively (one row per core).
+=> solution: integrate interpolation into motion vector search
+
+2) More segmentation. 
+Maybe variance based (just don't know what variance values should it be based on)
+Maybe quality based (redo macroblocks with bad SSIM with lower quantizer index) 
+Both a easy to implement in code, but i'm lazy at the moment
 
 main:
 Don't know what to write here...
