@@ -2,12 +2,15 @@
 char small_help[] = "\n"
 					"-i\t:  input file path\n"
 					"-o\t:  output file path\n"
-					"-qi\t:  quantizer index, one for all intra-color planes\n"
-					"-qp\t:  quantizer index, one for all inter-color planes\n"
+					"-qmin\t:  min quantizer index (also the only index for key frames)\n"
+					"-qmax\t:  max quantizer index\n"
 					"-g\t:  Group of Pictures size\n"
 					"-w\t:  amount of work-items on gpu launched simutaneosly\n"
 					"-t\t:  amount of partitions for boolean encoding (also threads launched at once)\n"
 					"-ls\t:  loop filter sharpness\n"
+					"\n"
+					"-SSIM-target\t:  tries to keep SSIM of encoded frame higher than this value;\n"
+					"\t\t\t:  format 0.XX (just write XX digits without 0.)"
 					"\n\n"
 					;
 
@@ -268,6 +271,8 @@ int init_all()
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with mb_metrics\n", device.state_gpu); return -1; }
 		device.mb_mask = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(int32_t)*video.mb_count, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with mb_mask\n", device.state_gpu); return -1; }
+		device.segments_data = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, sizeof(segment_data)*4, NULL , &device.state_gpu);
+		if (device.state_gpu != 0) { printf("GPU device memory problem %d with segments_data\n", device.state_gpu); return -1; }
 	}
 	device.transformed_blocks_cpu = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_cpu);
 	device.partitions = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.partition_step, NULL , &device.state_cpu);
@@ -298,14 +303,12 @@ int init_all()
 							const signed int net_width, //4 //in 8x8 blocks
 							const signed int width, //5
 							const signed int height, //6
-							const signed int pixel_rate, //7
-							const int dc_q, //8
-							const int ac_q) //9*/
+							const signed int pixel_rate) //7 */
 
 		//frames and nets are set according to downsampling rate
 		int32_t net_width = video.mb_width*2;
 		device.state_gpu = clSetKernelArg(device.luma_search_1step, 4, sizeof(int32_t), &net_width);
-		// sizes, pixel_rate and quantizers will be variable on kernel launch
+		// sizes, pixel_rate will be variable on kernel launch
 
 		/*__kernel void luma_search_2step //searching in interpolated picture
 						( 	__global uchar *const current_frame, //0
@@ -314,9 +317,7 @@ int init_all()
 							__global macroblock *const MBs, //3
 							__global macroblock_metrics *const MBdiff, //4
 							const signed int width, //5
-							const signed int height, //6
-							const int dc_q, //7
-							const int ac_q) //8*/
+							const signed int height) //6 */
 
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 0, sizeof(cl_mem), &device.current_frame_Y);
 	    device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.last_frame_Y_interpolated);
@@ -336,13 +337,9 @@ int init_all()
 								__global uchar *const golden_frame_V, //7
 								__global uchar *const recon_frame_V, //8
 								__global macroblock *const MBs, //9
-								__global int4 *const MBdiff, //10
+								__global int *const MBdiff, //10
 								const int width, //11
-								const int y_ac_q, //12
-								int y2_dc_q, //13
-								int y2_ac_q, //14
-								int uv_dc_q, //15
-								int uv_ac_q) //16 */
+								__constant segments_data *const SD) //12*/
 
 		device.state_gpu = clSetKernelArg(device.try_golden_reference, 0, sizeof(cl_mem), &device.current_frame_Y);
 		device.state_gpu = clSetKernelArg(device.try_golden_reference, 1, sizeof(cl_mem), &device.golden_frame_Y);
@@ -356,46 +353,44 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.try_golden_reference, 9, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.try_golden_reference, 10, sizeof(cl_mem), &device.mb_metrics);
 		device.state_gpu = clSetKernelArg(device.try_golden_reference, 11, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.try_golden_reference, 12, sizeof(cl_mem), &device.segments_data);
 
 
-		/*___kernel void luma_transform_8x8(__global uchar *current_frame, //0
-										__global uchar *recon_frame, //1
-										__global uchar *prev_frame, //2
-										__global macroblock *MBs, //3
-										signed int width, //4
-										int dc_q, //5
-										int ac_q) //6*/
+		/*__kernel void luma_transform_8x8(__global uchar *const current_frame, //0
+								__global uchar *const recon_frame, //1
+								__global uchar *const prev_frame, //2
+								__global macroblock *const MBs, //3
+								const signed int width, //4
+								__constant segments_data *const SD) //5*/
 
 		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 0, sizeof(cl_mem), &device.current_frame_Y);
 	    device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 4, sizeof(int32_t), &video.wrk_width);
-		// first_block_offset will be variable on kernel launch
+		device.state_gpu = clSetKernelArg(device.luma_transform_8x8, 5, sizeof(cl_mem), &device.segments_data);
 
-		/*__kernel void luma_transform_16x16(__global uchar *current_frame, //0
-								__global uchar *recon_frame, //1
-								__global uchar *prev_frame, //2
-								__global macroblock *MBs, //3
-								signed int width, //4
-								int y_ac_q, //5
-								int y2_dc_q, //6
-								int y2_ac_q) //7*/
+		/*__kernel void luma_transform_16x16(__global uchar *const current_frame, //0
+								__global uchar *const recon_frame, //1
+								__global uchar *const prev_frame, //2
+								__global macroblock *const MBs, //3
+								const int width, //4
+								__constant segments_data *const SD) //5*/
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 0, sizeof(cl_mem), &device.current_frame_Y);
 	    device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 2, sizeof(cl_mem), &device.last_frame_Y_interpolated);
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 4, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.luma_transform_16x16, 5, sizeof(cl_mem), &device.segments_data);
 
-		/*__kernel void chroma_transform(	__global uchar *current_frame, - 0
-											__global uchar *prev_frame, - 1
-											__global uchar *recon_frame, - 2
-											__global struct macroblock *MBs, - 3
-											signed int chroma_width, - 4
-											signed int chroma_height, - 5
-											int dc_q, - 6
-											int ac_q, - 7 
-											int block_place) - 8 */
+		/*__kernel void chroma_transform( 	__global uchar *const current_frame, //0 
+									__global uchar *const prev_frame, //1 
+									__global uchar *const recon_frame, //2 
+									__global macroblock *const MBs, //3
+									const signed int chroma_width, //4 
+									const signed int chroma_height, //5 
+									__constant segments_data *const SD) //6
+									const int block_place) //7*/
 		
 		int32_t chroma_width = video.wrk_width/2;
 		int32_t chroma_height = video.wrk_height/2;
@@ -403,7 +398,7 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.chroma_transform, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.chroma_transform, 4, sizeof(int32_t), &chroma_width); // width
 		device.state_gpu = clSetKernelArg(device.chroma_transform, 5, sizeof(int32_t), &chroma_height); // height
-		// first_block_offset will be variable on kernel launch
+		device.state_gpu = clSetKernelArg(device.chroma_transform, 6, sizeof(cl_mem), &device.segments_data);
 
 		/*__kernel luma_interpolate_Hx4(__global uchar *const src_frame, //0
 										__global uchar *const dst_frame, //1
@@ -447,28 +442,28 @@ int init_all()
 		device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
 		device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 1, sizeof(cl_mem), &device.mb_mask);
 
-		/*__kernel void normal_loop_filter_MBH(	__global uchar * const frame, //0
-												const int width, //1
-												const int mbedge_limit, //2
-												const int sub_bedge_limit, //3
-												const int interior_limit, //4
-												const int hev_threshold, //5
-												const int mb_size, //6
-												const int stage, //7 
-												__global int *const mb_mask) //8 */
+		/*__kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
+									const int width, //1
+									__constant segment_data *const SD, //2
+									__global macroblock *const MB, //3
+									const int mb_size, //4
+									const int stage, //5
+									__global int *const mb_mask) //6*/
 
-		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 8, sizeof(cl_mem), &device.mb_mask);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 2, sizeof(cl_mem), &device.segments_data);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(cl_mem), &device.mb_mask);
 
-		/*__kernel void normal_loop_filter_MBV(	__global uchar * const frame, //0
-												const int width, //1
-												const int mbedge_limit, //2
-												const int sub_bedge_limit, //3
-												const int interior_limit, //4
-												const int hev_threshold, //5
-												const int mb_size, //6
-												const int stage, //7
-												__global int *const mb_mask) //8 */
-		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 8, sizeof(cl_mem), &device.mb_mask);
+		/*__kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
+									const int width, //1
+									__constant segment_data *const SD, //2
+									__global macroblock *const MB, //3
+									const int mb_size, //4
+									const int stage, //5
+									__global int *const mb_mask) //6*/
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 2, sizeof(cl_mem), &device.segments_data);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(cl_mem), &device.mb_mask);
 
 		/*__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 					void count_SSIM(__global uchar *current_frame, //0
@@ -561,7 +556,7 @@ int string_to_value(char *str)
 
 int ParseArgs(int argc, char *argv[])
 {
-    char f_o = 0, f_i = 0, f_qi = 0, f_qp = 0, f_g = 0, f_w = 0, f_t = 0, f_ls = 0; 
+    char f_o = 0, f_i = 0, f_qmax = 0, f_qmin = 0, f_g = 0, f_w = 0, f_t = 0, f_ls = 0,f_SSIM_target=0; 
 	int i,ii;
     i = 1;
     while (i < argc)
@@ -606,25 +601,19 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
-            if ((argv[i][1] == 'q') && (argv[i][2] == 'i') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+            //if ((argv[i][1] == 'q') && (argv[i][2] == 'i') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+			if (memcmp(&argv[i][1], "qmax", 4)==0)
             {
                 ++i;
                 if (i < argc)
                 {
-					video.quantizer_index_y_dc_i = string_to_value(argv[i]);
-					if (video.quantizer_index_y_dc_i < 0)
+					video.qi_min = string_to_value(argv[i]);
+					if (video.qi_min < 0)
 					{
 						printf ("wrong quantizer index format for intra i-frames! must be an integer from 0 to 127;\n");
 						return -1;
 					}
-                    f_qi = 1;
-					video.quantizer_index_y_ac_i = video.quantizer_index_y_dc_i;
-					video.quantizer_index_uv_dc_i = video.quantizer_index_y_dc_i - 15;
-					video.quantizer_index_uv_dc_i = (video.quantizer_index_uv_dc_i < 0) ? 0 : video.quantizer_index_uv_dc_i;
-					video.quantizer_index_uv_ac_i = video.quantizer_index_y_dc_i - 15;
-					video.quantizer_index_uv_ac_i = (video.quantizer_index_uv_ac_i < 0) ? 0 : video.quantizer_index_uv_ac_i;
-					video.quantizer_index_y2_dc_i = video.quantizer_index_y_dc_i;
-					video.quantizer_index_y2_ac_i = video.quantizer_index_y_dc_i;
+                    f_qmax = 1;
 					++i;
                 }
                 else
@@ -633,25 +622,19 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
-			if ((argv[i][1] == 'q') && (argv[i][2] == 'p') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+			//if ((argv[i][1] == 'q') && (argv[i][2] == 'p') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+			if (memcmp(&argv[i][1], "qmin", 4)==0)
             {
                 ++i;
                 if (i < argc)
                 {
-					video.quantizer_index_y_dc_p = string_to_value(argv[i]);
-					if (video.quantizer_index_y_dc_p < 0)
+					video.qi_max = string_to_value(argv[i]);
+					if (video.qi_max < 0)
 					{
 						printf ("wrong quantizer index format for inter p-frames! must be an integer from 0 to 127;\n");
 						return -1;
 					}
-                    f_qp = 1;
-					video.quantizer_index_y_ac_p = video.quantizer_index_y_dc_p;
-					video.quantizer_index_uv_dc_p = video.quantizer_index_y_dc_p - 15;
-					video.quantizer_index_uv_dc_p = (video.quantizer_index_uv_dc_p < 0) ? 0 : video.quantizer_index_uv_dc_p;
-					video.quantizer_index_uv_ac_p = video.quantizer_index_y_dc_p - 15;
-					video.quantizer_index_uv_ac_p = (video.quantizer_index_uv_ac_p < 0) ? 0 : video.quantizer_index_uv_ac_p;
-					video.quantizer_index_y2_ac_p = video.quantizer_index_y_dc_p;
-					video.quantizer_index_y2_dc_p = video.quantizer_index_y_dc_p;
+                    f_qmin = 1;
 					++i;
                 }
                 else
@@ -746,6 +729,27 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
+			if (memcmp(&argv[i][1], "SSIM-target", 11)==0)
+            {
+                ++i;
+                if (i < argc)
+                {
+					int buf = string_to_value(argv[i]);
+					if ((buf < 0) || (buf > 97))
+					{
+						printf ("wrong quantizer index format for inter p-frames! must be an integer from 0 to 97;\n");
+						return -1;
+					}
+                    f_SSIM_target = 1;
+					video.SSIM_target = ((float)buf)/100.0f;
+					++i;
+                }
+                else
+                {
+                    printf ("no value for SSIM-target;\n");
+                    return -1;
+                }
+            }
 		}    
 		if (i == ii)
 		{
@@ -763,25 +767,15 @@ int ParseArgs(int argc, char *argv[])
 		printf("no output file specified;\n");
 		return -1;
     }
-	if (f_qi == 0)
+	if (f_qmax == 0)
     {
-		printf("no quantizer index for intra i-frames specified - set to 0;\n");
-		video.quantizer_index_y_dc_i = 0;
-		video.quantizer_index_uv_ac_i = 0;
-		video.quantizer_index_uv_dc_i = 0;
-		video.quantizer_index_y2_ac_i = 0;
-		video.quantizer_index_y2_dc_i = 0;
-		video.quantizer_index_y_ac_i = 0;
+		printf("no min quantizer index -> set to 0;\n");
+		video.qi_min = 0;
     }
-	if (f_qp == 0)
+	if (f_qmin == 0)
     {
-		printf("no quantizer index for inter p-frames specified - set to 16;\n");
-		video.quantizer_index_y_dc_p = 0;
-		video.quantizer_index_uv_ac_p = 0;
-		video.quantizer_index_uv_dc_p = 0;
-		video.quantizer_index_y2_ac_p = 0;
-		video.quantizer_index_y2_dc_p = 0;
-		video.quantizer_index_y_ac_p = 0;
+		printf("no max quantizer index -> set to 48;\n");
+		video.qi_max = 48;
     }
 	if (f_g == 0)
     {
@@ -803,8 +797,25 @@ int ParseArgs(int argc, char *argv[])
 		printf("no loop filter sharpness is specified - set to 0;\n");
 		video.loop_filter_sharpness = 0;
     }
-
+	if (f_SSIM_target == 0)
+	{
+		printf("no SSIM intra-in-inter tuning");
+		video.SSIM_target = -1.0f;
+	}
 	video.loop_filter_type = 0; //this is fixed now
+
+	if (video.qi_max < video.qi_min) 
+	{
+		printf("wrong quantizer min-max range -> swap \n");
+		int32_t buf = video.qi_max;
+		video.qi_max = video.qi_min;
+		video.qi_min = buf;
+		
+	}
+	video.qi[intra_segment] = video.qi_min;
+	video.qi[LQ_segment] = video.qi_max;
+	video.qi[AQ_segment] = (4*video.qi_max + 2*video.qi_min+3)/6;
+	video.qi[HQ_segment] = (2*video.qi_max + 4*video.qi_min+3)/6;
     return 0;
 }
 
