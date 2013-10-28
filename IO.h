@@ -1,6 +1,5 @@
 void gather_frame()
 {
-	t.start = clock();
 	// get info about partition sizes
 	device.state_cpu = clFinish(device.commandQueue_cpu);
 	device.state_cpu = clEnqueueReadBuffer(device.commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(int32_t), frames.partition_sizes, 0, NULL, NULL);
@@ -67,7 +66,6 @@ void write_output_file()
 	// now print frame
 	fwrite(frames.encoded_frame, 1, frames.encoded_frame_size, output_file.handle);
 
-	t.write += clock() - t.start;	
 	return;
 }
 
@@ -154,51 +152,51 @@ int copy_with_padding()
 	
 	for (i = 0; i < video.src_height; i+=2)
 	{
-        	// two luma lines, one chroma and one chroma line at step
-	    	memcpy(dstY, srcY, video.src_width);
+        // two luma lines, one chroma and one chroma line at step
+		memcpy(dstY, srcY, video.src_width);
 		ext_pixelY = srcY[video.src_width-1];
-        	for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
-	        	dstY[j] = ext_pixelY;
+		for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
+			dstY[j] = ext_pixelY;
 		srcY += video.src_width; // dst_width/height == src_width/height if this function called
-        	dstY += video.wrk_width;
+		dstY += video.wrk_width;
 
 		memcpy(dstY, srcY, video.src_width);
-        	ext_pixelY = srcY[video.src_width-1];
-	    	for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
+		ext_pixelY = srcY[video.src_width-1];
+		for (j = video.src_width; j < video.wrk_width; ++j) // extend to the right
 			dstY[j] = ext_pixelY;
 		srcY += video.src_width;
-        	dstY += video.wrk_width;
+		dstY += video.wrk_width;
 
 		memcpy(dstU, srcU, src_width_chroma);
-		ext_pixelU = srcU[src_width_chroma-1];
-        	for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
-	        	dstU[j] = ext_pixelU;
+		ext_pixelU = srcU[src_width_chroma-1];	
+		for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
+			dstU[j] = ext_pixelU;
 		srcU += (src_width_chroma);
-        	dstU += (wrk_width_chroma);
+        dstU += (wrk_width_chroma);
 
-	    	memcpy(dstV, srcV, src_width_chroma);
+		memcpy(dstV, srcV, src_width_chroma);
 		ext_pixelV = srcU[src_width_chroma-1];
 		for (j = src_width_chroma; j < wrk_width_chroma; ++j) // extend to the right
 			dstU[j] = ext_pixelV;
-        	srcV += (src_width_chroma);
-	    	dstV += (wrk_width_chroma);
+		srcV += (src_width_chroma);
+		dstV += (wrk_width_chroma);
 	}
-    	// now copy last line to all lower lines, so increment only for dst
+	// now copy last line to all lower lines, so increment only for dst
 	srcY = dstY - video.wrk_width;
 	srcU = dstU - wrk_width_chroma;
 	srcV = dstV - wrk_width_chroma;
 
-    	for (i = video.src_height; i < video.wrk_height; i+=2)
-    	{
-        	memcpy(dstY, srcY, video.wrk_width);
-        	dstY += video.wrk_width;
-        	memcpy(dstY, srcY, video.wrk_width);
-        	dstY += video.wrk_width;
-        	memcpy(dstU, srcU, wrk_width_chroma);
-        	dstU += (wrk_width_chroma);
-        	memcpy(dstV, srcV, wrk_width_chroma);
-        	dstV += (wrk_width_chroma);
-    	}
+	for (i = video.src_height; i < video.wrk_height; i+=2)
+	{
+		memcpy(dstY, srcY, video.wrk_width);
+		dstY += video.wrk_width;
+		memcpy(dstY, srcY, video.wrk_width);
+		dstY += video.wrk_width;
+		memcpy(dstU, srcU, wrk_width_chroma);
+		dstU += (wrk_width_chroma);
+		memcpy(dstV, srcV, wrk_width_chroma);
+		dstV += (wrk_width_chroma);
+	}
 
     	return 1;
 }
@@ -206,12 +204,11 @@ int copy_with_padding()
 
 int get_yuv420_frame()
 {
+	// if there is padding, could be just pointer switch
 	if (frames.frame_number > 0) {
 		memcpy(frames.last_U, frames.current_U, video.wrk_frame_size_chroma);
 		memcpy(frames.last_V, frames.current_V, video.wrk_frame_size_chroma);
 	}
-
-	t.start = clock();
 
 	int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1);
 	int i, j, fragment_size = src_frame_size_full;
@@ -251,6 +248,8 @@ int get_yuv420_frame()
 		return -1;
 	}
 
-	t.read += clock() - t.start;
+	//memset(frames.current_Y, 128, video.wrk_frame_size_luma);
+	//memset(frames.current_U, 128, video.wrk_frame_size_chroma); //make black and white
+	//memset(frames.current_V, 128, video.wrk_frame_size_chroma);
 	return 1;
 }
