@@ -1,5 +1,4 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef enum {
 	are16x16 = 0,
@@ -13,6 +12,27 @@ typedef enum {
 	ALTREF = 2
 } ref_frame;
 
+typedef enum {
+	intra_segment = 0,
+	HQ_segment = 1,
+	AQ_segment = 2,
+	LQ_segment = 3
+} segment_ids;
+
+typedef struct {
+	int y_ac_i; 
+	int y_dc_idelta;
+	int y2_dc_idelta;
+	int y2_ac_idelta;
+	int uv_dc_idelta;
+	int uv_ac_idelta;
+	int loop_filter_level;
+	int mbedge_limit;
+	int sub_bedge_limit;
+	int interior_limit;
+	int hev_threshold;
+} segment_data;
+
 typedef struct {
     short coeffs[25][16];
     int vector_x[4];
@@ -21,6 +41,7 @@ typedef struct {
 	int non_zero_coeffs;
 	int parts;
 	int reference_frame;
+	segment_ids segment_id;
 } macroblock;
 
 typedef struct {
@@ -28,7 +49,31 @@ typedef struct {
 	int vector_y;
 } vector_net;
 
-void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3, const int * const dc_q, const int * const ac_q) 
+static const int vp8_dc_qlookup[128] =
+{
+      4,   5,   6,   7,   8,   9,  10,  10,  11,  12,  13,  14,  15,  16,  17,  17,
+     18,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  25,  25,  26,  27,  28,
+     29,  30,  31,  32,  33,  34,  35,  36,  37,  37,  38,  39,  40,  41,  42,  43,
+     44,  45,  46,  46,  47,  48,  49,  50,  51,  52,  53,  54,  55,  56,  57,  58,
+     59,  60,  61,  62,  63,  64,  65,  66,  67,  68,  69,  70,  71,  72,  73,  74,
+     75,  76,  76,  77,  78,  79,  80,  81,  82,  83,  84,  85,  86,  87,  88,  89,
+     91,  93,  95,  96,  98, 100, 101, 102, 104, 106, 108, 110, 112, 114, 116, 118,
+    122, 124, 126, 128, 130, 132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
+};
+
+static const int vp8_ac_qlookup[128] =
+{
+      4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,
+     20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,
+     36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51,
+     52,  53,  54,  55,  56,  57,  58,  60,  62,  64,  66,  68,  70,  72,  74,  76,
+     78,  80,  82,  84,  86,  88,  90,  92,  94,  96,  98, 100, 102, 104, 106, 108,
+    110, 112, 114, 116, 119, 122, 125, 128, 131, 134, 137, 140, 143, 146, 149, 152,
+    155, 158, 161, 164, 167, 170, 173, 177, 181, 185, 189, 193, 197, 201, 205, 209,
+    213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
+};
+
+void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3) 
 {
 	int4 L0 = *__L0;
 	int4 L1 = *__L1;
@@ -375,6 +420,7 @@ __kernel void reset_vectors ( __global vector_net *const net1, //0
 	net2[mb_num + 3].vector_x = 0;
 	net2[mb_num + 3].vector_y = 0;
 	MBs[mb_num].reference_frame = LAST;
+	MBs[mb_num].segment_id = LQ_segment;
 	
 	return;
 }
@@ -411,9 +457,7 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 							const signed int net_width, //4 //in 8x8 blocks
 							const signed int width, //5
 							const signed int height, //6
-							const signed int pixel_rate, //7
-							const int dc_q, //8
-							const int ac_q) //9
+							const signed int pixel_rate) //7
 {   
 	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
 	__private uchar8 PL0, PL1, PL2, PL3, PL4, PL5, PL6, PL7;
@@ -501,25 +545,25 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			DL1 = convert_int4(CL1.s0123) - convert_int4(PL1.s0123);
 			DL2 = convert_int4(CL2.s0123) - convert_int4(PL2.s0123);
 			DL3 = convert_int4(CL3.s0123) - convert_int4(PL3.s0123);
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff = DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff = DL0.x;
 			// block 10			
 			DL0 = convert_int4(CL4.s0123) - convert_int4(PL4.s0123);
 			DL1 = convert_int4(CL5.s0123) - convert_int4(PL5.s0123);
 			DL2 = convert_int4(CL6.s0123) - convert_int4(PL6.s0123);
 			DL3 = convert_int4(CL7.s0123) - convert_int4(PL7.s0123);
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			// block 01
 			DL0 = convert_int4(CL0.s4567) - convert_int4(PL0.s4567);
 			DL1 = convert_int4(CL1.s4567) - convert_int4(PL1.s4567);
 			DL2 = convert_int4(CL2.s4567) - convert_int4(PL2.s4567);
 			DL3 = convert_int4(CL3.s4567) - convert_int4(PL3.s4567);
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			// block 11
 			DL0 = convert_int4(CL4.s4567) - convert_int4(PL4.s4567);
 			DL1 = convert_int4(CL5.s4567) - convert_int4(PL5.s4567);
 			DL2 = convert_int4(CL6.s4567) - convert_int4(PL6.s4567);
 			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			
 			//Diff += ((int)abs(px-cx) + (int)abs(py-cy))*4;
 			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*32;
@@ -545,9 +589,7 @@ __kernel void luma_search_2step //searching in interpolated picture
 							__global macroblock *const MBs, //3
 							__global int *const MBdiff, //4
 							const signed int width, //5
-							const signed int height, //6
-							const int dc_q, //7
-							const int ac_q) //8
+							const signed int height) //6
 {
 	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
 	
@@ -624,22 +666,22 @@ __kernel void luma_search_2step //searching in interpolated picture
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 = DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff0 = DL0.x;
 			DL0 = convert_int4(CL0.s0123) - convert_int4((uchar4)(UC00.y, UC01.y, UC02.y, UC03.y));
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.y, UC11.y, UC12.y, UC13.y));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.y, UC21.y, UC22.y, UC23.y));
 			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.y, UC31.y, UC32.y, UC33.y));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff1 = DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff1 = DL0.x;
 			DL0 = convert_int4(CL0.s0123) - convert_int4((uchar4)(UC00.z, UC01.z, UC02.z, UC03.z));
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.z, UC11.z, UC12.z, UC13.z));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.z, UC21.z, UC22.z, UC23.z));
 			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.z, UC31.z, UC32.z, UC33.z));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff2 = DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff2 = DL0.x;
 			DL0 = convert_int4(CL0.s0123) - convert_int4((uchar4)(UC00.w, UC01.w, UC02.w, UC03.w));
 			DL1 = convert_int4(CL1.s0123) - convert_int4((uchar4)(UC10.w, UC11.w, UC12.w, UC13.w));
 			DL2 = convert_int4(CL2.s0123) - convert_int4((uchar4)(UC20.w, UC21.w, UC22.w, UC23.w));
 			DL3 = convert_int4(CL3.s0123) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 = DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff3 = DL0.x;
 			// block 10			
 			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
 			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
@@ -649,22 +691,22 @@ __kernel void luma_search_2step //searching in interpolated picture
 			DL1 = convert_int4(CL5.s0123) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
 			DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 			DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff0 += DL0.x;
 			DL0 = convert_int4(CL4.s0123) - convert_int4((uchar4)(UC00.y, UC01.y, UC02.y, UC03.y));
 			DL1 = convert_int4(CL5.s0123) - convert_int4((uchar4)(UC10.y, UC11.y, UC12.y, UC13.y));
 			DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.y, UC21.y, UC22.y, UC23.y));
 			DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.y, UC31.y, UC32.y, UC33.y));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff1 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff1 += DL0.x;
 			DL0 = convert_int4(CL4.s0123) - convert_int4((uchar4)(UC00.z, UC01.z, UC02.z, UC03.z));
 			DL1 = convert_int4(CL5.s0123) - convert_int4((uchar4)(UC10.z, UC11.z, UC12.z, UC13.z));
 			DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.z, UC21.z, UC22.z, UC23.z));
 			DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.z, UC31.z, UC32.z, UC33.z));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff2 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff2 += DL0.x;
 			DL0 = convert_int4(CL4.s0123) - convert_int4((uchar4)(UC00.w, UC01.w, UC02.w, UC03.w));
 			DL1 = convert_int4(CL5.s0123) - convert_int4((uchar4)(UC10.w, UC11.w, UC12.w, UC13.w));
 			DL2 = convert_int4(CL6.s0123) - convert_int4((uchar4)(UC20.w, UC21.w, UC22.w, UC23.w));
 			DL3 = convert_int4(CL7.s0123) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff3 += DL0.x;
 			pi -= (width_x4<<5);
 			// block 01
 			pi += 16;
@@ -676,22 +718,22 @@ __kernel void luma_search_2step //searching in interpolated picture
 			DL1 = convert_int4(CL1.s4567) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
 			DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 			DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff0 += DL0.x;
 			DL0 = convert_int4(CL0.s4567) - convert_int4((uchar4)(UC00.y, UC01.y, UC02.y, UC03.y));
 			DL1 = convert_int4(CL1.s4567) - convert_int4((uchar4)(UC10.y, UC11.y, UC12.y, UC13.y));
 			DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.y, UC21.y, UC22.y, UC23.y));
 			DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.y, UC31.y, UC32.y, UC33.y));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff1 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff1 += DL0.x;
 			DL0 = convert_int4(CL0.s4567) - convert_int4((uchar4)(UC00.z, UC01.z, UC02.z, UC03.z));
 			DL1 = convert_int4(CL1.s4567) - convert_int4((uchar4)(UC10.z, UC11.z, UC12.z, UC13.z));
 			DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.z, UC21.z, UC22.z, UC23.z));
 			DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.z, UC31.z, UC32.z, UC33.z));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff2 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff2 += DL0.x;
 			DL0 = convert_int4(CL0.s4567) - convert_int4((uchar4)(UC00.w, UC01.w, UC02.w, UC03.w));
 			DL1 = convert_int4(CL1.s4567) - convert_int4((uchar4)(UC10.w, UC11.w, UC12.w, UC13.w));
 			DL2 = convert_int4(CL2.s4567) - convert_int4((uchar4)(UC20.w, UC21.w, UC22.w, UC23.w));
 			DL3 = convert_int4(CL3.s4567) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff3 += DL0.x;
 			// block 11
 			UC00 = vload4(0,prev_frame+pi); UC01 = vload4(0,prev_frame+pi+4); UC02 = vload4(0,prev_frame+pi+8); UC03 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
 			UC10 = vload4(0,prev_frame+pi); UC11 = vload4(0,prev_frame+pi+4); UC12 = vload4(0,prev_frame+pi+8); UC13 = vload4(0,prev_frame+pi+12); pi += width_x4_x4;
@@ -701,22 +743,22 @@ __kernel void luma_search_2step //searching in interpolated picture
 			DL1 = convert_int4(CL5.s4567) - convert_int4((uchar4)(UC10.x, UC11.x, UC12.x, UC13.x));
 			DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.x, UC21.x, UC22.x, UC23.x));
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.x, UC31.x, UC32.x, UC33.x));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff0 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff0 += DL0.x;
 			DL0 = convert_int4(CL4.s4567) - convert_int4((uchar4)(UC00.y, UC01.y, UC02.y, UC03.y));
 			DL1 = convert_int4(CL5.s4567) - convert_int4((uchar4)(UC10.y, UC11.y, UC12.y, UC13.y));
 			DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.y, UC21.y, UC22.y, UC23.y));
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.y, UC31.y, UC32.y, UC33.y));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff1 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff1 += DL0.x;
 			DL0 = convert_int4(CL4.s4567) - convert_int4((uchar4)(UC00.z, UC01.z, UC02.z, UC03.z));
 			DL1 = convert_int4(CL5.s4567) - convert_int4((uchar4)(UC10.z, UC11.z, UC12.z, UC13.z));
 			DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.z, UC21.z, UC22.z, UC23.z));
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.z, UC31.z, UC32.z, UC33.z));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff2 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff2 += DL0.x;
 			DL0 = convert_int4(CL4.s4567) - convert_int4((uchar4)(UC00.w, UC01.w, UC02.w, UC03.w));
 			DL1 = convert_int4(CL5.s4567) - convert_int4((uchar4)(UC10.w, UC11.w, UC12.w, UC13.w));
 			DL2 = convert_int4(CL6.s4567) - convert_int4((uchar4)(UC20.w, UC21.w, UC22.w, UC23.w));
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
-			weight(&DL0, &DL1, &DL2, &DL3, &dc_q, &ac_q);	Diff3 += DL0.x;
+			weight(&DL0, &DL1, &DL2, &DL3);	Diff3 += DL0.x;
 			
 			//Diff0 += abs(px - cx) + abs(py - cy);
 			Diff0 += (int)(abs(px-cx-vector_x0) + abs(py-cy-vector_y0))*16;
@@ -765,16 +807,12 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 								__global macroblock *const MBs, //9
 								__global int *const MBdiff, //10
 								const int width, //11
-								const int y_ac_q, //12
-								const int y2_dc_q, //13
-								const int y2_ac_q, //14
-								const int uv_dc_q, //15
-								const int uv_ac_q) //16
+								__constant segment_data *const SD) //12
 {
 	//this kernel try to compare difference from search  to difference resulting from vector(0;0) into golden frame
 	//if golden reference is better kernel does DCT and WHT on luma and chroma also
-	
-	__private int mb_num,x,y,i;
+
+	__private int mb_num,x,y,i,y_ac_q,y2_dc_q,y2_ac_q,uv_dc_q,uv_ac_q;
 	__private int4 DL0,DL1,DL2,DL3;
 	__private short16 L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14,L15;
 	
@@ -894,6 +932,24 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	
 	if (DL0.x > DL1.x) return; //last reference is better
 	//else
+	y_ac_q = MBs[mb_num].segment_id;
+	y_ac_q = SD[y_ac_q].y_ac_i;
+	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += y_ac_q;
+	y2_ac_q = SD[0].y2_ac_idelta; y2_ac_q += y_ac_q;
+	uv_dc_q = SD[0].uv_dc_idelta; uv_dc_q += y_ac_q;
+	uv_ac_q = SD[0].uv_ac_idelta; uv_ac_q += y_ac_q;
+	y2_dc_q = select(y2_dc_q,0,y2_dc_q<0); y2_dc_q = select(y2_dc_q,127,y2_dc_q>127);
+	y2_ac_q = select(y2_ac_q,0,y2_ac_q<0); y2_ac_q = select(y2_ac_q,127,y2_ac_q>127);
+	uv_dc_q = select(uv_dc_q,0,uv_dc_q<0); uv_dc_q = select(uv_dc_q,127,uv_dc_q>127);
+	uv_ac_q = select(uv_ac_q,0,uv_ac_q<0); uv_ac_q = select(uv_ac_q,127,uv_ac_q>127);
+	y_ac_q = vp8_ac_qlookup[y_ac_q];
+	y2_dc_q = (vp8_dc_qlookup[y2_dc_q])*2;
+	y2_ac_q = 31*(vp8_ac_qlookup[y2_ac_q])/20;
+	uv_dc_q = vp8_dc_qlookup[uv_dc_q];
+	uv_ac_q = vp8_ac_qlookup[uv_ac_q];
+	y2_ac_q = select(y2_ac_q,8,y2_ac_q<8);
+	uv_dc_q = select(uv_dc_q,132,uv_dc_q>132);
+	
 	MBs[mb_num].reference_frame = GOLDEN;
 	MBs[mb_num].parts = are16x16; 
 	MBs[mb_num].vector_x[0] = 0;
@@ -1290,14 +1346,12 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 								__global uchar *const prev_frame, //2
 								__global macroblock *const MBs, //3
 								const int width, //4
-								const int y_ac_q, //5
-								const int y2_dc_q, //6
-								const int y2_ac_q) //7
+								__constant segment_data *const SD) //5
 {	
 	// possible optimization - LOCAL memory for storing predictors until reconstruction
 	// but it's very device specific (HD6000-HD7000 has 32kb per work_group, older may has less)
 
-	__private int mb_num, vector_x,vector_y,x,y,condition,i;
+	__private int mb_num, vector_x,vector_y,x,y,condition,i,y_ac_q,y2_dc_q,y2_ac_q;
 	__private int4 DL0,DL1,DL2,DL3;
 	__private short16 L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14,L15;
 	__private uchar4 buf;
@@ -1305,8 +1359,8 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 	mb_num = get_global_id(0);
 
 	if (MBs[mb_num].reference_frame != LAST) return;
-	MBs[mb_num].parts = are8x8;
-		
+	MBs[mb_num].parts = are8x8; 
+
 	vector_x = MBs[mb_num].vector_x[0];
 	vector_y = MBs[mb_num].vector_y[0];
 	x = MBs[mb_num].vector_x[1];
@@ -1322,6 +1376,19 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 	condition = ((vector_x != x) || (vector_y != y)); 
 	if (condition) return; 
 	MBs[mb_num].parts = are16x16;
+	
+	i = MBs[mb_num].segment_id;
+	i = SD[i].y_ac_i;
+	
+	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += i;
+	y2_ac_q = SD[0].y2_ac_idelta; y2_ac_q += i;
+	y2_dc_q = select(y2_dc_q,0,y2_dc_q<0); y2_dc_q = select(y2_dc_q,127,y2_dc_q>127);
+	y2_ac_q = select(y2_ac_q,0,y2_ac_q<0); y2_ac_q = select(y2_ac_q,127,y2_ac_q>127);
+	
+	y_ac_q = vp8_ac_qlookup[i];
+	y2_dc_q = (vp8_dc_qlookup[y2_dc_q])*2;
+	y2_ac_q = 31*(vp8_ac_qlookup[y2_ac_q])/20;
+	y2_ac_q = select(y2_ac_q,8,y2_ac_q<8);
 	
 	x = (mb_num % (width/16))*16;
 	y = (mb_num / (width/16))*16;
@@ -1773,8 +1840,7 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 								__global uchar *const prev_frame, //2
 								__global macroblock *const MBs, //3
 								const signed int width, //4
-								const int dc_q, //5
-								const int ac_q) //6
+								__constant segment_data *const SD) //5
 	
 {
 	__private int4 DL0, DL1, DL2, DL3;
@@ -1785,7 +1851,7 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 	
    	__private int cx, cy, px, py, vector_x, vector_y;	
 	__private int ci, pi; 
-	__private int mb_num, b8x8_num, b4x4_in_mb,b8x8_in_mb;
+	__private int mb_num, b8x8_num, b4x4_in_mb,b8x8_in_mb,dc_q,ac_q;
 	__private int width_x4 = width*4;		
 	
 	b8x8_num = get_global_id(0); 
@@ -1795,6 +1861,14 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 	
 	if (MBs[mb_num].parts != are8x8) return;
 	if (MBs[mb_num].reference_frame != LAST) return;
+	
+	ac_q = MBs[mb_num].segment_id;
+	ac_q = SD[ac_q].y_ac_i;
+	dc_q = SD[0].y_dc_idelta; dc_q += ac_q;
+	dc_q = select(dc_q,0,dc_q<0); dc_q = select(dc_q,127,dc_q>127);
+	ac_q = select(ac_q,0,ac_q<0); ac_q = select(ac_q,127,ac_q>127);
+	dc_q = vp8_dc_qlookup[dc_q];
+	ac_q = vp8_ac_qlookup[ac_q];
 	
 	ci = cy*width + cx; 
 	b4x4_in_mb = ((cy%16)/4)*4 + (cx%16)/4;
@@ -2042,20 +2116,19 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 	return;
 }
 
-__kernel void chroma_transform( 	__global uchar *const current_frame, //0 input frame (the one being encoded)
-									__global uchar *const prev_frame, //1 reference frame for predictors
-									__global uchar *const recon_frame, //2 reconstructed current frame after DCT-quant/dequant-iDCT
-									__global macroblock *const MBs, //3 here it's an input
+__kernel void chroma_transform( 	__global uchar *const current_frame, //0 
+									__global uchar *const prev_frame, //1 
+									__global uchar *const recon_frame, //2 
+									__global macroblock *const MBs, //3 
 									const signed int chroma_width, //4 
 									const signed int chroma_height, //5 
-									const int dc_q, //6
-									const int ac_q, //7
-									const int block_place) //8
+									__constant segment_data *const SD, //6
+									const int block_place) //7
 {  
 	__private int chroma_block_num;
 	__private int chroma_width_x8 = chroma_width*8;
 	__private int cx, cy, px, py;
-	__private int mb_num, block_in_mb;
+	__private int mb_num, block_in_mb,dc_q,ac_q,qi;
 	
 	chroma_block_num = get_global_id(0); 
 
@@ -2065,6 +2138,17 @@ __kernel void chroma_transform( 	__global uchar *const current_frame, //0 input 
 	mb_num = (cy/8)*(chroma_width/8) + (cx/8);
 	block_in_mb = ((cy/4)%2)*2 + ((cx/4)%2);
 	if (MBs[mb_num].reference_frame != LAST) return;
+	
+	qi = MBs[mb_num].segment_id;
+	qi = SD[qi].y_ac_i;
+	dc_q = SD[0].uv_dc_idelta; dc_q += qi;
+	ac_q = SD[0].uv_ac_idelta; ac_q += qi;
+	dc_q = select(dc_q,0,dc_q<0); dc_q = select(dc_q,127,dc_q>127);
+	ac_q = select(ac_q,0,ac_q<0); ac_q = select(ac_q,127,ac_q>127);
+	
+	dc_q = vp8_dc_qlookup[dc_q];
+	ac_q = vp8_ac_qlookup[ac_q];
+	dc_q = select(dc_q,132,dc_q>132);
 
 	__private int ci00, ci10, ci20, ci30;
 	ci00 = cy*chroma_width + cx; 
@@ -2193,23 +2277,19 @@ __kernel void prepare_filter_mask(__global macroblock *const MBs,
 
 __kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
 									const int width, //1
-									const int mbedge_limit, //2
-									const int sub_bedge_limit, //3
-									const int interior_limit, //4
-									const int hev_threshold, //5
-									const int mb_size, //6
-									const int stage, //7
-									__global int *const mb_mask) //8
+									__constant const segment_data *const SD, //2
+									__global macroblock *const MB, //3
+									const int mb_size, //4
+									const int stage, //5
+									__global int *const mb_mask) //6
 {
 	// here we write R, then rewrite it as L
 	// may be reduced, but different mb_size and mask should be accounted
-	int x, y, i;
+	int x, y, i, mb_col, mb_row, mb_num;
 	uchar4 L, R;
 	int4 P, Q;
-	int a, b, w;
-	int mask;
-	int hev;
-	int mb_col, mb_row, subblock_mask;
+	int a, b, w, mask, hev, subblock_mask;
+	int interior_limit, mbedge_limit, sub_bedge_limit, hev_threshold, id;
 
 	mb_row = get_global_id(0)/mb_size;
 	mb_col = stage - (2*mb_row);
@@ -2217,8 +2297,15 @@ __kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
 	if (mb_col < 0) return;
 	if (mb_col >= (width/mb_size)) return;
 	
-	subblock_mask = mb_mask[mb_row*(width/mb_size)+mb_col];
-
+	mb_num = mb_row*(width/mb_size)+mb_col;
+	id = MB[mb_num].segment_id;
+	if (SD[id].loop_filter_level == 0) return;
+	interior_limit = SD[id].interior_limit;
+	mbedge_limit = SD[id].mbedge_limit;
+	sub_bedge_limit = SD[id].sub_bedge_limit;
+	hev_threshold = SD[id].hev_threshold;
+	subblock_mask = mb_mask[mb_num];
+	
 	y = get_global_id(0);
 	x = mb_col * mb_size;
 	
@@ -2428,23 +2515,19 @@ __kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
 	return;	
 }
 
-__kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
-		void normal_loop_filter_MBV(__global uchar * const frame, //0
+__kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
 									const int width, //1
-									const int mbedge_limit, //2
-									const int sub_bedge_limit, //3
-									const int interior_limit, //4
-									const int hev_threshold, //5
-									const int mb_size, //6
-									const int stage, //7
-									__global int *const mb_mask) //8
+									__constant segment_data *const SD, //2
+									__global macroblock *const MB, //3
+									const int mb_size, //4
+									const int stage, //5
+									__global int *const mb_mask) //6
 {
-	int x, y, i;
+	int x, y, i, mb_row, mb_col, mb_num;
 	uchar4 ucP3, ucP2, ucP1, ucP0, /*edge*/ ucQ0, ucQ1, ucQ2, ucQ3;
 	int4 p3, p2, p1, p0, /*edge*/ q0, q1, q2, q3;
-	int4 a, b, w;
-	int4 mask, hev;
-	int mb_row, mb_col, subblock_mask;
+	int4 a, b, w, mask, hev;
+	int interior_limit, mbedge_limit, sub_bedge_limit, hev_threshold, id, subblock_mask;
 
 	mb_row = get_global_id(0)/(mb_size/4);
 	mb_col = stage - (2*mb_row);
@@ -2452,7 +2535,17 @@ __kernel //__attribute__((reqd_work_group_size(64, 1, 1)))
 	if (mb_col < 0) return;
 	if (mb_col >= (width/mb_size)) return;
 	
-	subblock_mask = mb_mask[mb_row*(width/mb_size)+mb_col];
+	mb_num = mb_row*(width/mb_size)+mb_col;
+	id = MB[mb_num].segment_id;
+	if (SD[id].loop_filter_level == 0) return;
+	interior_limit = SD[id].interior_limit;
+	mbedge_limit = SD[id].mbedge_limit;
+	sub_bedge_limit = SD[id].sub_bedge_limit;
+	hev_threshold = SD[id].hev_threshold;
+	
+	subblock_mask = mb_mask[mb_num];
+	
+	//printf((__constant char*)"%d",subblock_mask);
 	
 	y = (get_global_id(0)/(mb_size/4))*mb_size;
 	x = mad24((int)mb_col, mb_size, (int)(get_global_id(0)%(mb_size/4))*4);
