@@ -808,13 +808,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			for (i = 0; i < video.mb_count; ++i)
 				++seg_count[frames.transformed_blocks[i].segment_id];
 			// 1 bit choose between 0,1 (0) and 2,3 (1) segments
-			i = (seg_count[0]+seg_count[1])/video.mb_count;
+			i = (seg_count[0]+seg_count[1])*255/video.mb_count;
 			new_segment_prob[0] = i;
 			// 2 bit :  0 (0) and 1 (1) segments
-			i = (seg_count[0]+seg_count[1]); i+=(i==0); i = seg_count[0]/i;
+			i = (seg_count[0]+seg_count[1]); i+=(i==0); i = seg_count[0]*255/i;
 			new_segment_prob[1] = i;
 			// 3 bit :  2 (0) and 3 (1) segments
-			i = (seg_count[2]+seg_count[3]); i+=(i==0); i = seg_count[2]/i;
+			i = (seg_count[2]+seg_count[3]); i+=(i==0); i = seg_count[2]*255/i;
 			new_segment_prob[2] = i;
 			
 			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[0], 8); 
@@ -905,13 +905,14 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       refresh_golden_frame                        | L(1)  |*/
 		write_flag(vbe, 0);
     /*      refresh_alternate_frame                     | L(1)  |*/
-		write_flag(vbe, 0);
+		write_flag(vbe, frames.current_is_altref_frame);
     /*      if (!refresh_golden_frame)                  |       |
     |           copy_buffer_to_golden                   | L(2)  | */// 0: no copying; 1: last -> golden; 2: altref -> golden
 		write_literal(vbe, 0, 2);
     /*      if (!refresh_alternate_frame)               |       |
-    |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: lsat -> altref; 2: golden -> altref
-		write_literal(vbe, 0, 2);
+    |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: last -> altref; 2: golden -> altref
+		if (!frames.current_is_altref_frame)
+			write_literal(vbe, 0, 2);
     /*      sign_bias_golden                            | L(1)  |
     |       sign_bias_alternate                         | L(1)  |*/
 	//These values are used to control the sign of the motion vectors when
@@ -980,26 +981,18 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	{
     /*      prob_intra                                  | L(8)  |*/
 		// probability, that block intra encoded. We use only inter in not-key frames
-		prob_intra = frames.replaced*256/video.mb_count;
+		prob_intra = frames.replaced*255/video.mb_count;
 		if ((frames.replaced > 0) && (prob_intra < 2)) prob_intra = 2;
 		if ((frames.replaced < video.mb_count) && (prob_intra > 254)) prob_intra = 254;
-		if (frames.replaced == video.mb_count) prob_intra = 255;
 		write_literal(vbe, prob_intra, 8); 
     /*      prob_last                                   | L(8)  |*/
 		// probability of last frame used as reference  for inter encoding
-		prob_last = 0; // flag value for last is ZERO; prob of flag being ZERO 
-		for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
-			if ((frames.transformed_blocks[mb_num].reference_frame == LAST) && (frames.e_data[mb_num].is_inter_mb))
-				++prob_last;
-		prob_last = ((video.mb_count - frames.replaced) == 0) ? 0 : (prob_last / (video.mb_count - frames.replaced));
-		prob_last = (prob_last < 45) ? 45 : prob_last; //range 2..254 gives worse result.... why...?
-		prob_last = (prob_last > 205) ? 205 : prob_last;
-		prob_last = 255 - prob_last; // confused i am about this line, why does it help?
+		prob_last = 128; // flag value for last is ZERO; prob of flag being ZERO 
 		write_literal(vbe, prob_last, 8); // we use lasts and goldens
     /*      prob_gf                                     | L(8)  |*/
 		// probability of golden frame used as reference  for inter encoding
-		prob_gf = 255;
-		write_literal(vbe, prob_gf, 8); // we don't use altrefs
+		prob_gf = 128;
+		write_literal(vbe, prob_gf, 8); 
     /*      intra_16x16_prob_update_flag                | L(1)  |*/
 		// indicates if the branch probabilities used in the decoding of the luma intra-prediction(for inter-frames only) mode are updated
     /*      if (intra_16x16_prob_update_flag) {         |       |
@@ -1101,8 +1094,6 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 					from prior frames) when true and intra-prediction (i.e., prediction
 					from already-coded portions of the current frame) when false. The
 					zero-probability prob_intra is set by field J of the frame header.*/
-			// we've encoded prob_intra as 0 (ZERO probability of in_inter_mb being ZERO)
-			// and all our blocks are inter
 		if (frames.current_is_key_frame == 0) 
 			write_bool(vbe, prob_intra, (frames.e_data[mb_num].is_inter_mb == 1));
 		if ((frames.current_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
@@ -1110,14 +1101,16 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		/*  if (is_inter_mb) {                          |       |
         |       mb_ref_frame_sel1                       | B(p)  |*/
 			//selects the reference frame to be used; last frame (0), golden/alternate (1)
-			//we have set probability of this flag being ZERO equal to prob_intra
-			int ref = !(frames.transformed_blocks[mb_num].reference_frame == LAST);
+			int ref = (frames.transformed_blocks[mb_num].reference_frame != LAST);
 			write_bool(vbe, prob_last, ref);
 
 		/*      if (mb_ref_frame_sel1)                  |       |
         |           mb_ref_frame_sel2                   | B(p)  |*/
-			if (ref == 1)
-				write_bool(vbe, prob_gf, 0);
+			if (ref == 1) {
+				ref = (frames.transformed_blocks[mb_num].reference_frame == ALTREF);
+				write_bool(vbe, prob_gf, ref);
+
+			}
 
         /*      mv_mode                                 |   T   |// determines the macroblock motion vectormode
         |       if (mv_mode == SPLITMV) {               |       |
