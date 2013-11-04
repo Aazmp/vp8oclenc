@@ -14,6 +14,7 @@ typedef enum {
 
 typedef enum {
 	intra_segment = 0,
+	UQ_segment = 0,
 	HQ_segment = 1,
 	AQ_segment = 2,
 	LQ_segment = 3
@@ -400,7 +401,8 @@ void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Li
 
 __kernel void reset_vectors ( __global vector_net *const net1, //0
 								__global vector_net *const net2, //1
-								__global macroblock *const MBs) //2
+								__global macroblock *const MBs, //2
+								const int ref) //3
 {
 	int mb_num = get_global_id(0);
 	net1[mb_num + 0].vector_x = 0;
@@ -419,8 +421,9 @@ __kernel void reset_vectors ( __global vector_net *const net1, //0
 	net2[mb_num + 2].vector_y = 0;
 	net2[mb_num + 3].vector_x = 0;
 	net2[mb_num + 3].vector_y = 0;
-	MBs[mb_num].reference_frame = LAST;
+	MBs[mb_num].reference_frame = ref;
 	MBs[mb_num].segment_id = LQ_segment;
+	MBs[mb_num].SSIM = 0.0f;
 	
 	return;
 }
@@ -600,7 +603,7 @@ __kernel void luma_search_2step //searching in interpolated picture
 	__private int4 DL0, DL1, DL2, DL3;
 	
 	__private int start_x, end_x, start_y, end_y, vector_x, vector_y,vector_x0,vector_y0; 
-	__private unsigned int MinDiff, Diff0, Diff1, Diff2, Diff3;	
+	__private int MinDiff, Diff0, Diff1, Diff2, Diff3;	
 	__private int px, py, cx, cy, ci, pi;
 	__private int width_x4 = width*4;
 	__private int width_x4_x4 = width_x4*4;
@@ -632,9 +635,6 @@ __kernel void luma_search_2step //searching in interpolated picture
 	CL7 = vload8(0, current_frame + ci); 
 
 	MinDiff = 0xffff;
-
-	//printf((__constant char*)"[%d]=%d; %d\n",b8x8_num,vector_x,vector_y);
-	
 	cx *= 4; cy *=4; //into qpel
 	
 	start_x = cx - 4 + vector_x;	end_x = cx + 3 + vector_x;
@@ -769,6 +769,16 @@ __kernel void luma_search_2step //searching in interpolated picture
 			//Diff3 += abs(px+3 - cx) + abs(py - cy);
 			Diff3 += (int)(abs(px+3-cx-vector_x0) + abs(py-cy-vector_y0))*16;
 
+			// workd around to exclude 3 interpolated pixels to the right of right edge
+			pi = (px >= width_x4 - 32) ? 0x7fffffff : 0;
+			Diff1 |= pi; Diff2 |= pi; Diff3 |= pi;
+			// P.S this removes artifacs, but i can't understand why
+			// these 3 pixels are correctly(must) interpolated
+			// and this works perfectly with buffer of exactly previous frame
+			// but with 2 or more frames ago it doesn't and must be clamped
+			//see comment below
+			
+			
 			vector_x = (Diff0 < MinDiff) ? (px - cx) : vector_x;
 			vector_y = (Diff0 < MinDiff) ? (py - cy) : vector_y;
 			MinDiff = (Diff0 < MinDiff) ? Diff0 : MinDiff;
@@ -787,6 +797,24 @@ __kernel void luma_search_2step //searching in interpolated picture
     	} 
     } 
 	
+	// here we can force our vector to be end_x+3-cx;
+	// MBs[mb_num].vector_x[b8x8_num] = end_x+3-cx;
+	// it points to the third interpolated pixel of most right one real pixel
+	// if this vector is used with exactly previos frame - it's ok
+	// if with older - gives artifacts 
+	// not from the begining and not for te whole right edge
+	// => this is some smart-ass bug (can't even think of His nature)
+	
+	//P.S made dump of reconstructed frames - no artifacts in them
+	// weird...
+	// either decoder bug or in erithmetic encoder
+	
+	// artifact looks like key frame(golden in my case)
+	// may be reference flag in bool encoder gets corrupted
+	
+	// strange part - not for al blocks
+	// and only if there were vectors to right interpolated pixels
+	
 	MBs[mb_num].vector_x[b8x8_num] = vector_x;
 	MBs[mb_num].vector_y[b8x8_num] = vector_y;
 	
@@ -795,19 +823,21 @@ __kernel void luma_search_2step //searching in interpolated picture
 	return;
 }
 	
-__kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
-								__global uchar *const golden_frame_Y, //1
+	
+__kernel void try_another_reference(__global uchar *const current_frame_Y, //0
+								__global uchar *const ref_frame_Y, //1
 								__global uchar *const recon_frame_Y, //2
 								__global uchar *const current_frame_U, //3
-								__global uchar *const golden_frame_U, //4
+								__global uchar *const ref_frame_U, //4
 								__global uchar *const recon_frame_U, //5
 								__global uchar *const current_frame_V, //6
-								__global uchar *const golden_frame_V, //7
+								__global uchar *const ref_frame_V, //7
 								__global uchar *const recon_frame_V, //8
 								__global macroblock *const MBs, //9
 								__global int *const MBdiff, //10
 								const int width, //11
-								__constant segment_data *const SD) //12
+								__constant segment_data *const SD, //12
+								const int ref) //13
 {
 	//this kernel try to compare difference from search  to difference resulting from vector(0;0) into golden frame
 	//if golden reference is better kernel does DCT and WHT on luma and chroma also
@@ -841,10 +871,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	i = y*width + x;
 	//now read reference and do transform
 	//but with 1,1 quantizer, because we need DCT metrics
-	L0 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L1 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L2 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L3 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L0 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L1 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L2 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L3 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	DL0 = convert_int4(L0.s0123); DL1 = convert_int4(L1.s0123); DL2 = convert_int4(L2.s0123); DL3 = convert_int4(L3.s0123);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L0.s0123 = convert_short4(DL0);	L1.s0123 = convert_short4(DL1);	L2.s0123 = convert_short4(DL2);	L3.s0123 = convert_short4(DL3);
@@ -857,10 +887,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L0.sCDEF); DL1 = convert_int4(L1.sCDEF); DL2 = convert_int4(L2.sCDEF); DL3 = convert_int4(L3.sCDEF);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L0.sCDEF = convert_short4(DL0);	L1.sCDEF = convert_short4(DL1);	L2.sCDEF = convert_short4(DL2);	L3.sCDEF = convert_short4(DL3);
-	L4 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L5 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L6 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L7 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L4 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L5 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L6 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L7 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	DL0 = convert_int4(L4.s0123); DL1 = convert_int4(L5.s0123); DL2 = convert_int4(L6.s0123); DL3 = convert_int4(L7.s0123);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L4.s0123 = convert_short4(DL0);	L5.s0123 = convert_short4(DL1);	L6.s0123 = convert_short4(DL2);	L7.s0123 = convert_short4(DL3);
@@ -873,10 +903,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L4.sCDEF); DL1 = convert_int4(L5.sCDEF); DL2 = convert_int4(L6.sCDEF); DL3 = convert_int4(L7.sCDEF);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L4.sCDEF = convert_short4(DL0);	L5.sCDEF = convert_short4(DL1);	L6.sCDEF = convert_short4(DL2);	L7.sCDEF = convert_short4(DL3);
-	L8 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L9 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L10 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L11 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L8 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L9 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L10 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L11 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	DL0 = convert_int4(L8.s0123); DL1 = convert_int4(L9.s0123); DL2 = convert_int4(L10.s0123); DL3 = convert_int4(L11.s0123);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L8.s0123 = convert_short4(DL0);	L9.s0123 = convert_short4(DL1);	L10.s0123 = convert_short4(DL2);	L11.s0123 = convert_short4(DL3);
@@ -889,10 +919,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L8.sCDEF); DL1 = convert_int4(L9.sCDEF); DL2 = convert_int4(L10.sCDEF); DL3 = convert_int4(L11.sCDEF);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L8.sCDEF = convert_short4(DL0);	L9.sCDEF = convert_short4(DL1);	L10.sCDEF = convert_short4(DL2);	L11.sCDEF = convert_short4(DL3);
-	L12 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L13 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L14 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L15 -= convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L12 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L13 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L14 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L15 -= convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	DL0 = convert_int4(L12.s0123); DL1 = convert_int4(L13.s0123); DL2 = convert_int4(L14.s0123); DL3 = convert_int4(L15.s0123);
 	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, 1, 1);
 	L12.s0123 = convert_short4(DL0);	L13.s0123 = convert_short4(DL1);	L14.s0123 = convert_short4(DL2);	L15.s0123 = convert_short4(DL3);
@@ -928,11 +958,17 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL1.x = MBdiff[mb_num*4];
 	DL1.x += MBdiff[mb_num*4+1];
 	DL1.x += MBdiff[mb_num*4+2];
-	DL1.x += MBdiff[mb_num*4+3]; //best last reference metrics minus vector part
+	DL1.x += MBdiff[mb_num*4+3]; //best previous reference metrics minus vector part
 	
-	if (DL0.x > DL1.x) return; //last reference is better
+	if (DL0.x > DL1.x) return; //previous reference is better
 	//else
-	y_ac_q = MBs[mb_num].segment_id;
+	DL0.x /= 4; // split metric on four 8x8 blocks (just to enble later reference try)
+	MBdiff[mb_num*4] = DL0.x;
+	MBdiff[mb_num*4+1] = DL0.x;
+	MBdiff[mb_num*4+2] = DL0.x;
+	MBdiff[mb_num*4+3] = DL0.x; 
+	y_ac_q = UQ_segment;
+	MBs[mb_num].segment_id = UQ_segment;
 	y_ac_q = SD[y_ac_q].y_ac_i;
 	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += y_ac_q;
 	y2_ac_q = SD[0].y2_ac_idelta; y2_ac_q += y_ac_q;
@@ -950,7 +986,7 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	y2_ac_q = select(y2_ac_q,8,y2_ac_q<8);
 	uv_dc_q = select(uv_dc_q,132,uv_dc_q>132);
 	
-	MBs[mb_num].reference_frame = GOLDEN;
+	MBs[mb_num].reference_frame = ref;
 	MBs[mb_num].parts = are16x16; 
 	MBs[mb_num].vector_x[0] = 0;
 	MBs[mb_num].vector_x[1] = 0;
@@ -1093,10 +1129,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L0.sCDEF); DL1 = convert_int4(L1.sCDEF); DL2 = convert_int4(L2.sCDEF); DL3 = convert_int4(L3.sCDEF);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
 	L0.sCDEF = convert_short4(DL0);	L1.sCDEF = convert_short4(DL1);	L2.sCDEF = convert_short4(DL2);	L3.sCDEF = convert_short4(DL3);
-	L0 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L1 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L2 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L3 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L0 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L1 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L2 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L3 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	//blocks 10-13
 	DL0 = convert_int4(L4.s0123); DL1 = convert_int4(L5.s0123); DL2 = convert_int4(L6.s0123); DL3 = convert_int4(L7.s0123);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
@@ -1110,10 +1146,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L4.sCDEF); DL1 = convert_int4(L5.sCDEF); DL2 = convert_int4(L6.sCDEF); DL3 = convert_int4(L7.sCDEF);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
 	L4.sCDEF = convert_short4(DL0);	L5.sCDEF = convert_short4(DL1);	L6.sCDEF = convert_short4(DL2);	L7.sCDEF = convert_short4(DL3);
-	L4 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L5 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L6 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L7 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L4 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L5 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L6 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L7 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	//blocks 20-23
 	DL0 = convert_int4(L8.s0123); DL1 = convert_int4(L9.s0123); DL2 = convert_int4(L10.s0123); DL3 = convert_int4(L11.s0123);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
@@ -1127,10 +1163,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L8.sCDEF); DL1 = convert_int4(L9.sCDEF); DL2 = convert_int4(L10.sCDEF); DL3 = convert_int4(L11.sCDEF);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
 	L8.sCDEF = convert_short4(DL0);	L9.sCDEF = convert_short4(DL1);	L10.sCDEF = convert_short4(DL2);	L11.sCDEF = convert_short4(DL3);
-	L8 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L9 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L10 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L11 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
+	L8 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L9 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L10 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L11 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
 	//blocks 30-33
 	DL0 = convert_int4(L12.s0123); DL1 = convert_int4(L13.s0123); DL2 = convert_int4(L14.s0123); DL3 = convert_int4(L15.s0123);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
@@ -1144,10 +1180,10 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	DL0 = convert_int4(L12.sCDEF); DL1 = convert_int4(L13.sCDEF); DL2 = convert_int4(L14.sCDEF); DL3 = convert_int4(L15.sCDEF);
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, 1, y_ac_q);
 	L12.sCDEF = convert_short4(DL0);	L13.sCDEF = convert_short4(DL1);	L14.sCDEF = convert_short4(DL2);	L15.sCDEF = convert_short4(DL3);
-	L12 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L13 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L14 += convert_short16(vload16(0, golden_frame_Y+i)); i+=width;
-	L15 += convert_short16(vload16(0, golden_frame_Y+i));
+	L12 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L13 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L14 += convert_short16(vload16(0, ref_frame_Y+i)); i+=width;
+	L15 += convert_short16(vload16(0, ref_frame_Y+i));
 	
 	//now place results in reconstruction frame
 	i = y*width + x;
@@ -1193,24 +1229,24 @@ __kernel void try_golden_reference(__global uchar *const current_frame_Y, //0
 	L7.s89ABCDEF = convert_short8(vload8(0, current_frame_V+i));
 	// U-plane golden
 	i = y*chroma_width + x;
-	L8.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L9.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L10.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L11.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L12.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L13.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L14.s01234567 = convert_short8(vload8(0, golden_frame_U+i)); i+= chroma_width;
-	L15.s01234567 = convert_short8(vload8(0, golden_frame_U+i));
+	L8.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L9.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L10.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L11.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L12.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L13.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L14.s01234567 = convert_short8(vload8(0, ref_frame_U+i)); i+= chroma_width;
+	L15.s01234567 = convert_short8(vload8(0, ref_frame_U+i));
 	// V-plane golden
 	i = y*chroma_width + x;
-	L8.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L9.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L10.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L11.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L12.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L13.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L14.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i)); i+= chroma_width;
-	L15.s89ABCDEF = convert_short8(vload8(0, golden_frame_V+i));
+	L8.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L9.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L10.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L11.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L12.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L13.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L14.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i)); i+= chroma_width;
+	L15.s89ABCDEF = convert_short8(vload8(0, ref_frame_V+i));
 	
 	//residual
 	L0 -= L8; L1 -= L9; L2 -= L10; L3 -= L11; L4-= L12; L5 -= L13; L6 -= L14; L7 -= L15;
@@ -1346,7 +1382,9 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 								__global uchar *const prev_frame, //2
 								__global macroblock *const MBs, //3
 								const int width, //4
-								__constant segment_data *const SD) //5
+								__constant segment_data *const SD, //5
+								const int segment_id, //6
+								const float SSIM_target) //7
 {	
 	// possible optimization - LOCAL memory for storing predictors until reconstruction
 	// but it's very device specific (HD6000-HD7000 has 32kb per work_group, older may has less)
@@ -1358,7 +1396,8 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 
 	mb_num = get_global_id(0);
 
-	if (MBs[mb_num].reference_frame != LAST) return;
+	if (MBs[mb_num].reference_frame == GOLDEN) return;
+	if (MBs[mb_num].SSIM > SSIM_target) return;
 	MBs[mb_num].parts = are8x8; 
 
 	vector_x = MBs[mb_num].vector_x[0];
@@ -1377,8 +1416,8 @@ __kernel void luma_transform_16x16(__global uchar *const current_frame, //0
 	if (condition) return; 
 	MBs[mb_num].parts = are16x16;
 	
-	i = MBs[mb_num].segment_id;
-	i = SD[i].y_ac_i;
+	MBs[mb_num].segment_id = segment_id;
+	i = SD[segment_id].y_ac_i;
 	
 	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += i;
 	y2_ac_q = SD[0].y2_ac_idelta; y2_ac_q += i;
@@ -1840,7 +1879,9 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 								__global uchar *const prev_frame, //2
 								__global macroblock *const MBs, //3
 								const signed int width, //4
-								__constant segment_data *const SD) //5
+								__constant segment_data *const SD, //5
+								const int segment_id, //6
+								const float SSIM_target) //7
 	
 {
 	__private int4 DL0, DL1, DL2, DL3;
@@ -1860,10 +1901,11 @@ __kernel void luma_transform_8x8(__global uchar *const current_frame, //0
 	mb_num = (cy/16)*(width/16) + (cx/16);
 	
 	if (MBs[mb_num].parts != are8x8) return;
-	if (MBs[mb_num].reference_frame != LAST) return;
+	if (MBs[mb_num].reference_frame == GOLDEN) return;
+	if (MBs[mb_num].SSIM > SSIM_target) return;
 	
-	ac_q = MBs[mb_num].segment_id;
-	ac_q = SD[ac_q].y_ac_i;
+	MBs[mb_num].segment_id = segment_id;
+	ac_q = SD[segment_id].y_ac_i;
 	dc_q = SD[0].y_dc_idelta; dc_q += ac_q;
 	dc_q = select(dc_q,0,dc_q<0); dc_q = select(dc_q,127,dc_q>127);
 	ac_q = select(ac_q,0,ac_q<0); ac_q = select(ac_q,127,ac_q>127);
@@ -2137,7 +2179,7 @@ __kernel void chroma_transform( 	__global uchar *const current_frame, //0
 
 	mb_num = (cy/8)*(chroma_width/8) + (cx/8);
 	block_in_mb = ((cy/4)%2)*2 + ((cx/4)%2);
-	if (MBs[mb_num].reference_frame != LAST) return;
+	if (MBs[mb_num].reference_frame == GOLDEN) return;
 	
 	qi = MBs[mb_num].segment_id;
 	qi = SD[qi].y_ac_i;
@@ -3204,24 +3246,24 @@ __kernel void chroma_interpolate_Vx8_bc(__global uchar *const frame, //0
 	return;
 }
 
-__kernel __attribute__((reqd_work_group_size(64, 1, 1)))
-		void count_SSIM(__global uchar *frame1, //0
+__kernel void count_SSIM_luma
+						(__global uchar *frame1, //0
 						__global uchar *frame2, //1
 						__global macroblock *MBs, //2
-						signed int width, //3
-						signed int mb_count)// 4
+                        signed int width, //3
+						const int segment_id)// 4														
 {
-	__private int mb_num, i;
-	__private uchar16 FL0, FL1, FL2, FL3, FL4, FL5, FL6, FL7, FL8, FL9, FL10, FL11, FL12, FL13, FL14, FL15;
-	__private uchar16 SL0, SL1, SL2, SL3, SL4, SL5, SL6, SL7, SL8, SL9, SL10, SL11, SL12, SL13, SL14, SL15;
-	__private float16 IL, IL1;
-	__private float M1, M2, D1, D2, C;
-	mb_num = get_global_id(0);
-	if (mb_num >= mb_count) return;
-	i = ((mb_num / (width/16))*16)*width + ((mb_num % (width/16))*16);
-	
-	FL0 = vload16(0, frame1 + i); i += width; IL = convert_float16(FL0);
-	FL1 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL1);
+    __private int mb_num, i;
+    __private uchar16 FL0, FL1, FL2, FL3, FL4, FL5, FL6, FL7, FL8, FL9, FL10, FL11, FL12, FL13, FL14, FL15;
+    __private uchar16 SL0, SL1, SL2, SL3, SL4, SL5, SL6, SL7, SL8, SL9, SL10, SL11, SL12, SL13, SL14, SL15;
+    __private float16 IL, IL1;
+    __private float M1, M2, D1, D2, C;
+    mb_num = get_global_id(0);
+	if (MBs[mb_num].segment_id != segment_id) return;
+    i = ((mb_num / (width/16))*16)*width + ((mb_num % (width/16))*16);
+        
+    FL0 = vload16(0, frame1 + i); i += width; IL = convert_float16(FL0);
+    FL1 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL1);
 	FL2 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL2);
 	FL3 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL3);
 	FL4 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL4);
@@ -3254,7 +3296,7 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	IL1 = convert_float16(FL14) - M1; IL = mad(IL1,IL1,IL);
 	IL1 = convert_float16(FL15) - M1; IL = mad(IL1,IL1,IL);
 	D1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-	
+
 	SL0 = vload16(0, frame2 + i); i += width; IL = convert_float16(SL0);
 	SL1 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL1);
 	SL2 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL2);
@@ -3289,7 +3331,7 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	IL1 = convert_float16(SL14) - M2; IL = mad(IL1,IL1,IL);
 	IL1 = convert_float16(SL15) - M2; IL = mad(IL1,IL1,IL);
 	D2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-	
+
 	IL = (convert_float16(FL0) - M1)*(convert_float16(SL0) - M2);
 	IL += (convert_float16(FL1) - M1)*(convert_float16(SL1) - M2);
 	IL += (convert_float16(FL2) - M1)*(convert_float16(SL2) - M2);
@@ -3307,12 +3349,108 @@ __kernel __attribute__((reqd_work_group_size(64, 1, 1)))
 	IL += (convert_float16(FL14) - M1)*(convert_float16(SL14) - M2);
 	IL += (convert_float16(FL15) - M1)*(convert_float16(SL15) - M2);
 	C = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-	
+
 	const float c1 = 0.01f*0.01f*255*255;
 	const float c2 = 0.03f*0.03f*255*255;
 	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
+		
+	// and now small workaround
+	// SSIM sometimes gives high structural similarity for block with largely different average value
+	// but similar structure: AC coeffs are close or variance is low
+	//example M1 == 60; M2 == 67 and D1 == D2 == C (only DC coeff differs)
+	// SSIM would be 0.993 while 7 points of luma difference would look like horrible unmatched square
 	
+	// so we lower SSIM (cheat) for each 1 point(over 4) by 0.02 
+	D1 = (M1 - M2);
+	D1 = select(D1,-D1,D1 < 0);
+	D2 = select(0.0f,0.02f*D1,D1 > 3);
+	C -= D2;	
+	
+	C += MBs[mb_num].SSIM;
+	//if (mb_num == 0) printf((__constant char*)"L %f\n", C);
+	C /= 3;
 	MBs[mb_num].SSIM = C;
+
+	return;
+}												
+
+
+
+
+__kernel void count_SSIM_chroma
+						(__global uchar *frame1, //0
+						__global uchar *frame2, //1
+						__global macroblock *MBs, //2
+                        signed int cwidth, //3
+						const int segment_id)// 4	
+{
+	const float c1 = 0.01f*0.01f*255*255;
+	const float c2 = 0.03f*0.03f*255*255;
+	__private int mb_num, i;
+	__private float M1, M2, D1, D2, C;
+	mb_num = get_global_id(0);
+	if (MBs[mb_num].segment_id != segment_id) return;
 	
+	__private uchar8 cFL0, cFL1, cFL2, cFL3, cFL4, cFL5, cFL6, cFL7;
+	__private uchar8 cSL0, cSL1, cSL2, cSL3, cSL4, cSL5, cSL6, cSL7;
+	__private float8 cIL, cIL1;
+	
+	i = ((mb_num / (cwidth/8))*8)*cwidth + ((mb_num % (cwidth/8))*8);
+
+	cFL0 = cFL1 = cFL2 = cFL3 = cFL4 = cFL5 = cFL6 = cFL7 = 0;
+	cSL0 = cSL1 = cSL2 = cSL3 = cSL4 = cSL5 = cSL6 = cSL7 = 0;
+	// U
+	cFL0 = vload8(0, frame1 + i); i += cwidth; cIL = convert_float8(cFL0); 
+	cFL1 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL1);
+	cFL2 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL2);
+	cFL3 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL3);
+	cFL4 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL4);
+	cFL5 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL5);
+	cFL6 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL6);
+	cFL7 = vload8(0, frame1 + i); i -= 7*cwidth; cIL += convert_float8(cFL7); 
+	M1 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
+	cIL = convert_float8(cFL0) - M1; cIL *= cIL;
+	cIL1 = convert_float8(cFL1) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL2) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL3) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL4) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL5) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL6) - M1; cIL = mad(cIL1,cIL1,cIL);
+	cIL1 = convert_float8(cFL7) - M1; cIL = mad(cIL1,cIL1,cIL);
+	D1 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
+	cSL0 = vload8(0, frame2 + i); i += cwidth; cIL = convert_float8(cSL0);
+	cSL1 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL1);
+	cSL2 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL2);
+	cSL3 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL3);
+	cSL4 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL4); 
+	cSL5 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL5);
+	cSL6 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL6);
+	cSL7 = vload8(0, frame2 + i); i -= 7*cwidth; cIL += convert_float8(cSL7); 
+	M2 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
+	cIL = convert_float8(cSL0) - M2; cIL *= cIL; 
+	cIL1 = convert_float8(cSL1) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL2) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL3) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL4) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL5) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL5) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL6) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	cIL1 = convert_float8(cSL7) - M2; cIL = mad(cIL1,cIL1,cIL); 
+	D2 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
+	cIL = (convert_float8(cFL0) - M1)*(convert_float8(cSL0) - M2);
+	cIL += (convert_float8(cFL1) - M1)*(convert_float8(cSL1) - M2);
+	cIL += (convert_float8(cFL2) - M1)*(convert_float8(cSL2) - M2);
+	cIL += (convert_float8(cFL3) - M1)*(convert_float8(cSL3) - M2);
+	cIL += (convert_float8(cFL4) - M1)*(convert_float8(cSL4) - M2);
+	cIL += (convert_float8(cFL5) - M1)*(convert_float8(cSL5) - M2);
+	cIL += (convert_float8(cFL6) - M1)*(convert_float8(cSL6) - M2);
+	cIL += (convert_float8(cFL7) - M1)*(convert_float8(cSL7) - M2);
+	C = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
+	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
+	
+	C += MBs[mb_num].SSIM;
+	//if (mb_num == 0) printf((__constant char*)"C %f\n", C);
+	MBs[mb_num].SSIM = C;
 	return;
 }
+
