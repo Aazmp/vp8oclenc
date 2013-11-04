@@ -18,6 +18,9 @@ Threads are not distributed across stream cores effectively (one row per core).
 2) Make prediction from both LAST, GOLDEN and ALTREF frames for each frame and block.
 But for this 1) must be done (otherwise it will be either very slow or consume a huge lot of memory)
 
+3) Need more sophisticated algorithm for scene_change() (chroma analysis is good, but misses some).
+Need a fade detection (current scene_change detection places a series of key frames t this moments)
+
 main:
 Don't know what to write here...
 This is a VP8 encoder. Simple and not effective.
