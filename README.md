@@ -2,15 +2,12 @@ vp8oclenc
 =========
 
 upd: 
-1) Added segmentation (now it's used only on intrA MB in intEr frame).
--qi -qp options deleted; 
--qmin -qmax added (set a range for Y AC index quantizer); 
-for intEr frame UV indexes are set as (Y_AC_index-15) and Y_DC_index =(Y_AC_index+15);
-intrA frames are not segmented;
-intEr MBs use last 4th [segment index 3] segment.
-2) deleted pipelining bool_coder with GPU computings - now it converts frame after frame with no overlapping.
-(makes easier to improve)
-other) some code rewritings, some bugs fixed, etc
+0) There was a shameful bug in reading ARGV[] part. Also some other bug there was. But not anymore.
+1) Added segmentation for inter macroblocks too. 
+Now it tries to quant with highest quantizer and if result fails to pass SSIM-target value it's being requantized.
+2) Added ALTREF referencing. 
+Every <-altref-range param> encoder quantize a frame with lower quantizers and saves it as ALTREF buffer.
+ALTREF frames are being predicted from previous ALTREF frames. Others from LAST.
 
 TODO:
 1) Interpolation. (on HD7850 ~1/4 of encoding time is spent here)
@@ -18,10 +15,8 @@ Consumes a lot(!) of memory because of keeping interpolated buffers.
 Threads are not distributed across stream cores effectively (one row per core).
 => solution: integrate interpolation into motion vector search
 
-2) More segmentation. 
-Maybe variance based (just don't know what variance values should it be based on)
-Maybe quality based (redo macroblocks with bad SSIM with lower quantizer index) 
-Both a easy to implement in code, but i'm lazy at the moment
+2) Make prediction from both LAST, GOLDEN and ALTREF frames for each frame and block.
+But for this 1) must be done (otherwise it will be either very slow or consume a huge lot of memory)
 
 main:
 Don't know what to write here...
