@@ -74,6 +74,8 @@ static const int vp8_ac_qlookup[128] =
     213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
 };
 
+const int vector_diff_weight = 8;
+
 void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3) 
 {
 	int4 L0 = *__L0;
@@ -129,7 +131,6 @@ void weight(int4 *__L0, int4 *__L1, int4 *__L2, int4 *__L3)
 	(*__L1).x + (*__L1).y + (*__L1).z + (*__L1).w +
 	(*__L2).x + (*__L2).y + (*__L2).z + (*__L2).w +
 	(*__L3).x + (*__L3).y + (*__L3).z + (*__L3).w;
-	
 	
 	return;
 }
@@ -568,8 +569,7 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			
-			//Diff += ((int)abs(px-cx) + (int)abs(py-cy))*4;
-			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*32;
+			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*vector_diff_weight*2;
 						
 			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
 			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
@@ -760,14 +760,10 @@ __kernel void luma_search_2step //searching in interpolated picture
 			DL3 = convert_int4(CL7.s4567) - convert_int4((uchar4)(UC30.w, UC31.w, UC32.w, UC33.w));
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff3 += DL0.x;
 			
-			//Diff0 += abs(px - cx) + abs(py - cy);
-			Diff0 += (int)(abs(px-cx-vector_x0) + abs(py-cy-vector_y0))*16;
-			//Diff1 += abs(px+1 - cx) + abs(py - cy);
-			Diff1 += (int)(abs(px+1-cx-vector_x0) + abs(py-cy-vector_y0))*16;
-			//Diff2 += abs(px+2 - cx) + abs(py - cy);
-			Diff2 += (int)(abs(px+2-cx-vector_x0) + abs(py-cy-vector_y0))*16;
-			//Diff3 += abs(px+3 - cx) + abs(py - cy);
-			Diff3 += (int)(abs(px+3-cx-vector_x0) + abs(py-cy-vector_y0))*16;
+			Diff0 += (int)(abs(px-cx-vector_x0) + abs(py-cy-vector_y0))*vector_diff_weight;
+			Diff1 += (int)(abs(px+1-cx-vector_x0) + abs(py-cy-vector_y0))*vector_diff_weight;
+			Diff2 += (int)(abs(px+2-cx-vector_x0) + abs(py-cy-vector_y0))*vector_diff_weight;
+			Diff3 += (int)(abs(px+3-cx-vector_x0) + abs(py-cy-vector_y0))*vector_diff_weight;
 
 			// workd around to exclude 3 interpolated pixels to the right of right edge
 			pi = (px >= width_x4 - 32) ? 0x7fffffff : 0;
@@ -818,7 +814,7 @@ __kernel void luma_search_2step //searching in interpolated picture
 	MBs[mb_num].vector_x[b8x8_num] = vector_x;
 	MBs[mb_num].vector_y[b8x8_num] = vector_y;
 	
-	MBdiff[mb_num*4+b8x8_num] = (MinDiff - ((int)abs(vector_x - vector_x0) + (int)abs(vector_y - vector_y0))*16);
+	MBdiff[mb_num*4+b8x8_num] = (MinDiff - ((int)abs(vector_x - vector_x0) + (int)abs(vector_y - vector_y0))*vector_diff_weight);
 	
 	return;
 }
@@ -841,7 +837,6 @@ __kernel void try_another_reference(__global uchar *const current_frame_Y, //0
 {
 	//this kernel try to compare difference from search  to difference resulting from vector(0;0) into golden frame
 	//if golden reference is better kernel does DCT and WHT on luma and chroma also
-
 	__private int mb_num,x,y,i,y_ac_q,y2_dc_q,y2_ac_q,uv_dc_q,uv_ac_q;
 	__private int4 DL0,DL1,DL2,DL3;
 	__private short16 L0,L1,L2,L3,L4,L5,L6,L7,L8,L9,L10,L11,L12,L13,L14,L15;
@@ -849,8 +844,8 @@ __kernel void try_another_reference(__global uchar *const current_frame_Y, //0
 	mb_num = get_global_id(0);
 	x = (mb_num % (width/16))*16;
 	y = (mb_num / (width/16))*16;
-	
 	i = y*width + x;
+	//if (mb_num==3599) printf((__constant char*)"%d %d %d\n",x,y,i);
 	L0 = convert_short16(vload16(0, current_frame_Y+i)); i+= width;
 	L1 = convert_short16(vload16(0, current_frame_Y+i)); i+= width;
 	L2 = convert_short16(vload16(0, current_frame_Y+i)); i+= width;
@@ -967,8 +962,8 @@ __kernel void try_another_reference(__global uchar *const current_frame_Y, //0
 	MBdiff[mb_num*4+1] = DL0.x;
 	MBdiff[mb_num*4+2] = DL0.x;
 	MBdiff[mb_num*4+3] = DL0.x; 
-	y_ac_q = UQ_segment;
-	MBs[mb_num].segment_id = UQ_segment;
+	y_ac_q = AQ_segment;
+	MBs[mb_num].segment_id = AQ_segment;
 	y_ac_q = SD[y_ac_q].y_ac_i;
 	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += y_ac_q;
 	y2_ac_q = SD[0].y2_ac_idelta; y2_ac_q += y_ac_q;
@@ -3363,26 +3358,25 @@ __kernel void count_SSIM_luma
 	// so we lower SSIM (cheat) for each 1 point(over 4) by 0.02 
 	D1 = (M1 - M2);
 	D1 = select(D1,-D1,D1 < 0);
-	D2 = select(0.0f,0.02f*D1,D1 > 3);
-	C -= D2;	
+	D2 = select(0.0f,0.02f*D1,D1 > 4);
+	C -= D2;
+	//if (mb_num == 3530) printf((__constant char*)"%f\n",C);
 	
-	C += MBs[mb_num].SSIM;
-	//if (mb_num == 0) printf((__constant char*)"L %f\n", C);
+	D1 = MBs[mb_num].SSIM;
+	C += D1;
 	C /= 3;
 	MBs[mb_num].SSIM = C;
 
 	return;
 }												
 
-
-
-
 __kernel void count_SSIM_chroma
 						(__global uchar *frame1, //0
 						__global uchar *frame2, //1
 						__global macroblock *MBs, //2
                         signed int cwidth, //3
-						const int segment_id)// 4	
+						const int segment_id, //4
+						const int reset)// 5	
 {
 	const float c1 = 0.01f*0.01f*255*255;
 	const float c2 = 0.03f*0.03f*255*255;
@@ -3448,9 +3442,246 @@ __kernel void count_SSIM_chroma
 	C = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
 	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
 	
-	C += MBs[mb_num].SSIM;
-	//if (mb_num == 0) printf((__constant char*)"C %f\n", C);
+	D1 = MBs[mb_num].SSIM;
+	C += (reset == 1) ? 0 : D1;
 	MBs[mb_num].SSIM = C;
 	return;
 }
 
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////
+/*
+__kernel void luma_interpolate_Hx4_bl( __global uchar *const src_frame, //0
+									__global uchar *const dst_frame, //1
+									const int width, //2
+									const int height) //3
+{
+	if (get_global_id(0) > (height-1)) return;
+	
+	__private uchar4 M;
+	__private uchar R;
+	__private uchar16 M16;
+	
+	int i, ind;
+	int4 buf;
+	int width_x4 = width*4;
+	
+	ind = (get_global_id(0) + 1)*width - 4;
+	M = vload4(0, src_frame + ind);
+	R = M.s3;
+	
+	for (i = width-4; i >= 0; i -= 4)
+	{
+		ind = get_global_id(0)*width + i;
+		M = vload4(0, src_frame + ind);
+		
+		buf.s0 = M.s0;
+		buf.s1 = mad24((int)M.s0, 3, (int)M.s1 + 2)/4; 
+		buf.s2 = ((int)M.s0+(int)M.s1+1)/2;
+		buf.s3 = mad24((int)M.s1, 3, (int)M.s0 + 2)/4;
+		M16.s0123 = convert_uchar4_sat(buf);
+		
+		buf.s0 = M.s1;
+		buf.s1 = mad24((int)M.s1, 3, (int)M.s2 + 2)/4; 
+		buf.s2 = ((int)M.s1+(int)M.s2+1)/2;
+		buf.s3 = mad24((int)M.s2, 3, (int)M.s1 + 2)/4;
+		M16.s4567 = convert_uchar4_sat(buf);
+		
+		buf.s0 = M.s2;
+		buf.s1 = mad24((int)M.s2, 3, (int)M.s3 + 2)/4; 
+		buf.s2 = ((int)M.s2+(int)M.s3+1)/2;
+		buf.s3 = mad24((int)M.s3, 3, (int)M.s2 + 2)/4;
+		M16.s89AB = convert_uchar4_sat(buf);
+		
+		buf.s0 = M.s3;
+		buf.s1 = mad24((int)M.s3, 3, (int)R + 2)/4; 
+		buf.s2 = ((int)M.s3+(int)R+1)/2;
+		buf.s3 = mad24((int)R, 3, (int)M.s3 + 2)/4;
+		M16.sCDEF = convert_uchar4_sat(buf);		
+
+		ind = get_global_id(0)*width_x4 + (i*4);
+		vstore16(M16, 0, dst_frame + ind);
+		
+		R = M.s0;
+	}
+	
+	return;	
+}
+
+__kernel void luma_interpolate_Vx4_bl( __global uchar *const frame, //0
+									const int width, //1
+									const int height) //2
+{
+	__private uchar4 M0, M1, M2, M3, U;
+	__private int4 buf;
+
+	int width_x4 = width*4;
+	if (4*get_global_id(0) > (width_x4-1)) return;
+	int i, ind;
+	
+	ind = (height-1)*width_x4 + (get_global_id(0)*4);
+	U = vload4(0, frame + ind);
+	
+	for (i = height-1; i >= 0; --i)
+	{
+		ind = i*width_x4 + (get_global_id(0)*4);
+		M0 = vload4(0, frame + ind);
+	
+		buf = mad24(convert_int4(M0), 3, convert_int4(U) + 2)/4; 
+		M1 = convert_uchar4_sat(buf);
+		buf = (convert_int4(M0) + convert_int4(U) + 1)/2;
+		M2 = convert_uchar4_sat(buf);
+		buf = mad24(convert_int4(U), 3, convert_int4(M0) + 2)/4;
+		M3 = convert_uchar4_sat(buf);
+		
+		ind = (i*4)*width_x4 + (get_global_id(0)*4);
+		vstore4(M0, 0, frame + ind); ind += width_x4;
+		vstore4(M1, 0, frame + ind); ind += width_x4;
+		vstore4(M2, 0, frame + ind); ind += width_x4;
+		vstore4(M3, 0, frame + ind);
+		
+		U = M0;
+	}
+	
+	return;	
+}
+
+
+
+__kernel void chroma_interpolate_Hx8_bl(__global uchar *const src_frame, //0
+										__global uchar *const dst_frame, //1
+										const int width, //2
+										const int height) //3
+{
+	if (get_global_id(0) > (height-1)) return; 
+
+	__private int4 M, O;
+	__private int R;
+	__private uchar4 buf;
+	
+	int i, ind;
+	int width_x8 = width*8;
+	
+	
+	ind = (get_global_id(0) + 1)*width - 4;
+	buf = vload4(0, src_frame + ind);
+	M = convert_int4(buf);
+	R = M.s3;
+	
+	for (i = width-4; i >= 0; i -= 4)
+	{
+		ind = get_global_id(0)*width + i;
+		buf = vload4(0, src_frame + ind);
+		M = convert_int4(buf);
+
+		ind = get_global_id(0)*width_x8 + (i*8);
+
+		O.s0 = M.s0;
+		O.s1 = mad24(M.s0, 7, M.s1 + 4)/8;
+		O.s2 = mad24(M.s0, 3, M.s1 + 2)/4;
+		O.s3 = mad24(M.s0, 5, mad24(M.s1, 3, 4))/8;
+		buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = (M.s1 + M.s0 + 1)/2;
+		O.s1 = mad24(M.s1, 5, mad24(M.s0, 3, 4))/8;
+		O.s2 = mad24(M.s1, 3, M.s0 + 2)/4;
+		O.s3 = mad24(M.s1, 7, M.s0 + 4)/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = M.s1;
+		O.s1 = mad24(M.s1, 7, M.s2 + 4)/8;
+		O.s2 = mad24(M.s1, 3, M.s2 + 2)/4;
+		O.s3 = mad24(M.s1, 5, mad24(M.s2, 3, 4))/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = (M.s2 + M.s1 + 1)/2;
+		O.s1 = mad24(M.s2, 5, mad24(M.s1, 3, 4))/8;
+		O.s2 = mad24(M.s2, 3, M.s1 + 2)/4;
+		O.s3 = mad24(M.s2, 7, M.s1 + 4)/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = M.s2;
+		O.s1 = mad24(M.s2, 7, M.s3 + 4)/8;
+		O.s2 = mad24(M.s2, 3, M.s3 + 2)/4;
+		O.s3 = mad24(M.s2, 5, mad24(M.s3, 3, 4))/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = (M.s3 + M.s2 + 1)/2;
+		O.s1 = mad24(M.s3, 5, mad24(M.s2, 3, 4))/8;
+		O.s2 = mad24(M.s3, 3, M.s2 + 2)/4;
+		O.s3 = mad24(M.s3, 7, M.s2 + 4)/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = M.s3;
+		O.s1 = mad24(M.s3, 7, R + 4)/8;
+		O.s2 = mad24(M.s3, 3, R + 2)/4;
+		O.s3 = mad24(M.s3, 5, mad24(R, 3, 4))/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+		O.s0 = (R + M.s3 + 1)/2;
+		O.s1 = mad24(R, 5, mad24(M.s3, 3, 4))/8;
+		O.s2 = mad24(R, 3, M.s3 + 2)/4;
+		O.s3 = mad24(R, 7, M.s3 + 4)/8;
+		ind += 4; buf = convert_uchar4_sat(O); vstore4(buf, 0, dst_frame + ind);
+
+		R = M.s0;
+	}
+	
+	return;	
+}
+
+__kernel void chroma_interpolate_Vx8_bl(__global uchar *const frame, //0
+										const int width, //1
+										const int height) //2
+{
+	__private int4 M, O, U;
+	__private uchar4 buf;
+
+	int width_x8 = width*8;
+	int i, ind;
+	
+	if ((get_global_id(0)*4) > (width_x8-1)) return;
+	
+	ind = (height-1)*width_x8 + (get_global_id(0)*4);
+	buf = vload4(0, frame + ind);
+	U = convert_int4(buf);
+	
+	for (i = height-1; i >= 0; --i)
+	{
+		ind = i*width_x8 + (get_global_id(0)*4);
+		buf = vload4(0, frame + ind);
+		M = convert_int4(buf);			
+		
+		ind = (i*8)*width_x8 + (get_global_id(0)*4); 		
+		buf = convert_uchar4_sat(M); vstore4(buf, 0, frame + ind);
+		O = mad24(M, 7, U + 4)/8;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = mad24(M, 3, U + 2)/4;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = mad24(M, 5, mad24(U, 3, 4))/8;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = (M + U + 1)/2;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = mad24(U, 5, mad24(M, 3, 4))/8;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = mad24(U, 3, M + 2)/4;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		O = mad24(U, 7, M + 4)/8;
+		ind += width_x8; buf = convert_uchar4_sat(O); vstore4(buf, 0, frame + ind);
+		
+		U = M;
+	}
+	
+	return;
+}
+*/
