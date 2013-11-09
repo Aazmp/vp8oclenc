@@ -74,7 +74,7 @@ int init_all()
 	// GPU:
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
-		const char gpu_options[] = "-cl-std=CL1.2 -cl-opt-disable";
+		const char gpu_options[] = "-cl-std=CL1.2";
 		program_handle = fopen(GPUPATH, "rb");
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
@@ -494,11 +494,12 @@ int init_all()
 						(__global uchar *frame1, //0
 						__global uchar *frame2, //1
 						__global macroblock *MBs, //2
-                        signed int width, //3
-						const int segment_id)// 4	*/
+                        signed int cwidth, //3
+						const int segment_id, //4
+						const int reset)// 5*/
 
 		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 3, sizeof(int32_t), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 3, sizeof(int32_t), &chroma_width);
 
 		device.commandQueue_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
 	}
@@ -777,9 +778,9 @@ int ParseArgs(int argc, char *argv[])
                 if (i < argc)
                 {
 					int buf = string_to_value(argv[i]);
-					if ((buf < 0) || (buf > 97))
+					if ((buf < 0) || (buf > 99))
 					{
-						printf ("wrong quantizer index format for inter p-frames! must be an integer from 0 to 97;\n");
+						printf ("wrong SSIM level! must be an integer from 0 to 99;\n");
 						return -1;
 					}
                     f_SSIM_target = 1;
