@@ -1212,7 +1212,7 @@ void prepare_segments_data()
 		if (frames.uv_dc_q[i] > 132)
 			frames.uv_dc_q[i] = 132;
 		
-		frames.segments_data[i].loop_filter_level = frames.y_dc_q[i]/QUANT_TO_FILTER_LEVEL - 1;
+		frames.segments_data[i].loop_filter_level = frames.y_dc_q[i]/QUANT_TO_FILTER_LEVEL;
 		frames.segments_data[i].loop_filter_level = (frames.segments_data[i].loop_filter_level > 63) ? 63 : frames.segments_data[i].loop_filter_level;
 		frames.segments_data[i].loop_filter_level = (frames.segments_data[i].loop_filter_level < 0) ? 0 : frames.segments_data[i].loop_filter_level;
 
@@ -1558,6 +1558,7 @@ void inter_transform()
 	//now check if it's possible to make (0;0)-reference to other frames 
 	if (!frames.prev_is_key_frame) 
 	{
+		device.state_gpu = clSetKernelArg(device.try_another_reference, 0, sizeof(cl_mem), &device.current_frame_Y);
 		device.gpu_work_items_per_dim[0] = video.mb_count;
 		//first try golden
 		int32_t reffr = GOLDEN;
@@ -1568,9 +1569,9 @@ void inter_transform()
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.try_another_reference, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		device.state_gpu = clFinish(device.commandQueue_gpu);
 	}
-	if (0)//((!frames.prev_is_altref_frame) && (!frames.current_is_altref_frame))
+	if (0)//((!frames.prev_is_key_frame) && (!frames.prev_is_altref_frame) && (!frames.current_is_altref_frame))
 	{
-		//not working with current frames being new altref now
+		//artifacts
 		int32_t reffr = ALTREF;
 		device.state_gpu = clSetKernelArg(device.try_another_reference, 1, sizeof(cl_mem), &device.altref_frame_Y);
 		device.state_gpu = clSetKernelArg(device.try_another_reference, 4, sizeof(cl_mem), &device.altref_frame_U);
@@ -1620,13 +1621,17 @@ void inter_transform()
 		//count SSIM
 		device.gpu_work_items_per_dim[0] = video.mb_count;
 		//U
+		int32_t reset = 1;
 		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 0, sizeof(cl_mem), &device.current_frame_U);
 		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 1, sizeof(cl_mem), &device.reconstructed_frame_U);
+		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 5, sizeof(int32_t), &reset);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.count_SSIM_chroma, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		device.state_gpu = clFinish(device.commandQueue_gpu);
 		//V
+		reset = 0;
 		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 0, sizeof(cl_mem), &device.current_frame_V);
 		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 1, sizeof(cl_mem), &device.reconstructed_frame_V);
+		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 5, sizeof(int32_t), &reset);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue_gpu, device.count_SSIM_chroma, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		device.state_gpu = clFinish(device.commandQueue_gpu);
 		//Y
@@ -1696,10 +1701,10 @@ void check_SSIM()
 	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
 	{
 		min2 = (frames.transformed_blocks[mb_num].SSIM < min2) ? frames.transformed_blocks[mb_num].SSIM : min2;
-		//if (frames.transformed_blocks[mb_num].SSIM < video.SSIM_target) 
-		//	frames.e_data[mb_num].is_inter_mb = (test_inter_on_intra(mb_num, AQ_segment) == 0) ? 0 : frames.e_data[mb_num].is_inter_mb;
-		//if (frames.transformed_blocks[mb_num].SSIM < video.SSIM_target) 
-		//	frames.e_data[mb_num].is_inter_mb = (test_inter_on_intra(mb_num, HQ_segment) == 0) ? 0 : frames.e_data[mb_num].is_inter_mb;
+		if (frames.transformed_blocks[mb_num].SSIM < video.SSIM_target) 
+			frames.e_data[mb_num].is_inter_mb = (test_inter_on_intra(mb_num, AQ_segment) == 0) ? 0 : frames.e_data[mb_num].is_inter_mb;
+		if (frames.transformed_blocks[mb_num].SSIM < video.SSIM_target) 
+			frames.e_data[mb_num].is_inter_mb = (test_inter_on_intra(mb_num, HQ_segment) == 0) ? 0 : frames.e_data[mb_num].is_inter_mb;
 		if (frames.transformed_blocks[mb_num].SSIM < video.SSIM_target) 
 			frames.e_data[mb_num].is_inter_mb = (test_inter_on_intra(mb_num, UQ_segment) == 0) ? 0 : frames.e_data[mb_num].is_inter_mb;
 		frames.replaced+=(frames.e_data[mb_num].is_inter_mb==0);
@@ -1715,7 +1720,7 @@ void check_SSIM()
 	}
 
 	frames.new_SSIM /= (float)video.mb_count;
-	//printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f(%f); replaced:%d\n", frames.frame_number,frames.new_SSIM,min1,min2,frames.replaced);
+	printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f(%f); replaced:%d\n", frames.frame_number,frames.new_SSIM,min1,min2,frames.replaced);
 	return;
 }
 
@@ -1873,7 +1878,7 @@ int main(int argc, char *argv[])
 				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
 				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
 				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-				printf("key frame FORCED by bad inter-result!\n");
+				printf("key frame FORCED by bad inter-result: replaced(%d) and SSIM(%f)!\n",frames.replaced,frames.new_SSIM);
 			}
 
 			// we will move reconstructed buffers to last while interpolating later in inter_transform();
