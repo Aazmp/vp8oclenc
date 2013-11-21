@@ -8,7 +8,7 @@
 #include <time.h>
 #include "stdint1.h"
 
-#define QUANT_TO_FILTER_LEVEL 2
+#define QUANT_TO_FILTER_LEVEL 1
 #define DEFAULT_ALTREF_RANGE 16
 
 static const uint8_t vp8_dc_qlookup[128] =
@@ -45,6 +45,8 @@ static const int16_t vp8_ac_qlookup[128] =
 #define DUMPPATH "dump.y4m"
 #define CPUPATH "..\\Release\\CPU_kernels.cl"
 #define GPUPATH "..\\Release\\GPU_kernels.cl"
+//#define CPUPATH "CPU_kernels.cl"
+//#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	uint32_t raw;
@@ -127,17 +129,16 @@ struct deviceContext
 	cl_kernel luma_search_1step;
 	cl_kernel luma_search_2step;
 	cl_kernel downsample;
-	cl_kernel try_another_reference;
-	cl_kernel luma_transform_8x8;
-	cl_kernel luma_transform_16x16;
+	cl_kernel select_reference;
+	cl_kernel prepare_predictors_and_residual;
+	cl_kernel pack_8x8_into_16x16;
+	cl_kernel dct4x4;
+	cl_kernel wht4x4_iwht4x4;
+	cl_kernel idct4x4;
 	cl_kernel chroma_transform;
 	cl_kernel encode_coefficients;
 	cl_kernel count_probs;
 	cl_kernel num_div_denom;
-	cl_kernel luma_interpolate_Hx4;
-	cl_kernel luma_interpolate_Vx4;
-	cl_kernel chroma_interpolate_Hx8;
-	cl_kernel chroma_interpolate_Vx8;
 	cl_kernel normal_loop_filter_MBH;
 	cl_kernel normal_loop_filter_MBV;
 	cl_kernel count_SSIM_luma;
@@ -153,26 +154,56 @@ struct deviceContext
 	cl_mem current_frame_Y_downsampled_by16;
     cl_mem current_frame_U;
     cl_mem current_frame_V;
-    cl_mem ref_frame_Y_interpolated;
+	//images
+	cl_image_format image_format;
+	cl_mem last_frame_Y_image;
+	cl_mem last_frame_U_image;
+	cl_mem last_frame_V_image;
+	cl_mem altref_frame_Y_image;
+	cl_mem altref_frame_U_image;
+	cl_mem altref_frame_V_image;
+	cl_mem golden_frame_Y_image;
+	cl_mem golden_frame_U_image;
+	cl_mem golden_frame_V_image;
 	//instead of original size we use reconstructed frame
-	cl_mem ref_frame_Y_downsampled_by2;
-	cl_mem ref_frame_Y_downsampled_by4;
-	cl_mem ref_frame_Y_downsampled_by8;
-	cl_mem ref_frame_Y_downsampled_by16;
-    cl_mem ref_frame_U; // both
-    cl_mem ref_frame_V; // interpolated
+	cl_mem last_frame_Y_downsampled_by2;
+	cl_mem last_frame_Y_downsampled_by4;
+	cl_mem last_frame_Y_downsampled_by8;
+	cl_mem last_frame_Y_downsampled_by16;
+	cl_mem golden_frame_Y_downsampled_by2;
+	cl_mem golden_frame_Y_downsampled_by4;
+	cl_mem golden_frame_Y_downsampled_by8;
+	cl_mem golden_frame_Y_downsampled_by16;
+	cl_mem altref_frame_Y_downsampled_by2;
+	cl_mem altref_frame_Y_downsampled_by4;
+	cl_mem altref_frame_Y_downsampled_by8;
+	cl_mem altref_frame_Y_downsampled_by16;
+    //cl_mem ref_frame_U; // both
+    //cl_mem ref_frame_V; // interpolated
     cl_mem reconstructed_frame_Y;
     cl_mem reconstructed_frame_U;
     cl_mem reconstructed_frame_V;
+	cl_mem predictors_Y;
+	cl_mem predictors_U;
+	cl_mem predictors_V;
+	cl_mem residual_Y;
+	cl_mem residual_U;
+	cl_mem residual_V;
 	cl_mem golden_frame_Y;
     cl_mem golden_frame_U;
     cl_mem golden_frame_V;
 	cl_mem altref_frame_Y;
     cl_mem altref_frame_U;
     cl_mem altref_frame_V;
-	cl_mem vnet1; //vector
-	cl_mem vnet2; //nets
-	cl_mem mb_metrics;
+	cl_mem last_vnet1;
+	cl_mem golden_vnet1;
+	cl_mem altref_vnet1;
+	cl_mem last_vnet2;
+	cl_mem golden_vnet2;
+	cl_mem altref_vnet2;
+	cl_mem last_metrics;
+	cl_mem golden_metrics;
+	cl_mem altref_metrics;
 	cl_mem mb_mask;
 	cl_mem segments_data;
 	cl_mem third_context;
@@ -238,6 +269,8 @@ struct videoContext
 struct hostFrameBuffers
 {
     int32_t frame_number;
+	int32_t altref_frame_number;
+	int32_t golden_frame_number;
 	int32_t last_key_detect;
 	int32_t frames_until_key;
 	int32_t frames_until_altref;
@@ -263,8 +296,10 @@ struct hostFrameBuffers
     uint8_t *current_frame_pos_in_pack;
     int32_t current_is_key_frame;
 	int32_t current_is_altref_frame;
+	int32_t current_is_golden_frame;
 	int32_t prev_is_key_frame;
 	int32_t prev_is_altref_frame;
+	int32_t prev_is_golden_frame;
 	int32_t skip_prob;
 	float new_SSIM;
 	
