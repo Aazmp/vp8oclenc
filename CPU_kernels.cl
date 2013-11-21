@@ -19,6 +19,7 @@ typedef enum {
 
 typedef enum {
 	intra_segment = 0,
+	UQ_segment = 0,
 	HQ_segment = 1,
 	AQ_segment = 2,
 	LQ_segment = 3
