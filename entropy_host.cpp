@@ -903,12 +903,13 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	{
     /*  else {											|		|
     |       refresh_golden_frame                        | L(1)  |*/
-		write_flag(vbe, 0);
+		write_flag(vbe, frames.current_is_golden_frame);
     /*      refresh_alternate_frame                     | L(1)  |*/
 		write_flag(vbe, frames.current_is_altref_frame);
     /*      if (!refresh_golden_frame)                  |       |
     |           copy_buffer_to_golden                   | L(2)  | */// 0: no copying; 1: last -> golden; 2: altref -> golden
-		write_literal(vbe, 0, 2);
+		if (!frames.current_is_golden_frame)
+			write_literal(vbe, 0, 2);
     /*      if (!refresh_alternate_frame)               |       |
     |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: last -> altref; 2: golden -> altref
 		if (!frames.current_is_altref_frame)
@@ -979,6 +980,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	/*  if (!key_frame) {                               |       |*/
 	if (!frames.current_is_key_frame)
 	{
+		int i;
     /*      prob_intra                                  | L(8)  |*/
 		// probability, that block intra encoded. We use only inter in not-key frames
 		prob_intra = frames.replaced*255/video.mb_count;
@@ -987,11 +989,21 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		write_literal(vbe, prob_intra, 8); 
     /*      prob_last                                   | L(8)  |*/
 		// probability of last frame used as reference  for inter encoding
-		prob_last = 128; // flag value for last is ZERO; prob of flag being ZERO 
+		prob_last = 0; // flag value for last is ZERO; prob of flag being ZERO 
+		prob_gf = 0;
+		for (i = 0; i < video.mb_count; ++i)
+		{
+			prob_last += (frames.transformed_blocks[i].reference_frame == LAST);
+			prob_gf += (frames.transformed_blocks[i].reference_frame == GOLDEN);
+		}
+		prob_gf = (prob_gf*256)/(video.mb_count-prob_last+1);
+		prob_last = (prob_last*256)/video.mb_count;
+		prob_gf = (prob_gf > 255) ? 255 : ((prob_gf < 1) ? 1 : prob_gf);
+		prob_last = (prob_last > 255) ? 255 : ((prob_last < 1) ? 1 : prob_last);
+		//prob_last = prob_gf = 128;
 		write_literal(vbe, prob_last, 8); // we use lasts and goldens
     /*      prob_gf                                     | L(8)  |*/
 		// probability of golden frame used as reference  for inter encoding
-		prob_gf = 128;
 		write_literal(vbe, prob_gf, 8); 
     /*      intra_16x16_prob_update_flag                | L(1)  |*/
 		// indicates if the branch probabilities used in the decoding of the luma intra-prediction(for inter-frames only) mode are updated
@@ -1006,7 +1018,6 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     |       }                                           |       |*/
 		if (frames.replaced > 7) 
 		{
-			int32_t i;
 			write_flag(vbe, 1);
 			new_ymode_prob = B_ymode_prob;
 			for (i = 0; i < 4; ++i)
