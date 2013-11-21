@@ -2,33 +2,27 @@ vp8oclenc
 =========
 
 upd: 
-0) There was a shameful bug in reading ARGV[] part. Also some other bug there was. But not anymore.
-1) Added segmentation for inter macroblocks too. 
-Now it tries to quant with highest quantizer and if result fails to pass SSIM-target value it's being requantized.
-2) Added ALTREF referencing. 
-Every <-altref-range param> encoder quantize a frame with lower quantizers and saves it as ALTREF buffer.
-ALTREF frames are being predicted from previous ALTREF frames. Others from LAST.
+1) Now codec uses image objects for reference frames. Interpolation is made on the run butstill in sofware (OpenCL doesn't offerbicubic interpolation)
+2) GPU code divided in some smaller pieces (dct kernel, idct kernel, wht kernel...) no more long kernels => faster compilation and smaller memory usage.
+3) all 3 reference buffers used: ALTREF, GOLDEN, LAST - for search
 
-TODO:
-1) Interpolation. (on HD7850 ~1/4 of encoding time is spent here)
-Consumes a lot(!) of memory because of keeping interpolated buffers. 
-Threads are not distributed across stream cores effectively (one row per core).
-=> solution: integrate interpolation into motion vector search
+Some results:
+1) memory usage decreased by huge amount. now it fits almost every GPU device.
+2) speed a little bit slower (but amount of search done is higher)
+3)-cl-opt-disable slows down working with images by 13x times (maybe because there is no option to read 32 bit from one channel image in OpenCL language and only compiler could improve this, maybe not)
+4) on E350 (HD6410) performance is veeeeery slow (again because of image usage)
 
-2) Make prediction from both LAST, GOLDEN and ALTREF frames for each frame and block.
-But for this 1) must be done (otherwise it will be either very slow or consume a huge lot of memory)
-
-3) Need more sophisticated algorithm for scene_change() (chroma analysis is good, but misses some).
-Need a fade detection (current scene_change detection places a series of key frames t this moments)
+TODO: pure C optimization (LUT instead of IFs, etc...), asm, visual scene changeand effects detection...
 
 main:
 Don't know what to write here...
 This is a VP8 encoder. Simple and not effective.
 
-Used (and copied :)) sources: 
+Used sources: 
 http://www.webmproject.org/; http://multimedia.cx/eggs/category/vp8/;
 
-Uses OpenCL. CPU for coefficient partitions boolean coding.GPU for motion vector search, transform for inter-frames, interpolation and loop filters.
+Uses OpenCL. CPU for coefficient partitions boolean coding.
+GPU for motion vector search, transform for inter-frames, interpolation and loop filters.
 
 Launched only on AMD+AMD+Win7.
 
@@ -47,6 +41,5 @@ Bicubic interpolation.
 Used probabilities are calculated and set in each frame.
 
 P.S. No benchmarks, because there is no need in them :) Quality of material can't compete with any good encoder.
-No adaptive quant even on frame level.
 
 
