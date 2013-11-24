@@ -43,6 +43,20 @@ typedef struct {
 } macroblock;
 
 typedef struct {
+	int y_ac_i; 
+	int y_dc_idelta;
+	int y2_dc_idelta;
+	int y2_ac_idelta;
+	int uv_dc_idelta;
+	int uv_ac_idelta;
+	int loop_filter_level;
+	int mbedge_limit;
+	int sub_bedge_limit;
+	int interior_limit;
+	int hev_threshold;
+} segment_data;
+
+typedef struct {
 	__global uint8_t *output; /* ptr to next byte to be written */
 	uint32_t range; /* 128 <= range <= 255 */
 	uint32_t bottom; /* minimum value of remaining output */
@@ -149,6 +163,7 @@ typedef struct {
 	int extra_size;
 	__constant Prob* pcat;
 } token;
+
 __constant tree_index coeff_tree [2 * (num_dct_tokens - 1)] = {	-dct_eob, 2, /* eob = "0" */
 																-DCT_0, 4, /* 0 = "10" */
 																-DCT_1, 6, /* 1 = "110" */
@@ -239,7 +254,7 @@ void encode_block(vp8_bool_encoder *vbe, __global uint *coeff_probs, int mb_num,
 	return;
 }
 														 
-void tokenize_block(__global macroblock *MBs, int mb_num, int b_num, token tokens[16])
+void tokenize_block(__global macroblock *MBs, int mb_num, int b_num, token tokens[16]) //IF-ELSE
 {
 	int next = 0; // imaginary 17th element
 	int i;
@@ -753,3 +768,292 @@ __kernel void num_div_denom(__global uint *coeff_probs,
 				}
 	return;
 }
+
+
+#ifdef LOOP_FILTER
+__kernel void prepare_filter_mask(__global macroblock *const MBs, //0
+								__global int *const mb_mask, //1
+								const int width, //2
+								const int height, //3
+								const int parts) //4
+{
+	__private int mb_num, b_num, mb_row, mb_col, mb_height, mb_width, i, mask, coeffs, split_mode;
+	mb_height = height/16;
+	mb_width = width/16;
+	
+	for (mb_row = get_global_id(0); mb_row < mb_height; mb_row += parts)
+	{
+		for (mb_col = 0; mb_col < mb_width; ++mb_col)
+		{
+			mb_num = mb_row * mb_width + mb_col;
+			//printf((__constant char*)"%d\n",mb_num);
+			mask = 0; coeffs = 0; split_mode = MBs[mb_num].parts;
+			for (b_num = 0; b_num < 16; ++b_num) {
+				for (i = 1; i < 16; ++i) {
+					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][i]);
+				}
+			}
+			for (b_num = 16; b_num < 24; ++b_num) {
+				for (i = 0; i < 16; ++i) {
+					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][i]);
+				}
+			}
+			if (split_mode == are16x16) {
+				for (i = 0; i < 16; ++i) {
+					coeffs += (int)abs(MBs[mb_num].coeffs[24][i]);
+				}
+			}
+			else {
+				for (b_num = 0; b_num < 16; ++b_num) {
+					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][0]);
+				}
+			}
+					
+			MBs[mb_num].non_zero_coeffs = coeffs;
+			mask = ((split_mode != are16x16) || (coeffs > 0)) ? -1 : 0;
+			mb_mask[mb_num] = mask;
+		}
+	}
+	return;
+}
+
+void filter_mb_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8 *const p0,
+					short8 *const q0, short8 *const q1, short8 *const q2, short8 *const q3,
+					ushort mb_lim, ushort int_lim, ushort hev_thr)
+{
+	short8 mask, hev, a, b, w;
+	
+	mask = (abs(*p3 - *p2) > int_lim);
+	mask |= (abs(*p2 - *p1) > int_lim);
+	mask |= (abs(*p1 - *p0) > int_lim);
+	mask |= (abs(*q1 - *q0) > int_lim);
+	mask |= (abs(*q2 - *q1) > int_lim);
+	mask |= (abs(*q3 - *q2) > int_lim);
+	mask |= ((abs(*p0 - *q0) * 2 + abs(*p1 - *q1) / 2)  > mb_lim);
+	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
+	hev = (abs(*p1 - *p0) > hev_thr);
+	hev |= (abs(*q1 - *q0) > hev_thr);
+	//w = clamp128(clamp128(p1 - q1) + 3*(q0 - p0));
+	w = *p1 - *q1;
+	w = select(w,-128,w<-128);
+	w = select(w,127,w>127);
+	w += (*q0 - *p0) * (short)3;
+	w = select(w,-128,w<-128);
+	w = select(w,127,w>127);
+	w &= mask;
+	a = w & hev;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	*q0 -= a; *p0 += b;
+	w &= ~hev;		
+	//a = clamp128((27*w + 63) >> 7);
+	a = (w * (short)27 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q0 -= a; *p0 += a;
+	//a = clamp128((18*w + 63) >> 7);
+	a = (w * (short)18 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q1 -= a; *p1 += a;
+	//a = clamp128((9*w + 63) >> 7);
+	a = (w * (short)9 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q2 -= a; *p2 += a;
+	
+	return;
+}
+
+void filter_b_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8 *const p0,
+					short8 *const q0, short8 *const q1, short8 *const q2, short8 *const q3,
+					ushort b_lim, ushort int_lim, ushort hev_thr)
+{
+	short8 mask, hev, a, b;
+	
+	mask = (abs(*p3 - *p2) > int_lim);
+	mask |= (abs(*p2 - *p1) > int_lim);
+	mask |= (abs(*p1 - *p0) > int_lim);
+	mask |= (abs(*q1 - *q0) > int_lim);
+	mask |= (abs(*q2 - *q1) > int_lim);
+	mask |= (abs(*q3 - *q2) > int_lim);
+	mask |= ((abs(*p0 - *q0) * 2 + abs(*p1 - *q1) / 2)  > b_lim);
+	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
+	hev = (abs(*p1 - *p0) > hev_thr);
+	hev |= (abs(*q1 - *q0) > hev_thr);
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = *p1 - *q1;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a &= hev;
+	a += (*q0 - *p0) * (short)3;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a &= mask;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	*q0 -= a; *p0 += b;
+	a = (a + 1) >> 1;
+	a &= ~hev;
+	*q1 -= a; *p1 += a;
+	
+	return;
+}
+
+void read8p(__global uchar *const frame, const int pos, const int step, short8 *const V)
+{
+	int i = pos;
+	(*V).s0 = (short)frame[i] - 128; i += step;
+	(*V).s1 = (short)frame[i] - 128; i += step;
+	(*V).s2 = (short)frame[i] - 128; i += step;
+	(*V).s3 = (short)frame[i] - 128; i += step;
+	(*V).s4 = (short)frame[i] - 128; i += step;
+	(*V).s5 = (short)frame[i] - 128; i += step;
+	(*V).s6 = (short)frame[i] - 128; i += step;
+	(*V).s7 = (short)frame[i] - 128;
+	return;
+}
+
+void write8p(__global uchar *const frame, const int pos, const int step, short8 *const V)
+{
+	int i = pos;
+	uchar8 buf;
+	buf = convert_uchar8_sat(*V + 128);
+	frame[i] = buf.s0; i += step;
+	frame[i] = buf.s1; i += step;
+	frame[i] = buf.s2; i += step;
+	frame[i] = buf.s3; i += step;
+	frame[i] = buf.s4; i += step;
+	frame[i] = buf.s5; i += step;
+	frame[i] = buf.s6; i += step;
+	frame[i] = buf.s7;
+	return;
+}
+
+__kernel void loop_filter_frame(__global uchar *const frame, //0
+								__global macroblock *const MBs, //1
+								__global int *const mb_mask, //2
+								__constant const segment_data *const SD, //3
+								const int width, //4
+								const int height, //5
+								const int mb_size) //6
+{
+	__private int mb_num, mb_width, mb_count;
+	__private int x0,y0,x,y,i;
+	__private short int_lim, mb_lim, b_lim, hev_thr;
+	__private short8 p3,p2,p1,p0,q0,q1,q2,q3;
+	
+	if (get_global_id(0) != 0) return; //there can be only one
+	
+	mb_width = width/mb_size;
+	mb_count = mb_width*(height/mb_size);
+	
+	for (mb_num = 0; mb_num < mb_count; ++mb_num)
+	{
+		i = MBs[mb_num].segment_id;
+		if (SD[i].loop_filter_level == 0) return;
+		int_lim = (short)SD[i].interior_limit;
+		mb_lim = (short)SD[i].mbedge_limit;
+		b_lim = (short)SD[i].sub_bedge_limit;
+		hev_thr = (short)SD[i].hev_threshold;
+	
+		x0 = (mb_num%mb_width)*mb_size;
+		y0 = (mb_num/mb_width)*mb_size;
+
+		// horizontal
+		for (y = y0; (y-y0) < mb_size; y += 8)
+		{
+			x = x0;
+			i = y * width + x; read8p(frame,i,width,&q0);
+			++i; read8p(frame,i,width,&q1);
+			++i; read8p(frame,i,width,&q2);
+			++i; read8p(frame,i,width,&q3);	
+			if (x0>0) 
+			{
+				i = y * width + x-4; read8p(frame,i,width,&p3);
+				++i; read8p(frame,i,width,&p2);
+				++i; read8p(frame,i,width,&p1);
+				++i; read8p(frame,i,width,&p0);
+				filter_mb_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+				i = y * width + x-3; write8p(frame,i,width,&p2);
+				++i; write8p(frame,i,width,&p1);
+				++i; write8p(frame,i,width,&p0);
+				++i; write8p(frame,i,width,&q0);
+				++i; write8p(frame,i,width,&q1);
+				++i; write8p(frame,i,width,&q2);
+			}
+
+			for (x = x0 + 4; ((x-x0) < mb_size) && (mb_mask[mb_num]); x += 4)
+			{
+				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+				i = y * width + x; read8p(frame,i,width,&q0);
+				++i; read8p(frame,i,width,&q1);
+				++i; read8p(frame,i,width,&q2);
+				++i; read8p(frame,i,width,&q3);			
+				filter_b_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				i = y * width + x-2; write8p(frame,i,width,&p1);
+				++i; write8p(frame,i,width,&p0);
+				++i; write8p(frame,i,width,&q0);
+				++i; write8p(frame,i,width,&q1);
+			}
+		}
+				
+		// vertically
+		
+		for (x = x0; (x-x0) < mb_size; x += 8)
+		{
+			y = y0;
+			i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q1 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q2 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q3 = convert_short8(vload8(0, frame + i)) - 128;
+			if (y0 > 0) 
+			{
+				i = (y-4) * width + x; p3 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; p2 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; p1 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; p0 = convert_short8(vload8(0, frame + i)) - 128;
+				filter_mb_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+				i = (y-3) * width + x; vstore8(convert_uchar8_sat(p2 + 128),0,frame + i);
+				i += width; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(q0 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(q1 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(q2 + 128), 0, frame + i);
+			}
+			
+			for (y = y0 + 4; ((y - y0) < mb_size) && (mb_mask[mb_num]); y += 4)
+			{
+				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+				i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; q1 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; q2 = convert_short8(vload8(0, frame + i)) - 128;
+				i += width; q3 = convert_short8(vload8(0, frame + i)) - 128;
+				filter_b_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				i = (y-2) * width + x; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(q0 + 128), 0, frame + i);
+				i += width; vstore8(convert_uchar8_sat(q1 + 128), 0, frame + i);
+			}
+		}
+		
+	}
+	
+}
+#endif
