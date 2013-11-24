@@ -1,5 +1,5 @@
-typedef uint8_t Prob;
-typedef int8_t tree_index;
+typedef cl_uchar Prob;
+typedef cl_char tree_index;
 typedef const tree_index Tree[];
 
 typedef struct {
@@ -285,8 +285,8 @@ const Prob default_mv_context[2][MVPcount] ={{ // row
 											128, 130, 130, 74, 148, 180, 203, 236, 254, 254 // long bits
 											}};
 Prob new_mv_context[2][MVPcount];
-uint32_t num_mv_context[2][MVPcount];
-uint32_t denom_mv_context[2][MVPcount];
+cl_uint num_mv_context[2][MVPcount];
+cl_uint denom_mv_context[2][MVPcount];
 const tree_index small_mvtree [2 * (8 - 1)] = {	2, 8, /* "0" subtree, "1" subtree */
 												4, 6, /* "00" subtree, "01" subtree */
 												-0, -1, /* 0 = "000", 1 = "001" */
