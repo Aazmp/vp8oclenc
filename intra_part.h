@@ -10,12 +10,12 @@ typedef enum
 	num_intra_bmodes
 } intra_bmode;
 
-void zigzag_block(int16_t *block)
+void zigzag_block(cl_short *block)
 {
     //      zigzag[16] = { 0, 1, 4, 8, 5, 2, 3,  6, 9, 12, 13, 10, 7, 11, 14, 15 };
     //  inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
 
-    int16_t tmp1, tmp2, tmp3;
+    cl_short tmp1, tmp2, tmp3;
 
     tmp1 = block[2];
     tmp2 = block[3];
@@ -39,12 +39,12 @@ void zigzag_block(int16_t *block)
 static const int cospi8sqrt2minus1=20091;
 static const int sinpi8sqrt2 =35468;
 
-void iDCT4x4(int16_t *input, uint8_t *output, uint8_t* predictor, int32_t dc_q, int32_t ac_q)
+void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_int dc_q, cl_int ac_q)
 {
     int i;
     int a1, b1, c1, d1;
 	int ip0, ip4, ip8, ip12, q;
-    int16_t tmp_block[16];
+    cl_short tmp_block[16];
     short *ip=input;
     short *tp=tmp_block;
     int temp1, temp2; 
@@ -78,7 +78,7 @@ void iDCT4x4(int16_t *input, uint8_t *output, uint8_t* predictor, int32_t dc_q, 
         ++tp;
     }
 
-    uint8_t *op = output;
+    cl_uchar *op = output;
     tp = tmp_block;
     for(i = 0; i < 4; ++i)
     {
@@ -93,13 +93,13 @@ void iDCT4x4(int16_t *input, uint8_t *output, uint8_t* predictor, int32_t dc_q, 
 
         /* after adding this results to predictors - clamping maybe needed */
         tp[0] = ((a1 + d1 + 4) >> 3) + predictor[0];
-		op[0] = (uint8_t)((tp[0] > 255) ? 255 : ((tp[0] < 0) ? 0 : tp[0] ));
+		op[0] = (cl_uchar)((tp[0] > 255) ? 255 : ((tp[0] < 0) ? 0 : tp[0] ));
 		tp[3] = ((a1 - d1 + 4) >> 3) + predictor[3];
-        op[3] = (uint8_t)((tp[3] > 255) ? 255 : ((tp[3] < 0) ? 0 : tp[3] ));
+        op[3] = (cl_uchar)((tp[3] > 255) ? 255 : ((tp[3] < 0) ? 0 : tp[3] ));
         tp[1] = ((b1 + c1 + 4) >> 3) + predictor[1];
-        op[1] = (uint8_t)((tp[1] > 255) ? 255 : ((tp[1] < 0) ? 0 : tp[1] ));
+        op[1] = (cl_uchar)((tp[1] > 255) ? 255 : ((tp[1] < 0) ? 0 : tp[1] ));
         tp[2] = ((b1 - c1 + 4) >> 3) + predictor[2];
-        op[2] = (uint8_t)((tp[2] > 255) ? 255 : ((tp[2] < 0) ? 0 : tp[2] ));
+        op[2] = (cl_uchar)((tp[2] > 255) ? 255 : ((tp[2] < 0) ? 0 : tp[2] ));
 
         op+=4;
 		tp+=4;
@@ -110,14 +110,14 @@ void iDCT4x4(int16_t *input, uint8_t *output, uint8_t* predictor, int32_t dc_q, 
 }
 
 
-static void DCT4x4(int16_t *input, int16_t *output)
+static void DCT4x4(cl_short *input, cl_short *output)
 {
     // input - pointer to start of block in raw frame. I-line of the block will be input + I*width
     // output - pointer to encoded_macroblock.block[i] data.
-    int32_t i;
-    int32_t a1, b1, c1, d1;
-    int16_t *ip = input;
-    int16_t *op = output;
+    cl_int i;
+    cl_int a1, b1, c1, d1;
+    cl_short *ip = input;
+    cl_short *op = output;
 
     for (i = 0; i < 4; i++)
     {
@@ -126,14 +126,14 @@ static void DCT4x4(int16_t *input, int16_t *output)
         c1 = ((ip[1] - ip[2])<<3);
         d1 = ((ip[0] - ip[3])<<3);
 
-        op[0] = (int16_t)(a1 + b1);
-        op[2] = (int16_t)(a1 - b1);
+        op[0] = (cl_short)(a1 + b1);
+        op[2] = (cl_short)(a1 - b1);
 
-        op[1] = (int16_t)((c1 * 2217 + d1 * 5352 +  14500)>>12);
-        op[3] = (int16_t)((d1 * 2217 - c1 * 5352 +   7500)>>12);
+        op[1] = (cl_short)((c1 * 2217 + d1 * 5352 +  14500)>>12);
+        op[3] = (cl_short)((d1 * 2217 - c1 * 5352 +   7500)>>12);
 
-        ip += 4; // because in's in the raw frame
-        op += 4; // because it's in block-packed order
+        ip += 4; 
+        op += 4; 
 
     }
     op = output;
@@ -155,24 +155,24 @@ static void DCT4x4(int16_t *input, int16_t *output)
 	return;
 }
 
-static int weight(int16_t * r) //r - residual to be weighted through WHT
+static int weight_wht(cl_short * r) //r - 4x4 residual to be weighted through WHT
 {
-    int32_t i;
-    int32_t a1, b1, c1, d1;
-    int32_t a2, b2, c2, d2;
-    int16_t *ip = r;
-	int16_t tmp[16];
-	int16_t *t = tmp;
+    cl_int i;
+    cl_int a1, b1, c1, d1;
+    cl_int a2, b2, c2, d2;
+    cl_short *ip = r;
+	cl_short tmp[16];
+	cl_short *t = tmp;
 
     for (i = 0; i < 4; i++)
     {
         // extracting dc coeffs from block-ordered macroblock
         // ip[0] - DCcoef of first mb in line, +16 coeffs and starts second, and so on...
         // ..every i element will be stored with 16*i offset from the start
-        a1 = ((int32_t)ip[0] + (int32_t)ip[3]);
-        b1 = ((int32_t)ip[1] + (int32_t)ip[2]);
-        c1 = ((int32_t)ip[1] - (int32_t)ip[2]);
-        d1 = ((int32_t)ip[0] - (int32_t)ip[3]);
+        a1 = ((cl_int)ip[0] + (cl_int)ip[3]);
+        b1 = ((cl_int)ip[1] + (cl_int)ip[2]);
+        c1 = ((cl_int)ip[1] - (cl_int)ip[2]);
+        d1 = ((cl_int)ip[0] - (cl_int)ip[3]);
 
         t[0] = a1 + b1;
         t[1] = c1 + d1;
@@ -221,7 +221,60 @@ static int weight(int16_t * r) //r - residual to be weighted through WHT
 	return a1;
 }
 
-void quant4x4(int16_t *coeffs, int32_t dc_q, int32_t ac_q)
+static int weight(cl_short * r) //r - 4x4 residual to be weighted through vp8 DCT
+{
+    // input - pointer to start of block in raw frame. I-line of the block will be input + I*width
+    // output - pointer to encoded_macroblock.block[i] data.
+
+	int i;
+    int a1, b1, c1, d1;
+	short *ip = r;
+	short tmp[16];
+    short *op = tmp;
+
+    for (i = 0; i < 4; i++)
+    {
+        a1 = ((ip[0] + ip[3])<<3);
+        b1 = ((ip[1] + ip[2])<<3);
+        c1 = ((ip[1] - ip[2])<<3);
+        d1 = ((ip[0] - ip[3])<<3);
+
+        op[0] = (cl_short)(a1 + b1);
+        op[2] = (cl_short)(a1 - b1);
+
+        op[1] = (cl_short)((c1 * 2217 + d1 * 5352 +  14500)>>12);
+        op[3] = (cl_short)((d1 * 2217 - c1 * 5352 +   7500)>>12);
+
+        ip += 4; 
+        op += 4; 
+
+    }
+    op = tmp;
+
+    for (i = 0; i < 4; i++)
+    {
+        a1 = op[0] + op[12];
+        b1 = op[4] + op[8];
+        c1 = op[4] - op[8];
+		d1 = op[0] - op[12];
+
+        op[0] = (( a1 + b1 + 7)>>4);
+        op[8] = (( a1 - b1 + 7)>>4);
+        op[4]  = (((c1 * 2217 + d1 * 5352 +  12000)>>16) + (d1!=0));
+        op[12] = ((d1 * 2217 - c1 * 5352 +  51000)>>16);
+
+        ++op;
+    }
+
+	tmp[0] /= 4;
+	a1 = 0;
+	for (i = 0; i < 16; ++i)
+		a1 += (tmp[i] < 0) ? -tmp[i] : tmp[i];
+
+	return i;
+}
+
+static void quant4x4(cl_short *coeffs, cl_int dc_q, cl_int ac_q)
 {
 	// possible opt: val + (val>>16)*(q/2)
 	coeffs[0] += (coeffs[0] < 0) ? (-dc_q/2) : (dc_q/2);
@@ -241,30 +294,30 @@ void quant4x4(int16_t *coeffs, int32_t dc_q, int32_t ac_q)
 	coeffs[14] += (coeffs[14] < 0) ? (-ac_q/2) : (ac_q/2);
 	coeffs[15] += (coeffs[15] < 0) ? (-ac_q/2) : (ac_q/2);
 
-	coeffs[0] /= (int16_t)dc_q;
-	coeffs[1] /= (int16_t)ac_q;
-	coeffs[2] /= (int16_t)ac_q;
-	coeffs[3] /= (int16_t)ac_q;
-	coeffs[4] /= (int16_t)ac_q;
-	coeffs[5] /= (int16_t)ac_q;
-	coeffs[6] /= (int16_t)ac_q;
-	coeffs[7] /= (int16_t)ac_q;
-	coeffs[8] /= (int16_t)ac_q;
-	coeffs[9] /= (int16_t)ac_q;
-	coeffs[10] /= (int16_t)ac_q;
-	coeffs[11] /= (int16_t)ac_q;
-	coeffs[12] /= (int16_t)ac_q;
-	coeffs[13] /= (int16_t)ac_q;
-	coeffs[14] /= (int16_t)ac_q;
-	coeffs[15] /= (int16_t)ac_q;
+	coeffs[0] /= (cl_short)dc_q;
+	coeffs[1] /= (cl_short)ac_q;
+	coeffs[2] /= (cl_short)ac_q;
+	coeffs[3] /= (cl_short)ac_q;
+	coeffs[4] /= (cl_short)ac_q;
+	coeffs[5] /= (cl_short)ac_q;
+	coeffs[6] /= (cl_short)ac_q;
+	coeffs[7] /= (cl_short)ac_q;
+	coeffs[8] /= (cl_short)ac_q;
+	coeffs[9] /= (cl_short)ac_q;
+	coeffs[10] /= (cl_short)ac_q;
+	coeffs[11] /= (cl_short)ac_q;
+	coeffs[12] /= (cl_short)ac_q;
+	coeffs[13] /= (cl_short)ac_q;
+	coeffs[14] /= (cl_short)ac_q;
+	coeffs[15] /= (cl_short)ac_q;
 	return;
 }
 
-int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *residual, int16_t *top_pred, int16_t *left_pred, int16_t top_left_pred)
+cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_short *residual, cl_short *top_pred, cl_short *left_pred, cl_short top_left_pred)
 {
-	int16_t MinWeight, bmode, val, buf, i, j, W;
-	uint8_t pr_tmp[16];
-	int16_t res_tmp[16];
+	cl_short MinWeight, bmode, val, buf, i, j, W;
+	cl_uchar pr_tmp[16];
+	cl_short res_tmp[16];
 // set B_DC_PRED as s start
 	bmode = B_DC_PRED;
 	val = 4;
@@ -273,8 +326,8 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 	val >>= 3;
 	for (i = 0; i < 4; ++i) 
 		for (j = 0; j < 4; ++j) {
-		predictor[i*4 + j] = (uint8_t)val; 
-		residual[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)predictor[i*4+j];
+		predictor[i*4 + j] = (cl_uchar)val; 
+		residual[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)predictor[i*4+j];
 
 	}
 	MinWeight = weight(residual);
@@ -284,8 +337,8 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 		{
 			val = top_pred[j] + left_pred[i] - top_left_pred;
 			val = (val < 0) ? 0 : val; val = (val > 255) ? 255 : val;
-			pr_tmp[i*4+j] = (uint8_t)val;
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			pr_tmp[i*4+j] = (cl_uchar)val;
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 		}
 	W = weight(res_tmp);
 	if (W < MinWeight) 
@@ -306,14 +359,14 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 	{
 		val = buf + top_pred[j]*2 + top_pred[j+1] + 2;
 		val >>= 2;
-		pr_tmp[j] = (uint8_t)val;
-		pr_tmp[4+j] = (uint8_t)val;
-		pr_tmp[8+j] = (uint8_t)val;
-		pr_tmp[12+j] = (uint8_t)val;
-		res_tmp[j] = (int16_t)original[j] - (int16_t)pr_tmp[j];
-		res_tmp[4 + j] = (int16_t)original[4+j] - (int16_t)pr_tmp[4+j];
-		res_tmp[8 + j] = (int16_t)original[8+j] - (int16_t)pr_tmp[8+j];
-		res_tmp[12 + j] = (int16_t)original[12+j] - (int16_t)pr_tmp[12+j];
+		pr_tmp[j] = (cl_uchar)val;
+		pr_tmp[4+j] = (cl_uchar)val;
+		pr_tmp[8+j] = (cl_uchar)val;
+		pr_tmp[12+j] = (cl_uchar)val;
+		res_tmp[j] = (cl_short)original[j] - (cl_short)pr_tmp[j];
+		res_tmp[4 + j] = (cl_short)original[4+j] - (cl_short)pr_tmp[4+j];
+		res_tmp[8 + j] = (cl_short)original[8+j] - (cl_short)pr_tmp[8+j];
+		res_tmp[12 + j] = (cl_short)original[12+j] - (cl_short)pr_tmp[12+j];
 		buf = top_pred[j];
 	}
 	W = weight(res_tmp);
@@ -334,27 +387,27 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 	{
 		val = buf + left_pred[i]*2 + left_pred[i+1] + 2;
 		val >>= 2;
-		pr_tmp[i*4] = (uint8_t)val;
-		pr_tmp[i*4+1] = (uint8_t)val;
-		pr_tmp[i*4+2] = (uint8_t)val;
-		pr_tmp[i*4+3] = (uint8_t)val;
-		res_tmp[i*4] = (int16_t)original[i*4] - (int16_t)pr_tmp[i*4];
-		res_tmp[i*4 + 1] = (int16_t)original[i*4+1] - (int16_t)pr_tmp[i*4+1];
-		res_tmp[i*4 + 2] = (int16_t)original[i*4+2] - (int16_t)pr_tmp[i*4+2];
-		res_tmp[i*4 + 3] = (int16_t)original[i*4+3] - (int16_t)pr_tmp[i*4+3];
+		pr_tmp[i*4] = (cl_uchar)val;
+		pr_tmp[i*4+1] = (cl_uchar)val;
+		pr_tmp[i*4+2] = (cl_uchar)val;
+		pr_tmp[i*4+3] = (cl_uchar)val;
+		res_tmp[i*4] = (cl_short)original[i*4] - (cl_short)pr_tmp[i*4];
+		res_tmp[i*4 + 1] = (cl_short)original[i*4+1] - (cl_short)pr_tmp[i*4+1];
+		res_tmp[i*4 + 2] = (cl_short)original[i*4+2] - (cl_short)pr_tmp[i*4+2];
+		res_tmp[i*4 + 3] = (cl_short)original[i*4+3] - (cl_short)pr_tmp[i*4+3];
 		buf = left_pred[i];
 	} 
 	// last row i==3
 	val = left_pred[3]*3 + left_pred[i-1] + 2;
 	val >>= 2;
-	pr_tmp[12] = (uint8_t)val;
-	pr_tmp[13] = (uint8_t)val;
-	pr_tmp[14] = (uint8_t)val;
-	pr_tmp[15] = (uint8_t)val;
-	res_tmp[12] = (int16_t)original[12] - (int16_t)pr_tmp[12];
-	res_tmp[13] = (int16_t)original[13] - (int16_t)pr_tmp[13];
-	res_tmp[14] = (int16_t)original[14] - (int16_t)pr_tmp[14];
-	res_tmp[15] = (int16_t)original[15] - (int16_t)pr_tmp[15];
+	pr_tmp[12] = (cl_uchar)val;
+	pr_tmp[13] = (cl_uchar)val;
+	pr_tmp[14] = (cl_uchar)val;
+	pr_tmp[15] = (cl_uchar)val;
+	res_tmp[12] = (cl_short)original[12] - (cl_short)pr_tmp[12];
+	res_tmp[13] = (cl_short)original[13] - (cl_short)pr_tmp[13];
+	res_tmp[14] = (cl_short)original[14] - (cl_short)pr_tmp[14];
+	res_tmp[15] = (cl_short)original[15] - (cl_short)pr_tmp[15];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -368,16 +421,16 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_LD_PRED
-	pr_tmp[0] = (uint8_t)((top_pred[0]+top_pred[1]*2+top_pred[2]+2)>>2);
-	pr_tmp[1] = pr_tmp[4] = (uint8_t)((top_pred[1]+top_pred[2]*2+top_pred[3]+2)>>2);
-	pr_tmp[2] = pr_tmp[5] = pr_tmp[8] = (uint8_t)((top_pred[2]+top_pred[3]*2+top_pred[4]+2)>>2);
-	pr_tmp[3] = pr_tmp[6] = pr_tmp[9] = pr_tmp[12] = (uint8_t)((top_pred[3]+top_pred[4]*2+top_pred[5]+2)>>2);
-	pr_tmp[7] = pr_tmp[10] = pr_tmp[13] = (uint8_t)((top_pred[4]+top_pred[5]*2+top_pred[6]+2)>>2);
-	pr_tmp[11] = pr_tmp[14] = (uint8_t)((top_pred[5]+top_pred[6]*2+top_pred[7]+2)>>2);
-	pr_tmp[15] = (uint8_t)((top_pred[6]+top_pred[7]*3+2)>>2);
+	pr_tmp[0] = (cl_uchar)((top_pred[0]+top_pred[1]*2+top_pred[2]+2)>>2);
+	pr_tmp[1] = pr_tmp[4] = (cl_uchar)((top_pred[1]+top_pred[2]*2+top_pred[3]+2)>>2);
+	pr_tmp[2] = pr_tmp[5] = pr_tmp[8] = (cl_uchar)((top_pred[2]+top_pred[3]*2+top_pred[4]+2)>>2);
+	pr_tmp[3] = pr_tmp[6] = pr_tmp[9] = pr_tmp[12] = (cl_uchar)((top_pred[3]+top_pred[4]*2+top_pred[5]+2)>>2);
+	pr_tmp[7] = pr_tmp[10] = pr_tmp[13] = (cl_uchar)((top_pred[4]+top_pred[5]*2+top_pred[6]+2)>>2);
+	pr_tmp[11] = pr_tmp[14] = (cl_uchar)((top_pred[5]+top_pred[6]*2+top_pred[7]+2)>>2);
+	pr_tmp[15] = (cl_uchar)((top_pred[6]+top_pred[7]*3+2)>>2);
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -391,16 +444,16 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_RD_PRED
-	pr_tmp[12] = (uint8_t)((left_pred[3] + left_pred[2]*2 + left_pred[1] + 2)>>2);
-	pr_tmp[13] = pr_tmp[8] = (uint8_t)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
-	pr_tmp[14] = pr_tmp[9] = pr_tmp[4] = (uint8_t)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
-	pr_tmp[15] = pr_tmp[10] = pr_tmp[5] = pr_tmp[0] = (uint8_t)((left_pred[0]+top_left_pred*2 + top_pred[0] + 2)>>2);
-	pr_tmp[11] = pr_tmp[6] = pr_tmp[1] = (uint8_t)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
-	pr_tmp[7] = pr_tmp[2] = (uint8_t)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
-	pr_tmp[3] = (uint8_t)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
+	pr_tmp[12] = (cl_uchar)((left_pred[3] + left_pred[2]*2 + left_pred[1] + 2)>>2);
+	pr_tmp[13] = pr_tmp[8] = (cl_uchar)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
+	pr_tmp[14] = pr_tmp[9] = pr_tmp[4] = (cl_uchar)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
+	pr_tmp[15] = pr_tmp[10] = pr_tmp[5] = pr_tmp[0] = (cl_uchar)((left_pred[0]+top_left_pred*2 + top_pred[0] + 2)>>2);
+	pr_tmp[11] = pr_tmp[6] = pr_tmp[1] = (cl_uchar)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
+	pr_tmp[7] = pr_tmp[2] = (cl_uchar)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
+	pr_tmp[3] = (cl_uchar)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -414,19 +467,19 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_VR_PRED
-	pr_tmp[12] = (uint8_t)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
-	pr_tmp[8] = (uint8_t)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
-	pr_tmp[13] = pr_tmp[4] = (uint8_t)((left_pred[0] + top_left_pred*2 + top_pred[0] + 2)>>2);
-	pr_tmp[9] = pr_tmp[0] = (uint8_t)((top_left_pred + top_pred[0] + 1)>>1);
-	pr_tmp[14] = pr_tmp[5] = (uint8_t)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
-	pr_tmp[10] = pr_tmp[1] = (uint8_t)((top_pred[0] + top_pred[1] + 1)>>1);
-	pr_tmp[15] = pr_tmp[6] = (uint8_t)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
-	pr_tmp[11] = pr_tmp[2] = (uint8_t)((top_pred[1] + top_pred[2] + 1)>>1);
-	pr_tmp[7] = (uint8_t)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
-	pr_tmp[3] = (uint8_t)((top_pred[2] + top_pred[3] + 1)>>1);
+	pr_tmp[12] = (cl_uchar)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
+	pr_tmp[8] = (cl_uchar)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
+	pr_tmp[13] = pr_tmp[4] = (cl_uchar)((left_pred[0] + top_left_pred*2 + top_pred[0] + 2)>>2);
+	pr_tmp[9] = pr_tmp[0] = (cl_uchar)((top_left_pred + top_pred[0] + 1)>>1);
+	pr_tmp[14] = pr_tmp[5] = (cl_uchar)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
+	pr_tmp[10] = pr_tmp[1] = (cl_uchar)((top_pred[0] + top_pred[1] + 1)>>1);
+	pr_tmp[15] = pr_tmp[6] = (cl_uchar)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
+	pr_tmp[11] = pr_tmp[2] = (cl_uchar)((top_pred[1] + top_pred[2] + 1)>>1);
+	pr_tmp[7] = (cl_uchar)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
+	pr_tmp[3] = (cl_uchar)((top_pred[2] + top_pred[3] + 1)>>1);
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -440,20 +493,20 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_VL_PRED
-	pr_tmp[0] = (uint8_t)((top_pred[0] + top_pred[1] + 1)>>1);
-	pr_tmp[4] = (uint8_t)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
-	pr_tmp[8] = pr_tmp[1] = (uint8_t)((top_pred[1] + top_pred[2] + 1)>>1);
-	pr_tmp[12] = pr_tmp[5] = (uint8_t)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
-	pr_tmp[9] = pr_tmp[2] = (uint8_t)((top_pred[2] + top_pred[3] + 1)>>1);
-	pr_tmp[13] = pr_tmp[6] = (uint8_t)((top_pred[2] + top_pred[3]*2 + top_pred[4] + 2)>>2);
-	pr_tmp[10] = pr_tmp[3] = (uint8_t)((top_pred[3] + top_pred[4] + 1)>>1);
-	pr_tmp[14] = pr_tmp[7] = (uint8_t)((top_pred[3] + top_pred[4]*2 + top_pred[5] + 2)>>2);
+	pr_tmp[0] = (cl_uchar)((top_pred[0] + top_pred[1] + 1)>>1);
+	pr_tmp[4] = (cl_uchar)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
+	pr_tmp[8] = pr_tmp[1] = (cl_uchar)((top_pred[1] + top_pred[2] + 1)>>1);
+	pr_tmp[12] = pr_tmp[5] = (cl_uchar)((top_pred[1] + top_pred[2]*2 + top_pred[3] + 2)>>2);
+	pr_tmp[9] = pr_tmp[2] = (cl_uchar)((top_pred[2] + top_pred[3] + 1)>>1);
+	pr_tmp[13] = pr_tmp[6] = (cl_uchar)((top_pred[2] + top_pred[3]*2 + top_pred[4] + 2)>>2);
+	pr_tmp[10] = pr_tmp[3] = (cl_uchar)((top_pred[3] + top_pred[4] + 1)>>1);
+	pr_tmp[14] = pr_tmp[7] = (cl_uchar)((top_pred[3] + top_pred[4]*2 + top_pred[5] + 2)>>2);
 	/* Last two values do not strictly follow the pattern. */
-	pr_tmp[11] = (uint8_t)((top_pred[4] + top_pred[5]*2 + top_pred[6] + 2)>>2);
-	pr_tmp[15] = (uint8_t)((top_pred[5] + top_pred[6]*2 + top_pred[7] + 2)>>2);
+	pr_tmp[11] = (cl_uchar)((top_pred[4] + top_pred[5]*2 + top_pred[6] + 2)>>2);
+	pr_tmp[15] = (cl_uchar)((top_pred[5] + top_pred[6]*2 + top_pred[7] + 2)>>2);
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -467,19 +520,19 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_HD_PRED
-	pr_tmp[12] = (uint8_t)((left_pred[3] + left_pred[2] + 1)>>1);
-	pr_tmp[13] = (uint8_t)((left_pred[3] + left_pred[2]*2 + left_pred[1] + 2)>>2);
-	pr_tmp[8] = pr_tmp[14] = (uint8_t)((left_pred[2] + left_pred[1] + 1)>>1);
-	pr_tmp[9] = pr_tmp[15] = (uint8_t)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
-	pr_tmp[4] = pr_tmp[10] = (uint8_t)((left_pred[1] + left_pred[0] + 1)>>1);
-	pr_tmp[5] = pr_tmp[11] = (uint8_t)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
-	pr_tmp[0] = pr_tmp[6] = (uint8_t)((left_pred[0] + top_left_pred + 1)>>1);
-	pr_tmp[1] = pr_tmp[7] = (uint8_t)((left_pred[0] + top_left_pred*2 + top_pred[0] + 2)>>2);
-	pr_tmp[2] = (uint8_t)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
-	pr_tmp[3] = (uint8_t)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
+	pr_tmp[12] = (cl_uchar)((left_pred[3] + left_pred[2] + 1)>>1);
+	pr_tmp[13] = (cl_uchar)((left_pred[3] + left_pred[2]*2 + left_pred[1] + 2)>>2);
+	pr_tmp[8] = pr_tmp[14] = (cl_uchar)((left_pred[2] + left_pred[1] + 1)>>1);
+	pr_tmp[9] = pr_tmp[15] = (cl_uchar)((left_pred[2] + left_pred[1]*2 + left_pred[0] + 2)>>2);
+	pr_tmp[4] = pr_tmp[10] = (cl_uchar)((left_pred[1] + left_pred[0] + 1)>>1);
+	pr_tmp[5] = pr_tmp[11] = (cl_uchar)((left_pred[1] + left_pred[0]*2 + top_left_pred + 2)>>2);
+	pr_tmp[0] = pr_tmp[6] = (cl_uchar)((left_pred[0] + top_left_pred + 1)>>1);
+	pr_tmp[1] = pr_tmp[7] = (cl_uchar)((left_pred[0] + top_left_pred*2 + top_pred[0] + 2)>>2);
+	pr_tmp[2] = (cl_uchar)((top_left_pred + top_pred[0]*2 + top_pred[1] + 2)>>2);
+	pr_tmp[3] = (cl_uchar)((top_pred[0] + top_pred[1]*2 + top_pred[2] + 2)>>2);
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -493,19 +546,19 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 			}
 	} 
 // try B_HU_PRED
-	pr_tmp[0] = (uint8_t)((left_pred[0] + left_pred[1] + 1)>>1);
-	pr_tmp[1] = (uint8_t)((left_pred[0] + left_pred[1]*2 + left_pred[2] + 2)>>2);
-	pr_tmp[2] = pr_tmp[4] = (uint8_t)((left_pred[1] + left_pred[2] + 1)>>1);
-	pr_tmp[3] = pr_tmp[5] = (uint8_t)((left_pred[1] + left_pred[2]*2 + left_pred[3] + 2)>>2);
-	pr_tmp[6] = pr_tmp[8] = (uint8_t)((left_pred[2] + left_pred[3] + 1)>>1);
-	pr_tmp[7] = pr_tmp[9] = (uint8_t)((left_pred[2] + left_pred[3]*3 + 2)>>2);
+	pr_tmp[0] = (cl_uchar)((left_pred[0] + left_pred[1] + 1)>>1);
+	pr_tmp[1] = (cl_uchar)((left_pred[0] + left_pred[1]*2 + left_pred[2] + 2)>>2);
+	pr_tmp[2] = pr_tmp[4] = (cl_uchar)((left_pred[1] + left_pred[2] + 1)>>1);
+	pr_tmp[3] = pr_tmp[5] = (cl_uchar)((left_pred[1] + left_pred[2]*2 + left_pred[3] + 2)>>2);
+	pr_tmp[6] = pr_tmp[8] = (cl_uchar)((left_pred[2] + left_pred[3] + 1)>>1);
+	pr_tmp[7] = pr_tmp[9] = (cl_uchar)((left_pred[2] + left_pred[3]*3 + 2)>>2);
 	/* Not possible to follow pattern for much of the bottom
 	row because no (nearby) already-constructed pixels lie
 	on the diagonals in question. */
-	pr_tmp[10] = pr_tmp[11] = pr_tmp[12] = pr_tmp[13] = pr_tmp[14] = pr_tmp[15] = (uint8_t)left_pred[3];
+	pr_tmp[10] = pr_tmp[11] = pr_tmp[12] = pr_tmp[13] = pr_tmp[14] = pr_tmp[15] = (cl_uchar)left_pred[3];
 	for(i = 0; i < 4; ++i)
 		for(j = 0; j < 4; ++j)
-			res_tmp[i*4 + j] = (int16_t)original[i*4+j] - (int16_t)pr_tmp[i*4+j];
+			res_tmp[i*4 + j] = (cl_short)original[i*4+j] - (cl_short)pr_tmp[i*4+j];
 	W = weight(res_tmp);
 	if (W < MinWeight) 
 	{
@@ -521,18 +574,18 @@ int32_t pick_luma_predictor(uint8_t *original, uint8_t *predictor, int16_t *resi
 	return bmode;
 }
 
-void predict_and_transform_mb(int32_t mb_num)
+void predict_and_transform_mb(cl_int mb_num)
 {
 	frames.transformed_blocks[mb_num].parts = are4x4;
-    int32_t i, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
+    cl_int i, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
 
-    int16_t top_left_pred_Y, top_left_pred_U, top_left_pred_V;
-    int16_t left_pred_Y[16], left_pred_U[8], left_pred_V[8], top_pred_Y[20], top_pred_U[8], top_pred_V[8];
+    cl_short top_left_pred_Y, top_left_pred_U, top_left_pred_V;
+    cl_short left_pred_Y[16], left_pred_U[8], left_pred_V[8], top_pred_Y[20], top_pred_U[8], top_pred_V[8];
 
-	uint8_t predictor[16], block_pixels[16];
-	int16_t residual[16];
+	cl_uchar predictor[16], block_pixels[16];
+	cl_short residual[16];
 
-	int32_t y_dc_q,y_ac_q,uv_dc_q,uv_ac_q;
+	cl_int y_dc_q,y_ac_q,uv_dc_q,uv_ac_q;
 	frames.transformed_blocks[mb_num].segment_id = intra_segment;
 	y_dc_q = frames.y_dc_q[intra_segment];
 	y_ac_q = frames.y_ac_q[intra_segment];
@@ -563,12 +616,12 @@ void predict_and_transform_mb(int32_t mb_num)
         pred_ind_UV = UV_offset - 1;
         for (i = 0; i < 16; i+=2)
         {
-            left_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            left_pred_Y[i]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             pred_ind_Y += video.wrk_width;
-            left_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            left_pred_Y[i+1]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             pred_ind_Y += video.wrk_width;
-            left_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
-            left_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            left_pred_U[i/2]= (cl_short)frames.reconstructed_U[pred_ind_UV];
+            left_pred_V[i/2]=  (cl_short)frames.reconstructed_V[pred_ind_UV];
             pred_ind_UV += (video.wrk_width>>1);
         }
     }
@@ -596,19 +649,19 @@ void predict_and_transform_mb(int32_t mb_num)
         pred_ind_UV = UV_offset - (video.wrk_width>>1);
         for (i = 0; i < 16; i+=2)
         {
-            top_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            top_pred_Y[i]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             ++pred_ind_Y;
-            top_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            top_pred_Y[i+1]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             ++pred_ind_Y;
-            top_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
-            top_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            top_pred_U[i/2]= (cl_short)frames.reconstructed_U[pred_ind_UV];
+            top_pred_V[i/2]=  (cl_short)frames.reconstructed_V[pred_ind_UV];
             ++pred_ind_UV;
         }
 		if (mb_col < (video.mb_width - 1)) {
-			top_pred_Y[16] = (int16_t)frames.reconstructed_Y[pred_ind_Y];
-			top_pred_Y[17] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 1];
-			top_pred_Y[18] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 2];
-			top_pred_Y[19] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 3];
+			top_pred_Y[16] = (cl_short)frames.reconstructed_Y[pred_ind_Y];
+			top_pred_Y[17] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 1];
+			top_pred_Y[18] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 2];
+			top_pred_Y[19] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 3];
 		} else {
 			top_pred_Y[16] = top_pred_Y[15];
 			top_pred_Y[17] = top_pred_Y[15];
@@ -624,11 +677,11 @@ void predict_and_transform_mb(int32_t mb_num)
         top_left_pred_V = frames.reconstructed_V[UV_offset - (video.wrk_width>>1) - 1];
     }
 
-    uint8_t *block_offset;
+    cl_uchar *block_offset;
 
     for (b_row = 0; b_row < 4; ++b_row) // 4x4 luma blocks
     {
-		int16_t buf_pred = left_pred_Y[(b_row<<2) + 3];
+		cl_short buf_pred = left_pred_Y[(b_row<<2) + 3];
 		for (b_col = 0; b_col < 4; ++b_col)
 		{
 			b_num = (b_row<<2) + b_col;
@@ -686,14 +739,14 @@ void predict_and_transform_mb(int32_t mb_num)
 			residual[i*4 + 1] = top_pred_U[b_col*4 + 1] + left_pred_U[b_row*4 + i] - top_left_pred_U;
 			residual[i*4 + 2] = top_pred_U[b_col*4 + 2] + left_pred_U[b_row*4 + i] - top_left_pred_U;
 			residual[i*4 + 3] = top_pred_U[b_col*4 + 3] + left_pred_U[b_row*4 + i] - top_left_pred_U;
-			predictor[i*4] = (uint8_t)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
-			predictor[i*4 + 1] = (uint8_t)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
-			predictor[i*4 + 2] = (uint8_t)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
-			predictor[i*4 + 3] = (uint8_t)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
-			residual[i*4] = (int16_t)*(block_offset) - (int16_t)predictor[i*4];
-			residual[i*4 + 1] = (int16_t)*(block_offset + 1) - (int16_t)predictor[i*4 + 1];
-			residual[i*4 + 2] = (int16_t)*(block_offset + 2) - (int16_t)predictor[i*4 + 2];
-			residual[i*4 + 3] = (int16_t)*(block_offset + 3) - (int16_t)predictor[i*4 + 3];
+			predictor[i*4] = (cl_uchar)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
+			predictor[i*4 + 1] = (cl_uchar)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
+			predictor[i*4 + 2] = (cl_uchar)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
+			predictor[i*4 + 3] = (cl_uchar)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
+			residual[i*4] = (cl_short)*(block_offset) - (cl_short)predictor[i*4];
+			residual[i*4 + 1] = (cl_short)*(block_offset + 1) - (cl_short)predictor[i*4 + 1];
+			residual[i*4 + 2] = (cl_short)*(block_offset + 2) - (cl_short)predictor[i*4 + 2];
+			residual[i*4 + 3] = (cl_short)*(block_offset + 3) - (cl_short)predictor[i*4 + 3];
 			block_offset += video.wrk_width/2;
 		}
 		DCT4x4(residual, frames.transformed_blocks[mb_num].coeffs[b_num+16]);
@@ -720,14 +773,14 @@ void predict_and_transform_mb(int32_t mb_num)
 			residual[i*4 + 1] = top_pred_V[b_col*4 + 1] + left_pred_V[b_row*4 + i] - top_left_pred_V;
 			residual[i*4 + 2] = top_pred_V[b_col*4 + 2] + left_pred_V[b_row*4 + i] - top_left_pred_V;
 			residual[i*4 + 3] = top_pred_V[b_col*4 + 3] + left_pred_V[b_row*4 + i] - top_left_pred_V;
-			predictor[i*4] = (uint8_t)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
-			predictor[i*4 + 1] = (uint8_t)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
-			predictor[i*4 + 2] = (uint8_t)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
-			predictor[i*4 + 3] = (uint8_t)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
-			residual[i*4] = (int16_t)*(block_offset) - (int16_t)predictor[i*4];
-			residual[i*4 + 1] = (int16_t)*(block_offset + 1) - (int16_t)predictor[i*4 + 1];
-			residual[i*4 + 2] = (int16_t)*(block_offset + 2) - (int16_t)predictor[i*4 + 2];
-			residual[i*4 + 3] = (int16_t)*(block_offset + 3) - (int16_t)predictor[i*4 + 3];
+			predictor[i*4] = (cl_uchar)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
+			predictor[i*4 + 1] = (cl_uchar)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
+			predictor[i*4 + 2] = (cl_uchar)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
+			predictor[i*4 + 3] = (cl_uchar)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
+			residual[i*4] = (cl_short)*(block_offset) - (cl_short)predictor[i*4];
+			residual[i*4 + 1] = (cl_short)*(block_offset + 1) - (cl_short)predictor[i*4 + 1];
+			residual[i*4 + 2] = (cl_short)*(block_offset + 2) - (cl_short)predictor[i*4 + 2];
+			residual[i*4 + 3] = (cl_short)*(block_offset + 3) - (cl_short)predictor[i*4 + 3];
 			block_offset += video.wrk_width/2;
 		}
 		DCT4x4(residual, frames.transformed_blocks[mb_num].coeffs[b_num+20]);
@@ -748,8 +801,8 @@ void predict_and_transform_mb(int32_t mb_num)
 }
 
 
-float count_SSIM_16x16(uint8_t *const frame1Y, uint8_t *const frame1U, uint8_t *const frame1V, const int32_t width1, 
-					   uint8_t *const frame2Y, uint8_t *const frame2U, uint8_t *const frame2V, const int32_t width2)
+float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_uchar *const frame1V, const cl_int width1, 
+					   cl_uchar *const frame2Y, cl_uchar *const frame2U, cl_uchar *const frame2V, const cl_int width2)
 {
 	int i,j,M1=0,M2=0,D1=0,D2=0,C=0,t1,t2;
 	const float c1 = 0.01f*0.01f*255*255;
@@ -842,18 +895,18 @@ float count_SSIM_16x16(uint8_t *const frame1Y, uint8_t *const frame1U, uint8_t *
 }
 
 
-int test_inter_on_intra(int32_t mb_num, segment_ids id)
+int test_inter_on_intra(cl_int mb_num, segment_ids id)
 {
 	macroblock test_mb;
-	static uint8_t test_recon_Y[256];
-	static uint8_t test_recon_V[64];
-	static uint8_t test_recon_U[64];
-	const int32_t test_width = 16;
+	static cl_uchar test_recon_Y[256];
+	static cl_uchar test_recon_V[64];
+	static cl_uchar test_recon_U[64];
+	const cl_int test_width = 16;
 
-	uint8_t predictor[16], block_pixels[16];
-	int16_t residual[16];
+	cl_uchar predictor[16], block_pixels[16];
+	cl_short residual[16];
 
-	int32_t y_dc_q,y_ac_q,uv_dc_q,uv_ac_q;
+	cl_int y_dc_q,y_ac_q,uv_dc_q,uv_ac_q;
 	test_mb.segment_id = id;
 	y_dc_q = frames.y_dc_q[id];
 	y_ac_q = frames.y_ac_q[id];
@@ -861,11 +914,11 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
 	uv_ac_q = frames.uv_ac_q[id];
 
 	// prepare predictors (TM_B_PRED) and transform each block
-    int32_t i,j, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
+    cl_int i,j, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
 
-    int16_t top_left_pred_Y, top_left_pred_U, top_left_pred_V;
-    int16_t left_pred_Y[16], left_pred_U[8], left_pred_V[8];
-    int16_t top_pred_Y[20], top_pred_U[8], top_pred_V[8];
+    cl_short top_left_pred_Y, top_left_pred_U, top_left_pred_V;
+    cl_short left_pred_Y[16], left_pred_U[8], left_pred_V[8];
+    cl_short top_pred_Y[20], top_pred_U[8], top_pred_V[8];
 
     mb_row = mb_num / video.mb_width;  mb_col = mb_num % video.mb_width;
     Y_offset = ((mb_row * video.wrk_width) + mb_col) << 4;
@@ -880,12 +933,12 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
     else {
         pred_ind_Y = Y_offset - 1; pred_ind_UV = UV_offset - 1;
         for (i = 0; i < 16; i+=2) {
-            left_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            left_pred_Y[i]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             pred_ind_Y += video.wrk_width;
-            left_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            left_pred_Y[i+1]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             pred_ind_Y += video.wrk_width;
-            left_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
-            left_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            left_pred_U[i/2]= (cl_short)frames.reconstructed_U[pred_ind_UV];
+            left_pred_V[i/2]=  (cl_short)frames.reconstructed_V[pred_ind_UV];
             pred_ind_UV += (video.wrk_width>>1);
         }
     }
@@ -903,19 +956,19 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
     else {
         pred_ind_Y = Y_offset - video.wrk_width; pred_ind_UV = UV_offset - (video.wrk_width>>1);
         for (i = 0; i < 16; i+=2) {
-            top_pred_Y[i]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            top_pred_Y[i]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             ++pred_ind_Y;
-            top_pred_Y[i+1]= (int16_t)frames.reconstructed_Y[pred_ind_Y];
+            top_pred_Y[i+1]= (cl_short)frames.reconstructed_Y[pred_ind_Y];
             ++pred_ind_Y;
-            top_pred_U[i/2]= (int16_t)frames.reconstructed_U[pred_ind_UV];
-            top_pred_V[i/2]=  (int16_t)frames.reconstructed_V[pred_ind_UV];
+            top_pred_U[i/2]= (cl_short)frames.reconstructed_U[pred_ind_UV];
+            top_pred_V[i/2]=  (cl_short)frames.reconstructed_V[pred_ind_UV];
             ++pred_ind_UV;
         }
 		if (mb_col < (video.mb_width - 1)) {
-			top_pred_Y[16] = (int16_t)frames.reconstructed_Y[pred_ind_Y];
-			top_pred_Y[17] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 1];
-			top_pred_Y[18] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 2];
-			top_pred_Y[19] = (int16_t)frames.reconstructed_Y[pred_ind_Y + 3];
+			top_pred_Y[16] = (cl_short)frames.reconstructed_Y[pred_ind_Y];
+			top_pred_Y[17] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 1];
+			top_pred_Y[18] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 2];
+			top_pred_Y[19] = (cl_short)frames.reconstructed_Y[pred_ind_Y + 3];
 		} else {
 			top_pred_Y[16] = top_pred_Y[15];
 			top_pred_Y[17] = top_pred_Y[15];
@@ -931,10 +984,10 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
         top_left_pred_V = frames.reconstructed_V[UV_offset - (video.wrk_width>>1) - 1];
     }
 
-    uint8_t *block_offset, *test_offset;
+    cl_uchar *block_offset, *test_offset;
     for (b_row = 0; b_row < 4; ++b_row) // 4x4 luma blocks
     {
-		int16_t buf_pred = left_pred_Y[(b_row<<2) + 3];
+		cl_short buf_pred = left_pred_Y[(b_row<<2) + 3];
 		for (b_col = 0; b_col < 4; ++b_col)
 		{
 			b_num = (b_row<<2) + b_col;
@@ -992,14 +1045,14 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
 			residual[i*4 + 1] = top_pred_U[b_col*4 + 1] + left_pred_U[b_row*4 + i] - top_left_pred_U;
 			residual[i*4 + 2] = top_pred_U[b_col*4 + 2] + left_pred_U[b_row*4 + i] - top_left_pred_U;
 			residual[i*4 + 3] = top_pred_U[b_col*4 + 3] + left_pred_U[b_row*4 + i] - top_left_pred_U;
-			predictor[i*4] = (uint8_t)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
-			predictor[i*4 + 1] = (uint8_t)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
-			predictor[i*4 + 2] = (uint8_t)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
-			predictor[i*4 + 3] = (uint8_t)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
-			residual[i*4] = (int16_t)*(block_offset) - (int16_t)predictor[i*4];
-			residual[i*4 + 1] = (int16_t)*(block_offset + 1) - (int16_t)predictor[i*4 + 1];
-			residual[i*4 + 2] = (int16_t)*(block_offset + 2) - (int16_t)predictor[i*4 + 2];
-			residual[i*4 + 3] = (int16_t)*(block_offset + 3) - (int16_t)predictor[i*4 + 3];
+			predictor[i*4] = (cl_uchar)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
+			predictor[i*4 + 1] = (cl_uchar)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
+			predictor[i*4 + 2] = (cl_uchar)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
+			predictor[i*4 + 3] = (cl_uchar)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
+			residual[i*4] = (cl_short)*(block_offset) - (cl_short)predictor[i*4];
+			residual[i*4 + 1] = (cl_short)*(block_offset + 1) - (cl_short)predictor[i*4 + 1];
+			residual[i*4 + 2] = (cl_short)*(block_offset + 2) - (cl_short)predictor[i*4 + 2];
+			residual[i*4 + 3] = (cl_short)*(block_offset + 3) - (cl_short)predictor[i*4 + 3];
 			block_offset += video.wrk_width/2;
 		}
 		DCT4x4(residual, test_mb.coeffs[b_num+16]);
@@ -1025,14 +1078,14 @@ int test_inter_on_intra(int32_t mb_num, segment_ids id)
 			residual[i*4 + 1] = top_pred_V[b_col*4 + 1] + left_pred_V[b_row*4 + i] - top_left_pred_V;
 			residual[i*4 + 2] = top_pred_V[b_col*4 + 2] + left_pred_V[b_row*4 + i] - top_left_pred_V;
 			residual[i*4 + 3] = top_pred_V[b_col*4 + 3] + left_pred_V[b_row*4 + i] - top_left_pred_V;
-			predictor[i*4] = (uint8_t)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
-			predictor[i*4 + 1] = (uint8_t)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
-			predictor[i*4 + 2] = (uint8_t)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
-			predictor[i*4 + 3] = (uint8_t)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
-			residual[i*4] = (int16_t)*(block_offset) - (int16_t)predictor[i*4];
-			residual[i*4 + 1] = (int16_t)*(block_offset + 1) - (int16_t)predictor[i*4 + 1];
-			residual[i*4 + 2] = (int16_t)*(block_offset + 2) - (int16_t)predictor[i*4 + 2];
-			residual[i*4 + 3] = (int16_t)*(block_offset + 3) - (int16_t)predictor[i*4 + 3];
+			predictor[i*4] = (cl_uchar)(residual[i*4] < 0) ? 0 : ((residual[i*4] > 255) ? 255 : residual[i*4]);
+			predictor[i*4 + 1] = (cl_uchar)(residual[i*4 + 1] < 0) ? 0 : ((residual[i*4 + 1] > 255) ? 255 : residual[i*4 + 1]);
+			predictor[i*4 + 2] = (cl_uchar)(residual[i*4 + 2] < 0) ? 0 : ((residual[i*4 + 2] > 255) ? 255 : residual[i*4 + 2]);
+			predictor[i*4 + 3] = (cl_uchar)(residual[i*4 + 3] < 0) ? 0 : ((residual[i*4 + 3] > 255) ? 255 : residual[i*4 + 3]);
+			residual[i*4] = (cl_short)*(block_offset) - (cl_short)predictor[i*4];
+			residual[i*4 + 1] = (cl_short)*(block_offset + 1) - (cl_short)predictor[i*4 + 1];
+			residual[i*4 + 2] = (cl_short)*(block_offset + 2) - (cl_short)predictor[i*4 + 2];
+			residual[i*4 + 3] = (cl_short)*(block_offset + 3) - (cl_short)predictor[i*4 + 3];
 			block_offset += video.wrk_width/2;
 		}
 		DCT4x4(residual, test_mb.coeffs[b_num+20]);
@@ -1086,7 +1139,7 @@ void intra_transform()
 
 
 	// on key transform we wait for all other to end
-    int32_t mb_num;
+    cl_int mb_num;
 
     // now foreach macroblock
     for(mb_num = 0; mb_num < video.mb_count; ++mb_num)
@@ -1096,11 +1149,21 @@ void intra_transform()
         // BONUS: reconstruct in here too
 		predict_and_transform_mb(mb_num);
     }
-	if (video.GOP_size > 1) {
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-	}  
+	if (video.GOP_size > 1) 
+	{
+		if (video.do_loop_filter_on_gpu)
+		{
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+		}  
+		else
+		{
+			device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+			device.state_cpu = clEnqueueWriteBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+			device.state_cpu = clEnqueueWriteBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+		}
+	}
 
     return;
 }
