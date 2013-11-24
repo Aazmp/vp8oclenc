@@ -9,15 +9,15 @@ extern struct videoContext video;
 extern struct hostFrameBuffers frames;
 
 typedef struct {
-	uint8_t *output; /* ptr to next byte to be written */
-	uint32_t range; /* 128 <= range <= 255 */
-	uint32_t bottom; /* minimum value of remaining output */
-	int32_t bit_count; /* # of shifts before an output byte is available */
-	uint32_t count;
+	cl_uchar *output; /* ptr to next byte to be written */
+	cl_uint range; /* 128 <= range <= 255 */
+	cl_uint bottom; /* minimum value of remaining output */
+	cl_int bit_count; /* # of shifts before an output byte is available */
+	cl_uint count;
 } vp8_bool_encoder;
 
 
-static void init_bool_encoder(vp8_bool_encoder *e, uint8_t *start_partition)
+static void init_bool_encoder(vp8_bool_encoder *e, cl_uchar *start_partition)
 {
     e->output = start_partition;
     e->range = 255;
@@ -26,7 +26,7 @@ static void init_bool_encoder(vp8_bool_encoder *e, uint8_t *start_partition)
     e->count = 0;
 }
 
-static void add_one_to_output(uint8_t *q)
+static void add_one_to_output(cl_uchar *q)
 {
     while( *--q == 255)
         *q = 0;
@@ -37,7 +37,7 @@ static void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
 {
     /* split is approximately (range * prob) / 256 and, crucially,
     is strictly bigger than zero and strictly smaller than range */
-    uint32_t split = 1 + ( ((e->range - 1) * prob) >> 8);
+    cl_uint split = 1 + ( ((e->range - 1) * prob) >> 8);
     if( bool_value) {
         e->bottom += split; /* move up bottom of interval */
         e->range -= split; /* with corresponding decrease in range */
@@ -50,7 +50,7 @@ static void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
             add_one_to_output(e->output);
         e->bottom <<= 1;
         if( !--e->bit_count) {
-            *e->output++ = (uint8_t) (e->bottom >> 24);
+            *e->output++ = (cl_uchar) (e->bottom >> 24);
             e->count++;
             e->bottom &= (1 << 24) - 1;
             e->bit_count = 8;
@@ -99,7 +99,7 @@ for the partition being written */
 static void flush_bool_encoder(vp8_bool_encoder *e)
 {
     int c = e->bit_count;
-    uint32_t v = e->bottom;
+    cl_uint v = e->bottom;
     if( v & (1 << (32 - c)))
         add_one_to_output(e->output);
     v <<= c & 7;
@@ -109,7 +109,7 @@ static void flush_bool_encoder(vp8_bool_encoder *e)
     c = 4;
     while( --c >= 0) {
         /* write remaining data, possibly padded */
-        *e->output++ = (uint8_t) (v >> 24);
+        *e->output++ = (cl_uchar) (v >> 24);
         e->count++;
         v <<= 8;
     }
@@ -130,7 +130,7 @@ static void write_symbol( vp8_bool_encoder *vbe, encoding_symbol symbol, const P
 
 static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcount])
 {
-	int16_t abs_v;
+	cl_short abs_v;
 	// short values are 0..7
 	// long are 8..1023
 	// sizes in luma quarter-pixel or chroma eighth-pixel
@@ -212,10 +212,10 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
     return;
 }
 
-void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) // mostly copied from guide.pdf (converted to encoder)
+void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
 {
-	int32_t mb_row = mb_num / video.mb_width;
-	int32_t mb_col = mb_num % video.mb_width;
+	cl_int mb_row = mb_num / video.mb_width;
+	cl_int mb_col = mb_num % video.mb_width;
 	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
 	macroblock_extra_data imaginary_edata;
 
@@ -245,10 +245,10 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		case is 5." */
 	// in reference decoder "raw" stands for putting X and Y component together as int32
 	union mv mb_mv_list[4];
-	int32_t cnt[4];
+	cl_int cnt[4];
 	union mv *mb_mv = mb_mv_list;
 	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
-	int32_t *cntx  = cnt;
+	cl_int *cntx  = cnt;
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
 
 	// process above 
@@ -334,12 +334,12 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 		s_tmp.size = 2;
 		write_symbol(vbe, s_tmp, split_mv_probs, split_mv_tree);
 		
-		int32_t b_num;
+		cl_int b_num;
 		for (b_num = 0; b_num < 4; ++b_num)
 		{
 			// b_num being part number and block number
 			union mv left_mv, above_mv, this_mv;
-			int32_t b_col, b_row;
+			cl_int b_col, b_row;
 			b_row = b_num / 2; b_col = b_num % 2;
 			// read previous vectors (they are already updated, or zeros if it's border case)
 			if (b_col > 0) {
@@ -369,10 +369,10 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 			// here we take out computed vectors and update them to refence to previous
 			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
 			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-			int32_t lez = !(left_mv.raw); // flags for context for decoding submv
-			int32_t aez = !(above_mv.raw);
-			int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
-			int32_t ctx = 0;
+			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			cl_int aez = !(above_mv.raw);
+			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			cl_int ctx = 0;
 			if (lea&&lez) ctx = 4; 
 			else if (lea) ctx = 3;
 			else if (aez) ctx = 2; // it seems above ha higher priority here
@@ -434,15 +434,15 @@ void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, int32_t mb_num) /
 
 	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
-	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
-	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
+	mb_edata->base_mv.d.x = (cl_short)frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = (cl_short)frames.transformed_blocks[mb_num].vector_y[3]; 
 
 	return;
 }
 
-static void count_mv(vp8_bool_encoder *vbe, union mv v, uint32_t num[2][MVPcount], uint32_t denom[2][MVPcount])
+static void count_mv(vp8_bool_encoder *vbe, union mv v, cl_uint num[2][MVPcount], cl_uint denom[2][MVPcount])
 {
-	int16_t abs_v;
+	cl_short abs_v;
 
 	enum {IS_SHORT, SIGN, SHORT, BITS = SHORT + 8 - 1, LONG_WIDTH = 10}; 
 
@@ -457,8 +457,8 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, uint32_t num[2][MVPcount
 		s_tmp.bits = abs_v;
 		s_tmp.size = 3;
 		
-		uint32_t * const pn = &(num[0][SHORT]);
-		uint32_t * const pd = &(denom[0][SHORT]);
+		cl_uint * const pn = &(num[0][SHORT]);
+		cl_uint * const pd = &(denom[0][SHORT]);
 		tree_index i = 0;
 		do	{
 			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
@@ -501,8 +501,8 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, uint32_t num[2][MVPcount
 		encoding_symbol s_tmp;
 		s_tmp.bits = abs_v;
 		s_tmp.size = 3;
-		uint32_t * const pn = &(num[1][SHORT]);
-		uint32_t * const pd = &(denom[1][SHORT]);
+		cl_uint * const pn = &(num[1][SHORT]);
+		cl_uint * const pd = &(denom[1][SHORT]);
 		tree_index i = 0;
 		do	{
 			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
@@ -537,14 +537,14 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, uint32_t num[2][MVPcount
     return;
 }
 
-void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num) 
+void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num) 
 {
 	// it looks similar to funtion where we encode vectors
 	// BUT
 	// we don't write anything here
 	// just count probs
-	int32_t mb_row = mb_num / video.mb_width;
-	int32_t mb_col = mb_num % video.mb_width;
+	cl_int mb_row = mb_num / video.mb_width;
+	cl_int mb_col = mb_num % video.mb_width;
 	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
 	macroblock_extra_data imaginary_edata;
 
@@ -562,10 +562,10 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	if ((mb_col>0) && (mb_row>0)) above_left_edata = &(frames.e_data[mb_num-video.mb_width-1]);
 	else above_left_edata = &imaginary_edata;
 	union mv mb_mv_list[4];
-	int32_t cnt[4];
+	cl_int cnt[4];
 	union mv *mb_mv = mb_mv_list;
 	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
-	int32_t *cntx  = cnt;
+	cl_int *cntx  = cnt;
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
 	if (above_edata->is_inter_mb == 1)
 	{
@@ -612,7 +612,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
 	if (cnt[2] > cnt[1])
 	{
-		int32_t tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
+		cl_int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
 		tmp = mb_mv_list[1].raw; mb_mv_list[1].raw = mb_mv_list[2].raw; mb_mv_list[2].raw = tmp;
 	}
 	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
@@ -628,13 +628,13 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	// -
 	if (frames.transformed_blocks[mb_num].parts == are8x8)
 	{
-		int32_t b_num;
+		cl_int b_num;
 		for (b_num = 0; b_num < 4; ++b_num)
 		{
 			// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
 			// b_num being part number and block number
 			union mv left_mv, above_mv, this_mv;
-			int32_t b_col, b_row;
+			cl_int b_col, b_row;
 			b_row = b_num / 2; b_col = b_num % 2;
 			// read previous vectors (they are already updated, or zeros if it's border case)
 			if (b_col > 0) {
@@ -664,10 +664,10 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 			// here we take out computed vectors and update them to refence to previous
 			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
 			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-			int32_t lez = !(left_mv.raw); // flags for context for decoding submv
-			int32_t aez = !(above_mv.raw);
-			int32_t lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
-			int32_t ctx = 0;
+			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			cl_int aez = !(above_mv.raw);
+			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			cl_int ctx = 0;
 			if (lea&&lez) ctx = 4; 
 			else if (lea) ctx = 3;
 			else if (aez) ctx = 2;
@@ -696,17 +696,17 @@ void count_mv_probs(vp8_bool_encoder *vbe, int32_t mb_num)
 	else printf("\nUnsupported macroblock partitioning %d! (counting)\n",frames.transformed_blocks[mb_num].parts);
 	// according to spec vector [15] is set as base (we have 3th on that place)
 	// that will be referenced by below, right and below_right macroblocks
-	mb_edata->base_mv.d.x = (int16_t)frames.transformed_blocks[mb_num].vector_x[3];
-	mb_edata->base_mv.d.y = (int16_t)frames.transformed_blocks[mb_num].vector_y[3]; 
+	mb_edata->base_mv.d.x = (cl_short)frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = (cl_short)frames.transformed_blocks[mb_num].vector_y[3]; 
 	return;
 }
 
 
-void encode_header(uint8_t* partition) // return  size of encoded header
+void encode_header(cl_uchar* partition) // return  size of encoded header
 {
 	// TODO: move all functions used to count probabilities from root to additional function
 
-	int32_t prob_intra, prob_last, prob_gf, mb_num, segmentation_enabled;
+	cl_int prob_intra, prob_last, prob_gf, mb_num, segmentation_enabled;
 	const Prob *new_ymode_prob = ymode_prob;
 	const Prob *new_uv_mode_prob = uv_mode_prob;
 
@@ -726,7 +726,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	vp8_bool_encoder *vbe = (vp8_bool_encoder*)malloc(sizeof(vp8_bool_encoder));
 	// start of encoding header
 	// at the start of every partition - init
-	int32_t bool_offset;
+	cl_int bool_offset;
 	if (!frames.current_is_key_frame) 
 		bool_offset = 3;
 	else 
@@ -779,7 +779,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     write_flag(vbe, segmentation_enabled);     // segmentation test
 	if (segmentation_enabled) 
 	{
-		int32_t update_mb_segmentation_map, update_segment_feature_data;
+		cl_int update_mb_segmentation_map, update_segment_feature_data;
 		update_mb_segmentation_map = 1;
 		update_segment_feature_data = 1;
 		write_flag(vbe, update_mb_segmentation_map);
@@ -956,7 +956,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
     ---- End code block ---------------------------------------- */
     // so Flag is B(coeff_probs [i] [j] [k] [t]), but prob is L(8)
     // last one (and the code version) is right. Bitstream.pdf mistake there is.
-	{ int32_t i,j,k,l;
+	{ cl_int i,j,k,l;
     for (i = 0; i < 4; i++)
         for (j = 0; j < 8; j++)
             for (k = 0; k < 3; k++)
@@ -1040,7 +1040,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	|			}										|		|
 	|		}											|		|*/
 		// same here. spec says L(1), but it's B(p) !!11!!1one!!1oneone
-		{ int32_t i,j, mb_num;
+		{ cl_int i,j, mb_num;
 		for (i = 0; i < 2; ++i)
 			for (j = 0; j < 19; ++j) {
 				num_mv_context[i][j] = 0;
@@ -1052,7 +1052,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		for (i = 0; i < 2; ++i)
 			for (j = 0; j < 19; ++j) {
 				write_bool(vbe, vp8_mv_update_probs[i][j], 1);
-				new_mv_context[i][j] = (uint8_t)((num_mv_context[i][j] << 8) / denom_mv_context[i][j]);
+				new_mv_context[i][j] = (cl_uchar)((num_mv_context[i][j] << 8) / denom_mv_context[i][j]);
 				// standard says that these probs are stored as 7 bit values (7 most significant of total 8)
 				// so we have to set LSB = 0;
 				new_mv_context[i][j] &= (~(0x1));
@@ -1213,7 +1213,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 			s_tmp.bits = 7; // B_PRED = "111" for P-frames
 			s_tmp.size = 3; 
 			write_symbol(vbe, s_tmp, new_ymode_prob, ymode_tree);
-			int32_t b_num;
+			cl_int b_num;
 			const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
 			const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
 			for(b_num = 0; b_num < 16; ++b_num)
@@ -1245,7 +1245,7 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	// The start_code is a constant 3-byte pattern having value 0x9d012a. (byte0->2)
 
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
-	uint32_t buf;
+	cl_uint buf;
 	buf = (frames.current_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
 	buf |= (0 << 1); /* version 0 in bits 3-1 */
 	// version 0 - bicubic interpolation
@@ -1255,9 +1255,9 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 	buf |= 0x10; /* this bit indicates that the frame should be shown */
 	buf |= (vbe->count << 5); 
 
-	partition[0] = (uint8_t)(buf & 0xff);
-	partition[1] = (uint8_t)((buf>>8) & 0xff);
-	partition[2] = (uint8_t)((buf>>16) & 0xff);
+	partition[0] = (cl_uchar)(buf & 0xff);
+	partition[1] = (cl_uchar)((buf>>8) & 0xff);
+	partition[2] = (cl_uchar)((buf>>16) & 0xff);
 
 	if (frames.current_is_key_frame)
 	{
@@ -1265,10 +1265,10 @@ void encode_header(uint8_t* partition) // return  size of encoded header
 		partition[4] = 0x01;
 		partition[5] = 0x2a;
 		// upscaling == 0
-		partition[6] = (uint8_t)(video.dst_width & 0x00FF);
-		partition[7] = (uint8_t)((video.dst_width >> 8) & 0x00FF);
-		partition[8] = (uint8_t)(video.dst_height & 0x00FF);
-		partition[9] = (uint8_t)((video.dst_height >> 8) & 0x00FF);
+		partition[6] = (cl_uchar)(video.dst_width & 0x00FF);
+		partition[7] = (cl_uchar)((video.dst_width >> 8) & 0x00FF);
+		partition[8] = (cl_uchar)(video.dst_height & 0x00FF);
+		partition[9] = (cl_uchar)((video.dst_height >> 8) & 0x00FF);
 	}
 
 	return;
