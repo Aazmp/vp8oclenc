@@ -1,28 +1,28 @@
 void gather_frame()
 {
 	// get info about partition sizes
-	device.state_cpu = clFinish(device.commandQueue_cpu);
-	device.state_cpu = clEnqueueReadBuffer(device.commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(int32_t), frames.partition_sizes, 0, NULL, NULL);
+	device.state_cpu = clFinish(device.boolcoder_commandQueue_cpu);
+	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(cl_int), frames.partition_sizes, 0, NULL, NULL);
 	// write partition size data
 	// each size = 3 byte in little endian (LSB first)
-	int32_t i;
+	cl_int i;
 	for (i = 0; i < (video.number_of_partitions-1); ++i) // size of last is not written
 	{
-		uint32_t psize = frames.partition_sizes[i];
-		uint8_t psize_b = (uint8_t)(psize & 0xff);
+		cl_uint psize = frames.partition_sizes[i];
+		cl_uchar psize_b = (cl_uchar)(psize & 0xff);
 		frames.encoded_frame[frames.encoded_frame_size] = psize_b;
 		++frames.encoded_frame_size;
-		psize_b = (uint8_t)((psize >> 8) & 0xff);
+		psize_b = (cl_uchar)((psize >> 8) & 0xff);
 		frames.encoded_frame[frames.encoded_frame_size] = psize_b;
 		++frames.encoded_frame_size;
-		psize_b = (uint8_t)((psize >> 16) & 0xff);
+		psize_b = (cl_uchar)((psize >> 16) & 0xff);
 		frames.encoded_frame[frames.encoded_frame_size] = psize_b;
 		++frames.encoded_frame_size;
 	}
 	//copy coefficient-partitions
 	for (i = 0; i < video.number_of_partitions; ++i)
 	{
-		device.state_gpu = clEnqueueReadBuffer(device.commandQueue_cpu, device.partitions, CL_TRUE, i*video.partition_step, frames.partition_sizes[i], 
+		device.state_gpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.partitions, CL_TRUE, i*video.partition_step, frames.partition_sizes[i], 
 																								&frames.encoded_frame[frames.encoded_frame_size], 0, NULL, NULL);	
 		frames.encoded_frame_size += frames.partition_sizes[i];		
 	}
@@ -34,34 +34,34 @@ void write_output_file()
 {
 	// clock start in gather frame
 	// write ivf frame header (12 bytes) LITTLE ENDIAN
-	uint8_t byte;
-	uint64_t timestamp;
+	cl_uchar byte;
+	cl_ulong timestamp;
 	// 0-3 frame(vp8 frame) size
-	byte = (uint8_t)(frames.encoded_frame_size & 0xff);
+	byte = (cl_uchar)(frames.encoded_frame_size & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.encoded_frame_size >> 8) & 0xff);
+	byte = (cl_uchar)((frames.encoded_frame_size >> 8) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.encoded_frame_size >> 16) & 0xff);
+	byte = (cl_uchar)((frames.encoded_frame_size >> 16) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.encoded_frame_size >> 24) & 0xff);
+	byte = (cl_uchar)((frames.encoded_frame_size >> 24) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
 	// 64bit timestamp
-	timestamp = ((uint64_t)(frames.frame_number))*((uint64_t)video.timestep);
-	byte = (uint8_t)(timestamp & 0xff);
+	timestamp = ((cl_ulong)(frames.frame_number))*((cl_ulong)video.timestep);
+	byte = (cl_uchar)(timestamp & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 8) & 0xff);
+	byte = (cl_uchar)((timestamp >> 8) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 16) & 0xff);
+	byte = (cl_uchar)((timestamp >> 16) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 24) & 0xff);
+	byte = (cl_uchar)((timestamp >> 24) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 32) & 0xff);
+	byte = (cl_uchar)((timestamp >> 32) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 40) & 0xff);
+	byte = (cl_uchar)((timestamp >> 40) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 48) & 0xff);
+	byte = (cl_uchar)((timestamp >> 48) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((timestamp >> 56) & 0xff);
+	byte = (cl_uchar)((timestamp >> 56) & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
 	// now print frame
 	fwrite(frames.encoded_frame, 1, frames.encoded_frame_size, output_file.handle);
@@ -73,7 +73,7 @@ void write_output_header()
 {
 	fseek (output_file.handle, 0, SEEK_SET);
 	// header size 32bytes LITTLE ENDIAN
-	uint8_t byte;
+	cl_uchar byte;
 	// 0-3 "DKIF"
 	byte = 'D'; fwrite(&byte, 1, 1, output_file.handle);
 	byte = 'K'; fwrite(&byte, 1, 1, output_file.handle);
@@ -91,43 +91,43 @@ void write_output_header()
 	byte = '8'; fwrite(&byte, 1, 1, output_file.handle);
 	byte = '0'; fwrite(&byte, 1, 1, output_file.handle);
 	// 12-13 width
-	byte = (uint8_t)(video.dst_width & 0xff);
+	byte = (cl_uchar)(video.dst_width & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((video.dst_width >> 8) & 0xff); 
+	byte = (cl_uchar)((video.dst_width >> 8) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
 	// 14-15 height
-	byte = (uint8_t)(video.dst_height & 0xff);
+	byte = (cl_uchar)(video.dst_height & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((video.dst_height >> 8) & 0xff); 
+	byte = (cl_uchar)((video.dst_height >> 8) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
 	// 16-19 framerate
-	uint32_t fr = video.framerate;
-	byte = (uint8_t)(fr & 0xff);
+	cl_uint fr = video.framerate;
+	byte = (cl_uchar)(fr & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((fr >> 8) & 0xff); 
+	byte = (cl_uchar)((fr >> 8) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((fr >> 16) & 0xff); 
+	byte = (cl_uchar)((fr >> 16) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((fr >> 24) & 0xff); 
+	byte = (cl_uchar)((fr >> 24) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
 	// 20-23 timescale
-	byte = (uint8_t)(video.timescale & 0xff);
+	byte = (cl_uchar)(video.timescale & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((video.timescale >> 8) & 0xff); 
+	byte = (cl_uchar)((video.timescale >> 8) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((video.timescale >> 16) & 0xff); 
+	byte = (cl_uchar)((video.timescale >> 16) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((video.timescale >> 24) & 0xff); 
+	byte = (cl_uchar)((video.timescale >> 24) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
 	// 24-27 frame count
 	++frames.frame_number;
-	byte = (uint8_t)(frames.frame_number & 0xff);
+	byte = (cl_uchar)(frames.frame_number & 0xff);
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.frame_number >> 8) & 0xff); 
+	byte = (cl_uchar)((frames.frame_number >> 8) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.frame_number >> 16) & 0xff); 
+	byte = (cl_uchar)((frames.frame_number >> 16) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
-	byte = (uint8_t)((frames.frame_number >> 24) & 0xff); 
+	byte = (cl_uchar)((frames.frame_number >> 24) & 0xff); 
 	fwrite(&byte, 1, 1, output_file.handle);
 	--frames.frame_number;
 	// 28-32 not using
@@ -142,8 +142,8 @@ void write_output_header()
 int copy_with_padding()
 {
     	int i, j;
-    	uint8_t *srcY, *srcU, *srcV, *dstY, *dstU, *dstV;
-    	uint8_t ext_pixelY, ext_pixelU, ext_pixelV;
+    	cl_uchar *srcY, *srcU, *srcV, *dstY, *dstU, *dstV;
+    	cl_uchar ext_pixelY, ext_pixelU, ext_pixelV;
     	//first line copy
     	srcY = frames.tmp_Y;        srcU = frames.tmp_U;        srcV = frames.tmp_V;
     	dstY = frames.current_Y;    dstU = frames.current_U;    dstV = frames.current_V;
@@ -213,10 +213,10 @@ int get_yuv420_frame()
 	int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1);
 	int i, j, fragment_size = src_frame_size_full;
 
-	i = fread(frames.input_pack, sizeof(uint8_t), (src_frame_size_full % fragment_size), input_file.handle);
+	i = fread(frames.input_pack, sizeof(cl_uchar), (src_frame_size_full % fragment_size), input_file.handle);
 	while (i < src_frame_size_full)
 	{
-		j = fread(frames.input_pack + i, sizeof(uint8_t), fragment_size, input_file.handle);
+		j = fread(frames.input_pack + i, sizeof(cl_uchar), fragment_size, input_file.handle);
 		if (j < fragment_size) 
 			return 0;
 		i += j;
@@ -242,7 +242,7 @@ int get_yuv420_frame()
 		}
 	}
 	char buf[6];
-	i = fread(buf, sizeof(uint8_t), 6, input_file.handle);
+	i = fread(buf, sizeof(cl_uchar), 6, input_file.handle);
 	if ((i > 0) && ((buf[0] != 'F') || (buf[4] != 'E'))) {
 		printf("broken stream!\n");
 		return -1;
