@@ -1,0 +1,40 @@
+##################
+### 24.11.2013 ###
+##################
+
+1) Loop filter is done on CPU by default now. To filter on GPU use "-loop-filter-on-gpu" option.
+No point of using loop filter on GPU on video < 4K. On system FX6300+HD7850 loop filter on CPU gives +50% on 1920x1080 and +250% on 700x400.
+Loop filter can be overlapped with boolean encoding with options "-threads" > "-partitions" + 3.
+
+2) All types like int32_t, uint8_t... replaced with cl_int, cl_uchar...
+
+3) New options. "-partitions" is the old "-t" - number of partitions. "-threads" - thead number limit when doing loop filters and boolean coding at the same time.
+
+4) Now GPU GPU kernels execute in parallel where possible (through 3 command queues)
+
+
+P.S. Tried to replace IF-ELSE parts of block tokenizing in boolean coder, got no speed boost
+(usually blocks have a lot of zero coeffs after inter prediction and this part takes noticeable time only in key frames, so it's not the thing that should be optimized)
+
+##################
+### 21.11.2013 ###
+##################
+
+1) Now codec uses image objects for reference frames. 
+
+2) Interpolation is made on the run but still in sofware (OpenCL doesn't offer bicubic interpolation) 
+
+3) GPU code divided in some smaller pieces (dct kernel, idct kernel, wht kernel...) no more long kernels => faster compilation and smaller memory usage. 
+
+4) all 3 reference buffers used: ALTREF, GOLDEN, LAST - for search
+
+Some results: 
+1) memory usage decreased by huge amount. now it fits almost every GPU device. 
+
+2) speed a little bit slower (but amount of search done is higher) 
+
+3) -cl-opt-disable slows down working with images by 13x times (maybe because there is no option to read 32 bit from one channel image in OpenCL language and only compiler could improve this, maybe not) 
+
+4) on E350 (HD6410) performance is veeeeery slow (again because of image usage)
+
+TODO: pure C optimization (LUT instead of IFs, etc...), asm, visual scene changeand effects detection...
