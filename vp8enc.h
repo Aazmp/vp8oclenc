@@ -6,12 +6,11 @@
 #include <stdlib.h>
 #include <memory.h>
 #include <time.h>
-#include "stdint1.h"
 
-#define QUANT_TO_FILTER_LEVEL 1
+#define QUANT_TO_FILTER_LEVEL 4
 #define DEFAULT_ALTREF_RANGE 16
 
-static const uint8_t vp8_dc_qlookup[128] =
+static const cl_uchar vp8_dc_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  10,  11,  12,  13,  14,  15,  16,  17,  17,
      18,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  25,  25,  26,  27,  28,
@@ -23,7 +22,7 @@ static const uint8_t vp8_dc_qlookup[128] =
     122, 124, 126, 128, 130, 132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
 };
 
-static const int16_t vp8_ac_qlookup[128] =
+static const cl_short vp8_ac_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,
      20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,
@@ -35,21 +34,23 @@ static const int16_t vp8_ac_qlookup[128] =
     213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
 };
 
-//static const int32_t zigzag[16] = { 0, 1, 4, 8, 5, 2, 3,  6, 9, 12, 13, 10, 7, 11, 14, 15 };
-//static const int32_t inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
+//static const cl_int zigzag[16] = { 0, 1, 4, 8, 5, 2, 3,  6, 9, 12, 13, 10, 7, 11, 14, 15 };
+//static const cl_int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
 // not only inv zigzag is inverse for zigzag, but
 // A[i] = B[zigzag[i]] === A[inv_zigzag[i]] = B[i]
 
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
+//#define CPUPATH "CPU_kernels.cl"
+//#define GPUPATH "GPU_kernels.cl"
 
 union mv {
-	uint32_t raw;
+	cl_uint raw;
 	struct {
-		int16_t x, y;
+		cl_short x, y;
 	} d;
 };
 
@@ -74,40 +75,40 @@ typedef enum {
 } segment_ids;
 
 typedef struct {
-	int32_t y_ac_i; 
-	int32_t y_dc_idelta;
-	int32_t y2_dc_idelta;
-	int32_t y2_ac_idelta;
-	int32_t uv_dc_idelta;
-	int32_t uv_ac_idelta;
-	int32_t loop_filter_level;
-	int32_t mbedge_limit;
-	int32_t sub_bedge_limit;
-	int32_t interior_limit;
-	int32_t hev_threshold;
+	cl_int y_ac_i; 
+	cl_int y_dc_idelta;
+	cl_int y2_dc_idelta;
+	cl_int y2_ac_idelta;
+	cl_int uv_dc_idelta;
+	cl_int uv_ac_idelta;
+	cl_int loop_filter_level;
+	cl_int mbedge_limit;
+	cl_int sub_bedge_limit;
+	cl_int interior_limit;
+	cl_int hev_threshold;
 } segment_data;
 
 typedef struct { //in future resize to short or chars!!!
-    int16_t coeffs[25][16];
-    int32_t vector_x[4];
-    int32_t vector_y[4];
+    cl_short coeffs[25][16];
+    cl_int vector_x[4];
+    cl_int vector_y[4];
 	float SSIM;
-	int32_t non_zero_coeffs;
-	int32_t parts; //16x16 == 0; 8x8 == 1;
-	int32_t reference_frame;
+	cl_int non_zero_coeffs;
+	cl_int parts; //16x16 == 0; 8x8 == 1;
+	cl_int reference_frame;
 	segment_ids segment_id;
 } macroblock;
 
 typedef struct {
-	int32_t vector_x;
-	int32_t vector_y;
+	cl_int vector_x;
+	cl_int vector_y;
 } vector_net;
 typedef struct 
 {
 	union mv base_mv;
-	int32_t is_inter_mb;
-	int32_t parts;
-	int32_t mode[16];
+	cl_int is_inter_mb;
+	cl_int parts;
+	cl_int mode[16];
 } macroblock_extra_data;
 
 struct deviceContext
@@ -119,8 +120,13 @@ struct deviceContext
     cl_device_id *device_gpu;
     cl_program program_cpu;
     cl_program program_gpu;
-    cl_command_queue commandQueue_cpu;
-    cl_command_queue commandQueue_gpu;
+    cl_command_queue boolcoder_commandQueue_cpu;
+	cl_command_queue loopfilterY_commandQueue_cpu;
+	cl_command_queue loopfilterU_commandQueue_cpu;
+	cl_command_queue loopfilterV_commandQueue_cpu;
+    cl_command_queue commandQueue1_gpu;
+	cl_command_queue commandQueue2_gpu;
+	cl_command_queue commandQueue3_gpu;
     cl_int state_cpu;
     cl_int state_gpu;
 	cl_kernel reset_vectors;
@@ -139,6 +145,7 @@ struct deviceContext
 	cl_kernel num_div_denom;
 	cl_kernel normal_loop_filter_MBH;
 	cl_kernel normal_loop_filter_MBV;
+	cl_kernel loop_filter_frame;
 	cl_kernel count_SSIM_luma;
 	cl_kernel count_SSIM_chroma;
 	cl_kernel prepare_filter_mask;
@@ -176,8 +183,6 @@ struct deviceContext
 	cl_mem altref_frame_Y_downsampled_by4;
 	cl_mem altref_frame_Y_downsampled_by8;
 	cl_mem altref_frame_Y_downsampled_by16;
-    //cl_mem ref_frame_U; // both
-    //cl_mem ref_frame_V; // interpolated
     cl_mem reconstructed_frame_Y;
     cl_mem reconstructed_frame_U;
     cl_mem reconstructed_frame_V;
@@ -188,12 +193,11 @@ struct deviceContext
 	cl_mem residual_U;
 	cl_mem residual_V;
 	cl_mem golden_frame_Y;
-    cl_mem golden_frame_U;
-    cl_mem golden_frame_V;
-	cl_mem altref_frame_Y;
-    cl_mem altref_frame_U;
-    cl_mem altref_frame_V;
-	cl_mem last_vnet1;
+    cl_mem altref_frame_Y;
+	cl_mem cpu_frame_Y; //for a filter
+	cl_mem cpu_frame_U;
+	cl_mem cpu_frame_V;
+    cl_mem last_vnet1;
 	cl_mem golden_vnet1;
 	cl_mem altref_vnet1;
 	cl_mem last_vnet2;
@@ -203,7 +207,8 @@ struct deviceContext
 	cl_mem golden_metrics;
 	cl_mem altref_metrics;
 	cl_mem mb_mask;
-	cl_mem segments_data;
+	cl_mem segments_data_gpu;
+	cl_mem segments_data_cpu;
 	cl_mem third_context;
 	cl_mem coeff_probs;
 	cl_mem coeff_probs_denom;
@@ -213,7 +218,6 @@ struct deviceContext
     cl_mem partitions;
 	cl_mem partitions_sizes;
 
-	size_t gpu_work_items_limit;
 	size_t gpu_work_items_per_dim[1];
 	size_t gpu_work_group_size_per_dim[1];
 	size_t cpu_work_items_per_dim[1];
@@ -224,41 +228,44 @@ struct deviceContext
 struct videoContext
 {
     // size of input frame
-    int32_t src_width;
-    int32_t src_height;
-    int32_t src_frame_size_luma;
-    int32_t src_frame_size_chroma;
+    cl_int src_width;
+    cl_int src_height;
+    cl_int src_frame_size_luma;
+    cl_int src_frame_size_chroma;
     // size of output frame
-    int32_t dst_width;
-    int32_t dst_height;
-    int32_t dst_frame_size_luma;
-    int32_t dst_frame_size_chroma;
+    cl_int dst_width;
+    cl_int dst_height;
+    cl_int dst_frame_size_luma;
+    cl_int dst_frame_size_chroma;
     // size of padded frame
-    int32_t wrk_width;
-    int32_t wrk_height;
-    int32_t wrk_frame_size_luma;
-    int32_t wrk_frame_size_chroma;
+    cl_int wrk_width;
+    cl_int wrk_height;
+    cl_int wrk_frame_size_luma;
+    cl_int wrk_frame_size_chroma;
 
-    int32_t mb_width;
-    int32_t mb_height;
-    int32_t mb_count;
-    int32_t GOP_size;
-	int32_t altref_range;
+    cl_int mb_width;
+    cl_int mb_height;
+    cl_int mb_count;
+    cl_int GOP_size;
+	cl_int altref_range;
 
-    int32_t qi_min; 
-    int32_t qi_max;
-	int32_t altrefqi[4];
-	int32_t lastqi[4];
+    cl_int qi_min; 
+    cl_int qi_max;
+	cl_int altrefqi[4];
+	cl_int lastqi[4];
     
-	int32_t loop_filter_type;
-	int32_t loop_filter_sharpness;
+	cl_int loop_filter_type;
+	cl_int loop_filter_sharpness;
 
-	int32_t number_of_partitions;
-	int32_t partition_step;
+	cl_int number_of_partitions;
+	cl_int partition_step;
 
-	uint32_t timestep;
-	uint32_t timescale;
-	uint32_t framerate;
+	cl_uint timestep;
+	cl_uint timescale;
+	cl_uint framerate;
+
+	int do_loop_filter_on_gpu;
+	int thread_limit;
 
 	float SSIM_target;
 
@@ -266,53 +273,55 @@ struct videoContext
 
 struct hostFrameBuffers
 {
-    int32_t frame_number;
-	int32_t altref_frame_number;
-	int32_t golden_frame_number;
-	int32_t last_key_detect;
-	int32_t frames_until_key;
-	int32_t frames_until_altref;
-	int32_t replaced;
-    int32_t input_pack_size;
-    uint8_t *input_pack; // allbytes for YUV in one
-    uint8_t *current_Y;
-    uint8_t *current_U;
-    uint8_t *current_V;
-    uint8_t *tmp_Y;
-    uint8_t *tmp_U;
-    uint8_t *tmp_V;
-    uint8_t *reconstructed_Y;
-    uint8_t *reconstructed_U;
-    uint8_t *reconstructed_V;
-    uint8_t *last_U;
-    uint8_t *last_V;
+    cl_int frame_number;
+	cl_int altref_frame_number;
+	cl_int golden_frame_number;
+	cl_int last_key_detect;
+	cl_int frames_until_key;
+	cl_int frames_until_altref;
+	cl_int replaced;
+    cl_int input_pack_size;
+    cl_uchar *input_pack; // allbytes for YUV in one
+    cl_uchar *current_Y;
+    cl_uchar *current_U;
+    cl_uchar *current_V;
+    cl_uchar *tmp_Y;
+    cl_uchar *tmp_U;
+    cl_uchar *tmp_V;
+    cl_uchar *reconstructed_Y;
+    cl_uchar *reconstructed_U;
+    cl_uchar *reconstructed_V;
+    cl_uchar *last_U;
+    cl_uchar *last_V;
     macroblock *transformed_blocks;
 	macroblock_extra_data *e_data;
 	segment_data segments_data[4];
-    uint8_t *encoded_frame;
-	uint32_t encoded_frame_size;
-    uint8_t *current_frame_pos_in_pack;
-    int32_t current_is_key_frame;
-	int32_t current_is_altref_frame;
-	int32_t current_is_golden_frame;
-	int32_t prev_is_key_frame;
-	int32_t prev_is_altref_frame;
-	int32_t prev_is_golden_frame;
-	int32_t skip_prob;
+    cl_uchar *encoded_frame;
+	cl_uint encoded_frame_size;
+    cl_uchar *current_frame_pos_in_pack;
+    cl_int current_is_key_frame;
+	cl_int current_is_altref_frame;
+	cl_int current_is_golden_frame;
+	cl_int prev_is_key_frame;
+	cl_int prev_is_altref_frame;
+	cl_int prev_is_golden_frame;
+	cl_int skip_prob;
 	float new_SSIM;
 	
-	int32_t partition_sizes[8];
-	uint8_t *partitions;
-	uint8_t *partition_0;
-	int32_t partition_0_size;
+	cl_int partition_sizes[8];
+	cl_uchar *partitions;
+	cl_uchar *partition_0;
+	cl_int partition_0_size;
 
-	uint32_t new_probs[4][8][3][11];
-	uint32_t new_probs_denom[4][8][3][11];
+	cl_uint new_probs[4][8][3][11];
+	cl_uint new_probs_denom[4][8][3][11];
 
-	int32_t y_dc_q[4], y_ac_q[4], y2_dc_q[4], y2_ac_q[4], uv_dc_q[4], uv_ac_q[4];
+	cl_int y_dc_q[4], y_ac_q[4], y2_dc_q[4], y2_ac_q[4], uv_dc_q[4], uv_ac_q[4];
 
-	uint8_t header[128];
+	cl_uchar header[128];
 	int header_sz;
+
+	int threads_free;
 };
 
 struct fileContext
