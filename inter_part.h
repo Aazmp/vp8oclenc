@@ -318,7 +318,14 @@ void inter_transform()
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.last_vnet2);
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.last_vnet1);
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics1);
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+	// we use local memory in kernel, so we have to explicitly set work group size
+	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
+	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
+		device.gpu_work_group_size_per_dim[0] = 256;
+	else 
+		// just for tests on cpu (useful to control memory). CPU won't work with 256 kernels in one hardware thread
+		device.gpu_work_group_size_per_dim[0] = 8; 
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = clFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
@@ -327,7 +334,7 @@ void inter_transform()
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.golden_vnet2);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.golden_vnet1);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = clFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
@@ -337,7 +344,7 @@ void inter_transform()
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.altref_vnet2);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.altref_vnet1);
 		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics3);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = clFlush(device.commandQueue3_gpu);
 	}
 
