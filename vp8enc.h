@@ -42,8 +42,10 @@ static const cl_short vp8_ac_qlookup[128] =
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
+//#define CPUPATH "CPU_kernels.cl"
+//#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	cl_uint raw;
@@ -116,6 +118,7 @@ struct deviceContext
     cl_platform_id *platforms;
     cl_device_id *device_cpu;
     cl_device_id *device_gpu;
+	cl_device_type gpu_device_type;
     cl_program program_cpu;
     cl_program program_gpu;
     cl_command_queue boolcoder_commandQueue_cpu;
