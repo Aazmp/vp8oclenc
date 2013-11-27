@@ -8,7 +8,7 @@
 #include <time.h>
 
 #define QUANT_TO_FILTER_LEVEL 4
-#define DEFAULT_ALTREF_RANGE 16
+#define DEFAULT_ALTREF_RANGE 5
 
 static const cl_uchar vp8_dc_qlookup[128] =
 {
@@ -42,10 +42,10 @@ static const cl_short vp8_ac_qlookup[128] =
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-//#define CPUPATH "..\\Release\\CPU_kernels.cl"
-//#define GPUPATH "..\\Release\\GPU_kernels.cl"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
+//#define CPUPATH "CPU_kernels.cl"
+//#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	cl_uint raw;
@@ -148,6 +148,7 @@ struct deviceContext
 	cl_kernel loop_filter_frame;
 	cl_kernel count_SSIM_luma;
 	cl_kernel count_SSIM_chroma;
+	cl_kernel gather_SSIM;
 	cl_kernel prepare_filter_mask;
     /* add kernels */
 
@@ -203,9 +204,9 @@ struct deviceContext
 	cl_mem last_vnet2;
 	cl_mem golden_vnet2;
 	cl_mem altref_vnet2;
-	cl_mem last_metrics;
-	cl_mem golden_metrics;
-	cl_mem altref_metrics;
+	cl_mem metrics1;
+	cl_mem metrics2;
+	cl_mem metrics3;
 	cl_mem mb_mask;
 	cl_mem segments_data_gpu;
 	cl_mem segments_data_cpu;
