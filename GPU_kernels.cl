@@ -74,7 +74,7 @@ static const int vp8_ac_qlookup[128] =
     213, 217, 221, 225, 229, 234, 239, 245, 249, 254, 259, 264, 269, 274, 279, 284,
 };
 
-__constant int vector_diff_weight = 16;
+__constant int vector_diff_weight = 64;
 
 void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __L3) 
 {
@@ -496,7 +496,7 @@ __kernel void reset_vectors ( __global vector_net *const last_net, //0
 	return;
 }
 
-__kernel void downsample_x2(__global uchar *const src_frame, //0
+__kernel void downsample_x2(__global uchar *const src_frame, //0 // bilinear
 							__global uchar *const dst_frame, //1
 							const signed int src_width, //2
 							const signed int src_height) //3
@@ -552,21 +552,35 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	cy = (b8x8_num / (cut_width/8))*8;
 	
 	vector_x = 0; vector_y = 0;
-	if (pixel_rate < 16) //then we need to read previous stage vector
-	{
-		// we have to determine corresponding parameters of previous stage
-		cx /= 2; cy /=2;
-		b8x8_num = (cy/8)*net_width + (cx/8);
-		// and read vectors
-		vector_x = src_net[b8x8_num].vector_x;
-		vector_y = src_net[b8x8_num].vector_y;
-		vector_x /= pixel_rate;
-		vector_y /= pixel_rate;
-		cx *= 2; cy *=2; //return to current stage position
-	} 
-	//now block numbers in current stage
-	vector_x0 = vector_x; vector_y0 = vector_y;
 
+	// we have to determine corresponding parameters of previous stage
+	cx /= 2; cy /=2;
+	b8x8_num = (cy/8)*net_width + (cx/8);
+	// and read vectors
+	vector_x = src_net[b8x8_num].vector_x;
+	vector_y = src_net[b8x8_num].vector_y;
+	vector_x /= pixel_rate;
+	vector_y /= pixel_rate;
+	vector_x0 = vector_x; 
+	vector_y0 = vector_y;
+	cx *= 2; cy *=2; //return to current stage position
+	
+	/*
+	vector_x0 = 0; 
+	vector_y0 = 0;
+	for (py = cy - 8; py <= (cy + 8); py += 8)
+		for (px = cx - 8; px <= (cx + 8); px += 8)
+		{
+			px = select(px,0,px<0); px = select(px,width-8,px>(width-8));
+			py = select(py,0,py<0); py = select(py,height-8,py>(height-8));
+			b8x8_num = (py/16)*net_width + (px/16);
+			vector_x0 += src_net[b8x8_num].vector_x;
+			vector_y0 += src_net[b8x8_num].vector_y;
+		}
+	vector_x0 /= 9*pixel_rate;
+	vector_y0 /= 9*pixel_rate;
+	*/
+	
 	b8x8_num = (cy/8)*net_width + (cx/8);
 	ci = cy*width + cx;
 	
@@ -634,7 +648,7 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			
-			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*vector_diff_weight*2;
+			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
 						
 			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
 			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
@@ -1063,116 +1077,6 @@ void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const s
 	return;
 }
 
-/*__kernel void luma_search_2step_unopt //searching in interpolated picture
-						( 	__global uchar *const current_frame, //0
-							__read_only image2d_t ref_frame, //1
-							__global vector_net *const net, //2
-							__global vector_net *const ref_net, //3
-							__global int *const ref_Bdiff, //4
-							const int width, //5
-							const int height) //6
-{
-	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
-	__private int4 DL0, DL1, DL2, DL3;
-	
-	__private int start_x, end_x, start_y, end_y, vector_x, vector_y,vector_x0,vector_y0; 
-	__private int MinDiff, Diff, b8x8_num;  
-	__private int cx, cy, px, py; //coords
-	__private int2 coords,d;
-		
-	// now b8x8_num represents absolute number of 8x8 block (net_index)
-	b8x8_num = get_global_id(0);
-	vector_x = net[b8x8_num].vector_x;
-	vector_y = net[b8x8_num].vector_y;
-	vector_x *= 4;	vector_y *= 4;
-	vector_x0 = vector_x;
-	vector_y0 = vector_y;
-
-	cx = (b8x8_num % (width/8))*8;
-	cy = (b8x8_num / (width/8))*8;
-		
-	Diff = cy*width + cx;
-	CL0 = vload8(0, current_frame + Diff); Diff += width;
-	CL1 = vload8(0, current_frame + Diff); Diff += width;
-	CL2 = vload8(0, current_frame + Diff); Diff += width;
-	CL3 = vload8(0, current_frame + Diff); Diff += width;
-	CL4 = vload8(0, current_frame + Diff); Diff += width;
-	CL5 = vload8(0, current_frame + Diff); Diff += width;
-	CL6 = vload8(0, current_frame + Diff); Diff += width;
-	CL7 = vload8(0, current_frame + Diff);
-	
-	MinDiff = 0xffff;
-	cx *= 4; cy *= 4;
-	
-	start_x = cx + vector_x - 2;	end_x = cx + vector_x + 2;
-	start_y = cy + vector_y - 2;	end_y = cy + vector_y + 2;
-	
-	vector_x = 0; vector_y = 0; 
-	
-	start_x = (start_x < 0) ? 0 : start_x;
-	end_x = (end_x > (width*4 - 32)) ? (width*4 - 32) : end_x;
-	start_y = (start_y < 0) ? 0 : start_y;
-	end_y = (end_y > (height*4 - 32)) ? (height*4 - 32) : end_y;
-
-	#pragma unroll 1
-	for (px = start_x; px <= end_x; ++px)
-	{
-		#pragma unroll 1
-		for (py = start_y; py <= end_y; ++py)
-		{
-			d.x=px%4; d.y=py%4;
-			d *= 2;
-			coords.x = px/4; coords.y = py/4;
-			construct(ref_frame, coords, d, &DL0, &DL1, &DL2, &DL3);
-			DL0 = convert_int4(CL0.s0123) - DL0;
-			DL1 = convert_int4(CL1.s0123) - DL1;
-			DL2 = convert_int4(CL2.s0123) - DL2;
-			DL3 = convert_int4(CL3.s0123) - DL3;
-			weight(&DL0, &DL1, &DL2, &DL3);	
-			Diff = DL0.x;
-			coords.x = (px + 16)/4; coords.y = py/4; 
-			construct(ref_frame, coords, d, &DL0, &DL1, &DL2, &DL3);
-			DL0 = convert_int4(CL0.s4567) - DL0;
-			DL1 = convert_int4(CL1.s4567) - DL1;
-			DL2 = convert_int4(CL2.s4567) - DL2;
-			DL3 = convert_int4(CL3.s4567) - DL3;
-			weight(&DL0, &DL1, &DL2, &DL3);	
-			Diff += DL0.x;
-			coords.x = px/4; coords.y = (py + 16)/4; 
-			construct(ref_frame, coords, d, &DL0, &DL1, &DL2, &DL3);
-			DL0 = convert_int4(CL4.s0123) - DL0;
-			DL1 = convert_int4(CL5.s0123) - DL1;
-			DL2 = convert_int4(CL6.s0123) - DL2;
-			DL3 = convert_int4(CL7.s0123) - DL3;
-			weight(&DL0, &DL1, &DL2, &DL3);	
-			Diff += DL0.x;
-			coords.x = (px + 16)/4; coords.y = (py + 16)/4;
-			construct(ref_frame, coords, d, &DL0, &DL1, &DL2, &DL3);
-			DL0 = convert_int4(CL4.s4567) - DL0;
-			DL1 = convert_int4(CL5.s4567) - DL1;
-			DL2 = convert_int4(CL6.s4567) - DL2;
-			DL3 = convert_int4(CL7.s4567) - DL3;
-			weight(&DL0, &DL1, &DL2, &DL3);	
-			Diff += DL0.x;
-			
-			d /= 2;
-			Diff += (int)(abs(px-cx-vector_x0) + abs(py-cy-vector_y0))*vector_diff_weight;
-			
-			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
-			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
-			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
-    	} 
-    } 
-
-	MinDiff -= ((int)abs(vector_x - vector_x0) + (int)abs(vector_y - vector_y0))*vector_diff_weight;
-	
-	ref_net[b8x8_num].vector_x = vector_x;
-	ref_net[b8x8_num].vector_y = vector_y;
-	ref_Bdiff[b8x8_num] = MinDiff;
-	
-	return;
-}  */
-
 __kernel void luma_search_2step //searching in interpolated picture
 						( 	__global uchar *const current_frame, //0
 							__read_only image2d_t ref_frame, //1
@@ -1201,15 +1105,53 @@ __kernel void luma_search_2step //searching in interpolated picture
 		
 	// now b8x8_num represents absolute number of 8x8 block (net_index)
 	b8x8_num = get_global_id(0);
-	pdata1.s4 = net[b8x8_num].vector_x;
-	pdata1.s5 = net[b8x8_num].vector_y;
+	pdata1.s4 = net[b8x8_num].vector_x; //vector_x = ...
+	pdata1.s5 = net[b8x8_num].vector_y; //vector_y = ...
 	pdata1.s4 *= 4;	pdata1.s5 *= 4;
-	pdata1.s6 = pdata1.s4;
-	pdata1.s7 = pdata1.s5;
-
-	pdata2.s0 = (b8x8_num % (width/8))*8;
-	pdata2.s1 = (b8x8_num / (width/8))*8;
-		
+	pdata1.s6 = pdata1.s4; // vector_x0 = vector_x
+	pdata1.s7 = pdata1.s5; // vector_y0 = vector_y
+	
+	pdata2.s0 = (b8x8_num % (width/8))*8; // x = ...
+	pdata2.s1 = (b8x8_num / (width/8))*8; // y = ...
+	
+	/*
+	// vector around (Diff as index)
+	// left (if x >= 8 or else the same as current)
+	Diff = select(b8x8_num, b8x8_num - 1, pdata2.s0 >= 8);
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// upleft (ix >= 8 and y>=8)
+	Diff = select(Diff, Diff - (width/8), pdata2.s1 >= 8);
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// up
+	Diff = select(b8x8_num, b8x8_num - (width/8), pdata2.s1 >= 8);
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// upright
+	Diff = select(Diff, Diff + 1, pdata2.s0 < (width - 8));
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// right
+	Diff = select(b8x8_num, b8x8_num + 1, pdata2.s0 < (width - 8));
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// downright
+	Diff = select(Diff, Diff + (width/8), pdata2.s1 < (width - 8));
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// down
+	Diff = select(b8x8_num, b8x8_num + (width/8), pdata2.s1 < (width - 8));
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	// downleft
+	Diff = select(Diff, Diff - 1, pdata2.s0 >= 8);
+	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
+	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
+	pdata1.s6 /= 9;
+	pdata1.s7 /= 9;
+	*/
+	
 	Diff = pdata2.s1*width + pdata2.s0;
 	LDS[(int)get_local_id(0)] = vload4(0, current_frame + Diff);; 
 	LDS[(int)get_local_size(0) + (int)get_local_id(0)] = vload4(0, current_frame + Diff + 4);  Diff += width;
@@ -1643,12 +1585,12 @@ __kernel void idct4x4(__global uchar *const recon_frame, //0
 	return;
 }
 
-__kernel void count_SSIM_luma
-						(__global uchar *frame1, //0
-						__global uchar *frame2, //1
-						__global macroblock *MBs, //2
-                        signed int width, //3
-						const int segment_id)// 4														
+__kernel void count_SSIM_luma(__global uchar *const frame1, //0
+								__global uchar *const frame2, //1
+								__global macroblock *const MBs, //2
+								__global float *const metric, //3
+								signed int width, //4
+								const int segment_id)//5
 {
     __private int mb_num, i;
     __private uchar16 FL0, FL1, FL2, FL3, FL4, FL5, FL6, FL7, FL8, FL9, FL10, FL11, FL12, FL13, FL14, FL15;
@@ -1763,21 +1705,18 @@ __kernel void count_SSIM_luma
 	D2 = select(0.0f,0.02f*D1,D1 > 4);
 	C -= D2;
 	
-	D1 = MBs[mb_num].SSIM;
-	C += D1;
-	C /= 3;
-	MBs[mb_num].SSIM = C;
+	metric[mb_num] = C;
 
 	return;
 }												
 
 __kernel void count_SSIM_chroma
-						(__global uchar *frame1, //0
-						__global uchar *frame2, //1
-						__global macroblock *MBs, //2
-                        signed int cwidth, //3
-						const int segment_id, //4
-						const int reset)// 5	
+						(__global uchar *const frame1, //0
+						__global uchar *const frame2, //1
+						__global macroblock *const MBs, //2
+						__global float *const metric, //3
+                        signed int cwidth, //4
+						const int segment_id)// 5
 {
 	const float c1 = 0.01f*0.01f*255*255;
 	const float c2 = 0.03f*0.03f*255*255;
@@ -1843,12 +1782,19 @@ __kernel void count_SSIM_chroma
 	C = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
 	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
 	
-	D1 = MBs[mb_num].SSIM;
-	C += (reset == 1) ? 0 : D1;
-	MBs[mb_num].SSIM = C;
+	metric[mb_num] = C;
 	return;
 }
 
+void __kernel gather_SSIM(__global float *const metric1, //0
+							__global float *const metric2, //1
+							__global float *const metric3, //2
+							__global macroblock *const MBs) //3
+{
+	__private int mb_num = get_global_id(0);
+	MBs[mb_num].SSIM = (metric1[mb_num] + metric2[mb_num] + metric3[mb_num])/3;
+	return;
+}
 
 #ifdef LOOP_FILTER
 __kernel void prepare_filter_mask(__global macroblock *const MBs,
