@@ -1,4 +1,14 @@
 ##################
+### 27.11.2013 ###
+##################
+
+1) Bugfix with local memory - now work group size is 256 instad of auto.
+2) Bugfix with reseting vectors. 
+Not all vector nets were set to zero which resulted in corrupted vectors and artifacts along bottom border.
+3) Little change in vector dependencies that allow lower bitrates now.
+
+
+##################
 ### 24.11.2013 ###
 ##################
 
