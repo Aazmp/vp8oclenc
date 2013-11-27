@@ -416,9 +416,9 @@ void finalize()
 		clReleaseMemObject(device.altref_vnet1);
 		clReleaseMemObject(device.altref_vnet2);
 		clReleaseMemObject(device.mb_mask);
-		clReleaseMemObject(device.last_metrics);
-		clReleaseMemObject(device.golden_metrics);
-		clReleaseMemObject(device.altref_metrics);
+		clReleaseMemObject(device.metrics1);
+		clReleaseMemObject(device.metrics2);
+		clReleaseMemObject(device.metrics3);
 		clReleaseKernel(device.reset_vectors);
 		clReleaseKernel(device.downsample);
 		clReleaseKernel(device.luma_search_1step);
