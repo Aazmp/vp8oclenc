@@ -1,4 +1,3 @@
-
 typedef enum
 {
 	DC_PRED, V_PRED, H_PRED, TM_PRED, B_PRED, 
@@ -271,7 +270,7 @@ static int weight(cl_short * r) //r - 4x4 residual to be weighted through vp8 DC
 	for (i = 0; i < 16; ++i)
 		a1 += (tmp[i] < 0) ? -tmp[i] : tmp[i];
 
-	return i;
+	return a1;
 }
 
 static void quant4x4(cl_short *coeffs, cl_int dc_q, cl_int ac_q)
