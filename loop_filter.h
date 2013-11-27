@@ -34,8 +34,8 @@ static void prepare_on_cpu()
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterY_commandQueue_cpu, device.prepare_filter_mask, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
 	// need to return info about non_zero coeffs
-	device.state_cpu = clEnqueueReadBuffer(device.loopfilterY_commandQueue_cpu, device.transformed_blocks_cpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
-	
+	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+
 	for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
 		if (frames.transformed_blocks[mb_num].non_zero_coeffs > 0) 
 			++frames.skip_prob;
