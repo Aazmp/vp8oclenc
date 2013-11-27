@@ -53,11 +53,12 @@ int init_all()
 	device.context_cpu = clCreateContext(NULL, 1, device.device_cpu, NULL, NULL, &device.state_cpu);
 	if (video.GOP_size > 1) {
 		device.device_gpu = (cl_device_id*)malloc(sizeof(cl_device_id));
-		device.state_gpu = clGetDeviceIDs(device.platforms[0], CL_DEVICE_TYPE_GPU, 1, device.device_gpu, NULL);
+		device.gpu_device_type = CL_DEVICE_TYPE_GPU;
+		device.state_gpu = clGetDeviceIDs(device.platforms[0], device.gpu_device_type, 1, device.device_gpu, NULL);
 		i = 1;
 		while ((device.state_gpu != CL_SUCCESS) && (i < (int)num_platforms)) 
 		{
-			device.state_cpu = clGetDeviceIDs(device.platforms[i], CL_DEVICE_TYPE_GPU, 1, device.device_gpu, NULL);
+			device.state_cpu = clGetDeviceIDs(device.platforms[i], device.gpu_device_type, 1, device.device_gpu, NULL);
 			++i;
 		}
 		if (device.state_gpu != CL_SUCCESS)
@@ -381,18 +382,24 @@ int init_all()
 	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(cl_uint), NULL , &device.state_cpu);
 
 	if (video.GOP_size > 1) {
-		/*__kernel void reset_vectors ( __global vector_net *const last_net, //0
-								__global vector_net *const golden_net, //1
-								__global vector_net *const altref_net, //2
-								__global int *const last_Bdiff, //3
-								__global int *const golden_Bdiff, //4
-								__global int *const altref_Bdiff) //5*/
+		/*__kernel void reset_vectors ( __global vector_net *const last_net1, //0
+								__global vector_net *const last_net2, //1
+								__global vector_net *const golden_net1, //2
+								__global vector_net *const golden_net2, //3
+								__global vector_net *const altref_net1, //4
+								__global vector_net *const altref_net2, //5
+								__global int *const last_Bdiff, //6
+								__global int *const golden_Bdiff, //7
+								__global int *const altref_Bdiff) //8*/
 		device.state_gpu = clSetKernelArg(device.reset_vectors, 0, sizeof(cl_mem), &device.last_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 1, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 3, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 4, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 5, sizeof(cl_mem), &device.metrics3);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 1, sizeof(cl_mem), &device.last_vnet2);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 2, sizeof(cl_mem), &device.golden_vnet1);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 3, sizeof(cl_mem), &device.golden_vnet2);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 4, sizeof(cl_mem), &device.altref_vnet1);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 5, sizeof(cl_mem), &device.altref_vnet2);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 6, sizeof(cl_mem), &device.metrics1);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 7, sizeof(cl_mem), &device.metrics2);
+		device.state_gpu = clSetKernelArg(device.reset_vectors, 8, sizeof(cl_mem), &device.metrics3);
 
 		/*__kernel void downsample(__global uchar *const src_frame, //0
 									__global uchar *const dst_frame, //1
