@@ -475,20 +475,29 @@ void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Li
 }
 
 
-__kernel void reset_vectors ( __global vector_net *const last_net, //0
-								__global vector_net *const golden_net, //1
-								__global vector_net *const altref_net, //2
-								__global int *const last_Bdiff, //3
-								__global int *const golden_Bdiff, //4
-								__global int *const altref_Bdiff) //5
+__kernel void reset_vectors ( __global vector_net *const last_net1, //0
+								__global vector_net *const last_net2, //1
+								__global vector_net *const golden_net1, //2
+								__global vector_net *const golden_net2, //3
+								__global vector_net *const altref_net1, //4
+								__global vector_net *const altref_net2, //5
+								__global int *const last_Bdiff, //6
+								__global int *const golden_Bdiff, //7
+								__global int *const altref_Bdiff) //8
 {
 	int b8x8_num = get_global_id(0);
-	last_net[b8x8_num].vector_x = 0; 
-	last_net[b8x8_num].vector_y = 0;
-	golden_net[b8x8_num].vector_x = 0; 
-	golden_net[b8x8_num].vector_y = 0;
-	altref_net[b8x8_num].vector_x = 0; 
-	altref_net[b8x8_num].vector_y = 0;
+	last_net1[b8x8_num].vector_x = 0; 
+	last_net1[b8x8_num].vector_y = 0;
+	last_net2[b8x8_num].vector_x = 0; 
+	last_net2[b8x8_num].vector_y = 0;
+	golden_net1[b8x8_num].vector_x = 0; 
+	golden_net1[b8x8_num].vector_y = 0;
+	golden_net2[b8x8_num].vector_x = 0; 
+	golden_net2[b8x8_num].vector_y = 0;
+	altref_net1[b8x8_num].vector_x = 0; 
+	altref_net1[b8x8_num].vector_y = 0;
+	altref_net2[b8x8_num].vector_x = 0; 
+	altref_net2[b8x8_num].vector_y = 0;
 	last_Bdiff[b8x8_num] = 0x7fffffff;
 	golden_Bdiff[b8x8_num] = 0x7fffffff;
 	altref_Bdiff[b8x8_num] = 0x7fffffff;
@@ -554,16 +563,17 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	vector_x = 0; vector_y = 0;
 
 	// we have to determine corresponding parameters of previous stage
-	cx /= 2; cy /=2;
-	b8x8_num = (cy/8)*net_width + (cx/8);
+	px = cx/2; py = cy/2;
+	b8x8_num = (py/8)*net_width + (px/8);
 	// and read vectors
 	vector_x = src_net[b8x8_num].vector_x;
 	vector_y = src_net[b8x8_num].vector_y;
 	vector_x /= pixel_rate;
 	vector_y /= pixel_rate;
+	vector_x = select(vector_x,0,pixel_rate>8);
+	vector_y = select(vector_y,0,pixel_rate>8);
 	vector_x0 = vector_x; 
 	vector_y0 = vector_y;
-	cx *= 2; cy *=2; //return to current stage position
 	
 	/*
 	vector_x0 = 0; 
@@ -648,14 +658,16 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			
+			
+			// this helps keep neighbouring vectors close
 			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
-						
+			
+			
 			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
 			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
 			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;			
     	} 
     } 
-	
 	
 	dst_net[b8x8_num].vector_x = (vector_x*pixel_rate);
 	dst_net[b8x8_num].vector_y = (vector_y*pixel_rate);
@@ -1099,7 +1111,7 @@ __kernel void luma_search_2step //searching in interpolated picture
 	
 	__private int MinDiff, Diff, b8x8_num;  
 	
-	__local uchar4 LDS[8*1024]; //32kb
+	__local uchar4 LDS[4*1024]; //16kb
 	
 	// the code has become unreadable, but it's better not to use defines (compiler probably go mad)
 		
@@ -1169,7 +1181,7 @@ __kernel void luma_search_2step //searching in interpolated picture
 	LDS[mad24((int)get_local_size(0),13,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
 	LDS[mad24((int)get_local_size(0),14,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
 	LDS[mad24((int)get_local_size(0),15,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); 
-	
+
 	MinDiff = 0x7fff;
 	pdata2.s0 *= 4; pdata2.s1 *= 4;
 	
