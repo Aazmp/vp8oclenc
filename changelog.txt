@@ -1,4 +1,16 @@
 ##################
+### 30.11.2013 ###
+##################
+
+1) restructured code into directories
+2) added linux x64 and x32 gcc builds (tested on the same AMD+AMD but + Mint15(x64))
+2') for linux builds code has been slightly modified (not in rep) like: change \ to /, delete conio.h::getch(), io.h(windows one), setmode().
+3) added win32 build from VS2008
+4) kernels in bin directory are the kernels corresponding to binaries, not being developed ones.
+5) "IO.h" renamed to "encIO.h" to move further from <io.h>
+
+
+##################
 ### 27.11.2013 ###
 ##################
 

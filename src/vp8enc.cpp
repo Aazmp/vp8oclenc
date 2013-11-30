@@ -13,7 +13,7 @@ struct deviceContext device; //both GPU and CPU OpenCL-devices (different handle
 struct videoContext video; //properties of the video (sizes, indicies, vector limits...)
 struct hostFrameBuffers frames; // host buffers, frame number, current/previous frame flags...
 
-#include "IO.h"
+#include "encIO.h"
 #include "init.h"
 #include "intra_part.h"
 #include "inter_part.h"
