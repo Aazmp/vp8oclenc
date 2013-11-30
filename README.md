@@ -14,7 +14,10 @@ http://www.webmproject.org/; http://multimedia.cx/eggs/category/vp8/;
 Uses OpenCL. CPU for coefficient partitions boolean coding.
 GPU for motion vector search, transform for inter-frames, interpolation and loop filters.
 
-Launched only on AMD+AMD+Win7.
+Launched only on AMD+AMD+Win7(x32).
+And with some changes (\ to /, delte getch() or switch from conio.h to ncurses, delete io.h, delete setmode()) tested on AMD+AMD+Linux 32 and 64.
+Strange part is:
+output files on 64 and 32 a little different (less then 2KB difference for 32.6 MB video)
 
 Intra coding is done in usual host code part. Has almost no error checking. 
 
