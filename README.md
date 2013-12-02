@@ -2,7 +2,7 @@ vp8oclenc
 =========
 
 upd: 
-now changуlog in changelog.txt
+now changelog in changelog.txt
 
 main:
 Don't know what to write here...
