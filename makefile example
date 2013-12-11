@@ -1,7 +1,15 @@
 # for amd app sdk on windows with default path
-g++ vp8enc.cpp entropy_host.cpp -L"C:/Program Files (x86)/AMD APP/lib/x86" -lOpenCL -o vp8oclenc
+g++ vp8enc.cpp entropy_host.cpp -I"<appsdk-include-path>" -L"<appsdk-lib-path>" -lOpenCL -o vp8oclenc
 
-on Linux possible path could be /opt/AMD APP...
+for AMD
+default AMD APP SDK path on windows:
+C:/Program Files (x86)/AMD APP
+on Linux:
+/opt/AMDAPP
 
-Or rename .cpp to .c. 
+then it followed by /lib/x86 or /lib/x86_64 for libs
+and /include for headers
+
+
+Also renaming .cpp to .c is ok.
 Code is in C, .cpp is just for visual studio, that doesn't have C99 compiler.
