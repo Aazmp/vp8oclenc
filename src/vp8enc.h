@@ -6,6 +6,7 @@
 #include <memory.h>
 #include <time.h>
 
+
 #define QUANT_TO_FILTER_LEVEL 4
 #define DEFAULT_ALTREF_RANGE 5
 

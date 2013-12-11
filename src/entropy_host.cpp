@@ -1,1094 +1,1275 @@
-// string to print when "-h" option is met
-char small_help[] = "\n"
-					"-i\t\t:  input file path\n"
-					"-o\t\t:  output file path\n"
-					"-qmin\t\t:  min quantizer index (also the only index for key frames)\n"
-					"-qmax\t\t:  max quantizer index\n"
-					"-g\t\t:  Group of Pictures size\n"
-					"-ls\t\t:  loop filter sharpness\n"
-					"-partitions\t: amount of partitions for boolean encoding\n"
-					"\t\t: (also threads for boolean coding)\n"
-					"-threads\t: limit number of threads launched at once\n"
-					"\t\t: (prevent overlapping of loop filters and bool coding)\n"
-					"\t\t: all partitions are still encoded in parallel\n"
-					"\t\t: (even if number of partitions > threads limit)\n"
-					"\n"
-					"-SSIM-target\t:  tries to keep SSIM of encoded frame higher than this value;\n"
-					"\t\t:  format 0.XX (just write XX digits without 0.)\n"
-					"-altref-range\t:  amount of frames between using altref;\n"
-					"\t\t:  altref are used with lower quantizer and reference previous altref"
-					"\n\n"
-					;
+// A mix from Multimedia Mike's encoder, spec, vpxenc and new parts
 
-int init_all()
+#include "vp8enc.h"
+#include "entropy_host.h"
+
+extern struct fileContext input_file, reconstructed_file;
+extern struct deviceContext device;
+extern struct videoContext video;
+extern struct hostFrameBuffers frames;
+
+typedef struct {
+	cl_uchar *output; /* ptr to next byte to be written */
+	cl_uint range; /* 128 <= range <= 255 */
+	cl_uint bottom; /* minimum value of remaining output */
+	cl_int bit_count; /* # of shifts before an output byte is available */
+	cl_uint count;
+} vp8_bool_encoder;
+
+
+static void init_bool_encoder(vp8_bool_encoder *e, cl_uchar *start_partition)
 {
-	video.timestep = 1;
-	video.timescale = 1;
+    e->output = start_partition;
+    e->range = 255;
+    e->bottom = 0;
+    e->bit_count = 24;
+    e->count = 0;
+}
 
-    // init platform, device, context, program, kernels
-    int i;
-	cl_uint num_platforms;
-	clGetPlatformIDs(2, NULL, &num_platforms);
-	if (num_platforms < 1)
-	{
-		printf("no OpenCL platforms found \n");
-		return -1;
-	}
-	device.platforms = (cl_platform_id*)malloc(num_platforms*sizeof(cl_platform_id));
-	device.state_cpu = clGetPlatformIDs(num_platforms, device.platforms, NULL);
-	device.device_cpu = (cl_device_id*)malloc(sizeof(cl_device_id));
-	device.state_cpu = clGetDeviceIDs(device.platforms[0], CL_DEVICE_TYPE_CPU, 1, device.device_cpu, NULL);
-	i = 1;
-	while ((device.state_cpu != CL_SUCCESS) && (i < (int)num_platforms)) 
-	{
-		device.state_cpu = clGetDeviceIDs(device.platforms[i], CL_DEVICE_TYPE_CPU, 1, device.device_cpu, NULL);
-		++i;
-	}
-	if (device.state_cpu != CL_SUCCESS)
-	{
-		printf("no CPU device found :) \n");
-		return -1;
-	}
+static void add_one_to_output(cl_uchar *q)
+{
+    while( *--q == 255)
+        *q = 0;
+    ++*q;
+}
 
-	device.context_cpu = clCreateContext(NULL, 1, device.device_cpu, NULL, NULL, &device.state_cpu);
-	if (video.GOP_size > 1) {
-		device.device_gpu = (cl_device_id*)malloc(sizeof(cl_device_id));
-		device.state_gpu = clGetDeviceIDs(device.platforms[0], CL_DEVICE_TYPE_GPU, 1, device.device_gpu, NULL);
-		i = 1;
-		while ((device.state_gpu != CL_SUCCESS) && (i < (int)num_platforms)) 
+static void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
+{
+    /* split is approximately (range * prob) / 256 and, crucially,
+    is strictly bigger than zero and strictly smaller than range */
+    cl_uint split = 1 + ( ((e->range - 1) * prob) >> 8);
+    if( bool_value) {
+        e->bottom += split; /* move up bottom of interval */
+        e->range -= split; /* with corresponding decrease in range */
+    } else
+        e->range = split;
+    while( e->range < 128)
+    {
+        e->range <<= 1;
+        if( e->bottom & (1 << 31)) /* detect carry */
+            add_one_to_output(e->output);
+        e->bottom <<= 1;
+        if( !--e->bit_count) {
+            *e->output++ = (cl_uchar) (e->bottom >> 24);
+            e->count++;
+            e->bottom &= (1 << 24) - 1;
+            e->bit_count = 8;
+        }
+    }
+}
+
+static void write_flag(vp8_bool_encoder *e, int b)
+{
+    write_bool(e, 128, (b)?1:0);
+}
+
+static void write_literal(vp8_bool_encoder *e, int i, int size)
+{
+    int mask = 1 << (size - 1);
+    while (mask)
+    {
+        write_flag(e, !((i & mask) == 0));
+        mask >>= 1;
+    }
+}
+
+static void write_quantizer_delta(vp8_bool_encoder *e, int delta)
+{
+    int sign;
+    if (delta < 0)
+    {
+        delta *= -1;
+        sign = 1;
+    }
+    else
+        sign = 0;
+
+    if (!delta)
+        write_flag(e, 0);
+    else
+    {
+        write_flag(e, 1);
+        write_literal(e, delta, 4);
+        write_flag(e, sign);
+    }
+}
+
+/* Call this function (exactly once) after encoding the last bool value
+for the partition being written */
+static void flush_bool_encoder(vp8_bool_encoder *e)
+{
+    int c = e->bit_count;
+    cl_uint v = e->bottom;
+    if( v & (1 << (32 - c)))
+        add_one_to_output(e->output);
+    v <<= c & 7;
+    c >>= 3;
+    while( --c >= 0)
+        v <<= 8;
+    c = 4;
+    while( --c >= 0) {
+        /* write remaining data, possibly padded */
+        *e->output++ = (cl_uchar) (v >> 24);
+        e->count++;
+        v <<= 8;
+    }
+}
+
+static void write_symbol( vp8_bool_encoder *vbe, encoding_symbol symbol, const Prob *const p, Tree t)
+{
+    tree_index i = 0;
+
+    do
+    {
+        const int b = (symbol.bits >> --symbol.size) & 1;
+        write_bool(vbe, p[i>>1], b);
+        i = t[i+b];
+    }
+    while (symbol.size);
+}
+
+static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcount])
+{
+	cl_short abs_v;
+	// short values are 0..7
+	// long are 8..1023
+	// sizes in luma quarter-pixel or chroma eighth-pixel
+
+	enum {IS_SHORT, SIGN, SHORT, BITS = SHORT + 8 - 1, LONG_WIDTH = 10}; //dublicate one in entropy_host.h
+	//       0    ,  1  ,   2  ,   9  =   2   + 8 - 1,    10
+	// Y(Row) goes first and uses mvc[0]
+
+	abs_v = (v.d.y < 0) ? (-v.d.y) : v.d.y; // sign and absolute value encoded
+	if (abs_v <= 7)
+	{
+		write_bool(vbe, mvc[0][IS_SHORT], 0); //according to spec-decoder flag '0' for a short range
+		encoding_symbol s_tmp;
+		s_tmp.bits = abs_v;
+		s_tmp.size = 3;// they all 000..111	
+		const Prob *const p = &(mvc[0][SHORT]);
+		tree_index i = 0;
+	    do
 		{
-			device.state_cpu = clGetDeviceIDs(device.platforms[i], CL_DEVICE_TYPE_GPU, 1, device.device_gpu, NULL);
-			++i;
+			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
+			write_bool(vbe, p[i>>1], b);
+			i = small_mvtree[i+b];
 		}
-		if (device.state_gpu != CL_SUCCESS)
-		{
-			printf("no GPU device found \n");
-			return -1;
-		}
-		device.context_gpu = clCreateContext(NULL, 1, device.device_gpu, NULL, NULL, &device.state_gpu);
+		while (s_tmp.size);
+
+		if (abs_v != 0)
+			write_bool(vbe, mvc[0][SIGN], (v.d.y < 0)); // no sign for zero
+	}
+	else
+	{
+		write_bool(vbe, mvc[0][IS_SHORT], 1); //'1' for long range
+		int i;
+		for(i = 0; i < 3; ++i)
+			write_bool(vbe, mvc[0][BITS + i], ((abs_v >> i) & 1));
+		for(i = LONG_WIDTH - 1; i > 3; --i)
+			write_bool(vbe, mvc[0][BITS + i], ((abs_v >> i) & 1));
+		if (abs_v & 0xFFF0)
+			write_bool(vbe, mvc[0][BITS + 3], ((abs_v >> 3) & 1));
+		// we have to ranges <=7 and >7
+		// if in all higher bits (except least 4) there are zeros
+		// then bit-3 has to be one or it would be another range 
+		// and another encoding sequence
+		write_bool(vbe, mvc[0][SIGN], (v.d.y < 0)); 
 	}
 
-	FILE *program_handle;
-	cl_uint program_size;
+	// X(Collumn) goes next and uses mvc[1]
+	abs_v = (v.d.x < 0) ? (-v.d.x) : v.d.x; // sign and absolute value encoded
+	if (abs_v <= 7)
+	{
+		write_bool(vbe, mvc[1][IS_SHORT], 0); 
+		encoding_symbol s_tmp;
+		s_tmp.bits = abs_v;
+		s_tmp.size = 3;// they all 000..111
+		const Prob *const p = &(mvc[1][SHORT]);
+		tree_index i = 0;
+	    do
+		{
+			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
+			write_bool(vbe, p[i>>1], b);
+			i = small_mvtree[i+b];
+		}
+		while (s_tmp.size);
 
-	// program sources in text files
-	// GPU:
-	if (video.GOP_size > 1) {
-		printf("reading GPU program...\n");
-		program_handle = fopen(GPUPATH, "rb");
-		fseek(program_handle, 0, SEEK_END);
-		program_size = ftell(program_handle);
-		rewind(program_handle); // set to start
-		char** device_program_source_gpu = (char**)malloc(sizeof(char*));
-		*device_program_source_gpu = (char*)malloc(program_size+1);
-		(*device_program_source_gpu)[program_size] = '\0';
-		int deb = fread(*device_program_source_gpu, sizeof(char), program_size, program_handle);
-		fclose(program_handle);
-		device.program_gpu = clCreateProgramWithSource(device.context_gpu, 1, (const char**)device_program_source_gpu, NULL, &device.state_gpu);
-		printf("building GPU program...\n");
-		if (video.do_loop_filter_on_gpu) {
-			const char gpu_options[] = "-cl-std=CL1.2 -DLOOP_FILTER";
-			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
+		if (abs_v == 0)	return; // no sign for zero, no encoding
+	}
+	else
+	{
+		write_bool(vbe, mvc[1][IS_SHORT], 1); //'1' for long range
+		int i;
+		for(i = 0; i < 3; ++i)
+			write_bool(vbe, mvc[1][BITS + i], ((abs_v >> i) & 1));
+		for(i = LONG_WIDTH - 1; i > 3; --i)
+			write_bool(vbe, mvc[1][BITS + i], ((abs_v >> i) & 1));
+		if (abs_v & 0xFFF0)
+			write_bool(vbe, mvc[1][BITS + 3], ((abs_v >> 3) & 1));
+	}
+	write_bool(vbe, mvc[1][SIGN], (v.d.x < 0));
+
+    return;
+}
+
+void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
+{
+	cl_int mb_row = mb_num / video.mb_width;
+	cl_int mb_col = mb_num % video.mb_width;
+	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
+	macroblock_extra_data imaginary_edata;
+
+	imaginary_edata.base_mv.raw = 0;
+	imaginary_edata.is_inter_mb = 0; 
+	imaginary_edata.parts = are16x16;
+
+	mb_edata = &(frames.e_data[mb_num]);
+	mb_edata->parts=frames.transformed_blocks[mb_num].parts;
+	mb_edata->base_mv.d.x = frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = frames.transformed_blocks[mb_num].vector_y[3];
+	if (mb_row>0) above_edata = &(frames.e_data[mb_num-video.mb_width]);
+	else above_edata = &imaginary_edata;
+	if (mb_col>0) left_edata = &(frames.e_data[mb_num-1]);
+	else left_edata = &imaginary_edata;
+	if ((mb_col>0) && (mb_row>0)) above_left_edata = &(frames.e_data[mb_num-video.mb_width-1]);
+	else above_left_edata = &imaginary_edata;
+	// we begin at spot, where spec decoder calls find near mvs
+	// but we do an encoder
+	//there only two types of macroblocks: SPLITMV (real ones), INTRA_like (imaginary blocks above the frame and to the left)
+	// for each macroblock there is a list of three vectors mv[3] (above, left, above_left),
+	// and "weights" cnt[4];
+	/* "The first three entries in the return value cnt are (in order)
+		weighted census values for "zero", "nearest", and "near" vectors.
+		The final value indicates the extent to which SPLITMV was used by the
+		neighboring macroblocks. The largest possible "weight" value in each
+		case is 5." */
+	// in reference decoder "raw" stands for putting X and Y component together as int32
+	union mv mb_mv_list[4];
+	cl_int cnt[4];
+	union mv *mb_mv = mb_mv_list;
+	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
+	cl_int *cntx  = cnt;
+	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
+
+	// process above 
+	// if above is INTRA-like then no action is taken, else above is SPLITMV (all we have)
+	// the same for other 2 processes
+	if (above_edata->is_inter_mb == 1)
+	{
+		if (above_edata->base_mv.raw)
+		{
+			++mb_mv; mb_mv->raw = above_edata->base_mv.raw;
+			++cntx;
+		}
+		*cntx += 2;
+	}
+
+	// process left
+	if (left_edata->is_inter_mb == 1)
+	{
+		if (left_edata->base_mv.raw)
+		{
+		// not using golden or altref, no sign correction(?)
+			if (left_edata->base_mv.raw != mb_mv->raw)
+			{
+				++mb_mv; mb_mv->raw = left_edata->base_mv.raw;
+				++cntx;
+			}
+			*cntx += 2;
+		} 
+		else cnt[0] += 2;
+	}
+
+	// process above_left
+	if (above_left_edata->is_inter_mb == 1)
+	{
+		if (above_left_edata->base_mv.raw)
+		{
+			if (above_left_edata->base_mv.raw != mb_mv->raw)
+			{
+				++mb_mv; mb_mv->raw = above_left_edata->base_mv.raw;
+				++cntx;
+			}
+			*cntx += 1;
+		} else cnt[0] += 1;
+	}
+
+	// if we have three distinct MVs
+	if (cnt[3]) /* See if above-left MV can be merged with NEAREST */	
+		if (mb_mv->raw == mb_mv_list[1].raw)
+			cnt[1] += 1;
+	// cnt[CNT_SPLITMV] = ((above->base.y_mode == SPLITMV) + (left->base.y_mode == SPLITMV)) * 2 + (aboveleft->base.y_mode == SPLITMV);
+	cnt[3] = (
+		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		)*2 + 
+		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
+	if (cnt[2] > cnt[1])
+	{
+		int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
+		tmp = mb_mv_list[1].raw; mb_mv_list[1].raw = mb_mv_list[2].raw; mb_mv_list[2].raw = tmp;
+	}
+	// Use near_mvs[CNT_BEST] to store the "best" MV. Note that this storage shares the same address as near_mvs[CNT_ZEROZERO].
+	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
+	// since we never use NEARMV or NEARESTMV modes, we need only cnt[0] (BEST)
+	// this position equals end of dixie.c function find_near_mvs with best_mv in mb_mv_list[0];
+	//also we have cnt[] array as index-set for probabilities array
+	Prob mv_ref_p[4];
+	mv_ref_p[0] = vp8_mode_contexts[cnt[0]][0]; // vp8_mode_contexts[6][4]
+	mv_ref_p[1] = vp8_mode_contexts[cnt[1]][1]; // defined in
+	mv_ref_p[2] = vp8_mode_contexts[cnt[2]][2]; // entropy_host.h
+	mv_ref_p[3] = vp8_mode_contexts[cnt[3]][3];
+
+	encoding_symbol s_tmp;
+
+	if (frames.transformed_blocks[mb_num].parts == are8x8)
+	{
+		// encode SPLITMV mode
+		s_tmp.bits = 15; // "1111"
+		s_tmp.size = 4;
+		write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+
+		// encode sub_mv_mode
+		s_tmp.bits = 2; // mv_quarters = "10" 
+		s_tmp.size = 2;
+		write_symbol(vbe, s_tmp, split_mv_probs, split_mv_tree);
+		
+		cl_int b_num;
+		for (b_num = 0; b_num < 4; ++b_num)
+		{
+			// b_num being part number and block number
+			union mv left_mv, above_mv, this_mv;
+			cl_int b_col, b_row;
+			b_row = b_num / 2; b_col = b_num % 2;
+			// read previous vectors (they are already updated, or zeros if it's border case)
+			if (b_col > 0) {
+				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+			}
+			else if (left_edata->is_inter_mb == 1) {
+				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
+			} 
+			else {
+				left_mv.d.x = 0; // because there are zeroes there
+				left_mv.d.y = 0;
+			}
+			if (b_row > 0) {
+				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
+			}
+			else if (above_edata->is_inter_mb == 1) {
+				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
+			} 
+			else {
+				above_mv.d.x = 0; 
+				above_mv.d.y = 0;
+			}
+			// here we take out computed vectors and update them to refence to previous
+			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
+			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
+			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			cl_int aez = !(above_mv.raw);
+			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			cl_int ctx = 0;
+			if (lea&&lez) ctx = 4; 
+			else if (lea) ctx = 3;
+			else if (aez) ctx = 2; // it seems above ha higher priority here
+			else if (lez) ctx = 1;
+			if (this_mv.raw == left_mv.raw) {// LEFT = "0" 
+				s_tmp.bits = 0;
+				s_tmp.size = 1;
+				//write_symbol(encoder, symbol, *probs, tree[])
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else if (this_mv.raw == above_mv.raw) { // ABOVE = "10" 
+				s_tmp.bits = 2;
+				s_tmp.size = 2;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else if (this_mv.raw == 0) { // ZERO = "110"
+				s_tmp.bits = 6;
+				s_tmp.size = 3;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+			}
+			else { // NEW = "111" 
+				s_tmp.bits = 7;
+				s_tmp.size = 3;
+				write_symbol(vbe, s_tmp, submv_ref_probs2[ctx], submv_ref_tree);
+				// and here we subtract best_mv found for this macroblock and stored in mb_mv_list[0]
+				this_mv.d.x -= mb_mv_list[0].d.x;
+				this_mv.d.y -= mb_mv_list[0].d.y;
+				write_mv(vbe, this_mv, new_mv_context);
+			}
+
+		}
+	}
+	else if (frames.transformed_blocks[mb_num].parts == are16x16)
+	{
+		if (mb_edata->base_mv.raw == 0) {
+			s_tmp.bits = 0;
+			s_tmp.size = 1;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else if (mb_edata->base_mv.raw == mb_mv_list[1].raw) {
+			s_tmp.bits = 2; 
+			s_tmp.size = 2;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else if (mb_edata->base_mv.raw == mb_mv_list[2].raw) {
+			s_tmp.bits = 6;
+			s_tmp.size = 3;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+		} else {
+			s_tmp.bits = 14; 
+			s_tmp.size = 4;
+			write_symbol(vbe, s_tmp, mv_ref_p, mv_ref_tree);
+			union mv mv_delta;
+			mv_delta.d.x = mb_edata->base_mv.d.x - mb_mv_list[0].d.x;
+			mv_delta.d.y = mb_edata->base_mv.d.y - mb_mv_list[0].d.y;
+			write_mv(vbe, mv_delta, new_mv_context);
+		}
+	}
+	else printf("\nUnsupported macroblock partitioning %d! (encoding)\n",frames.transformed_blocks[mb_num].parts);
+
+
+	// according to spec vector [15] is set as base (we have 3th on that place)
+	// that will be referenced by below, right and below_right macroblocks
+	mb_edata->base_mv.d.x = (cl_short)frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = (cl_short)frames.transformed_blocks[mb_num].vector_y[3]; 
+
+	return;
+}
+
+static void count_mv(vp8_bool_encoder *vbe, union mv v, cl_uint num[2][MVPcount], cl_uint denom[2][MVPcount])
+{
+	cl_short abs_v;
+
+	enum {IS_SHORT, SIGN, SHORT, BITS = SHORT + 8 - 1, LONG_WIDTH = 10}; 
+
+	++(denom[0][IS_SHORT]);
+	++(denom[1][IS_SHORT]);
+
+	abs_v = (v.d.y < 0) ? (-v.d.y) : v.d.y;
+	if (abs_v <= 7)
+	{
+		++(num[0][IS_SHORT]);
+		encoding_symbol s_tmp;
+		s_tmp.bits = abs_v;
+		s_tmp.size = 3;
+		
+		cl_uint * const pn = &(num[0][SHORT]);
+		cl_uint * const pd = &(denom[0][SHORT]);
+		tree_index i = 0;
+		do	{
+			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
+			pn[i>>1] += (1 - b);
+			++(pd[i>>1]);
+			i = small_mvtree[i+b];
+		}
+		while (s_tmp.size);
+
+		if (abs_v != 0) {
+			num[0][SIGN] += (v.d.y > 0);
+			++(denom[0][SIGN]);
+		}
+	}
+	else
+	{
+		//no numerator increment for long
+		int i;
+		for(i = 0; i < 3; ++i) {
+			num[0][BITS + i] += (1 - ((abs_v >> i) & 1));
+			++(denom[0][BITS + i]);
+		}
+		for(i = LONG_WIDTH - 1; i > 3; --i) {
+			num[0][BITS + i] += (1 - ((abs_v >> i) & 1));
+			++(denom[0][BITS + i]);
+		}
+		if (abs_v & 0xFFF0) {
+			num[0][BITS + 3] += (1 - ((abs_v >> 3) & 1));
+			++(denom[0][BITS + 3]);
+		}
+		num[0][SIGN] += (v.d.y > 0);
+		++(denom[0][SIGN]);
+	}
+	
+
+	abs_v = (v.d.x < 0) ? (-v.d.x) : v.d.x; 
+	if (abs_v <= 7)
+	{
+		++(num[1][IS_SHORT]);
+		encoding_symbol s_tmp;
+		s_tmp.bits = abs_v;
+		s_tmp.size = 3;
+		cl_uint * const pn = &(num[1][SHORT]);
+		cl_uint * const pd = &(denom[1][SHORT]);
+		tree_index i = 0;
+		do	{
+			const int b = (s_tmp.bits >> --s_tmp.size) & 1;
+			pn[i>>1] += (1 - b);
+			++(pd[i>>1]);
+			i = small_mvtree[i+b];
+		}
+		while (s_tmp.size);
+
+		if (abs_v == 0)
+			return; 
+	}
+	else
+	{
+		int i;
+		for(i = 0; i < 3; ++i) {
+			num[1][BITS + i] += (1 - ((abs_v >> i) & 1));
+			++(denom[1][BITS + i]);
+		}
+		for(i = LONG_WIDTH - 1; i > 3; --i) {
+			num[1][BITS + i] += (1 - ((abs_v >> i) & 1));
+			++(denom[1][BITS + i]);
+		}
+		if (abs_v & 0xFFF0) {
+			num[1][BITS + 3] += (1 - ((abs_v >> 3) & 1));
+			++(denom[1][BITS + 3]);
+		}
+
+	}
+	num[1][SIGN] += (v.d.x > 0);
+	++(denom[1][SIGN]);
+    return;
+}
+
+void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num) 
+{
+	// it looks similar to funtion where we encode vectors
+	// BUT
+	// we don't write anything here
+	// just count probs
+	cl_int mb_row = mb_num / video.mb_width;
+	cl_int mb_col = mb_num % video.mb_width;
+	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
+	macroblock_extra_data imaginary_edata;
+
+	imaginary_edata.base_mv.raw = 0;
+	imaginary_edata.parts = are16x16;
+
+	mb_edata = &(frames.e_data[mb_num]);
+	mb_edata->parts = frames.transformed_blocks[mb_num].parts;
+	mb_edata->base_mv.d.x = frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = frames.transformed_blocks[mb_num].vector_y[3];
+	if (mb_row>0) above_edata = &(frames.e_data[mb_num-video.mb_width]);
+	else above_edata = &imaginary_edata;
+	if (mb_col>0) left_edata = &(frames.e_data[mb_num-1]);
+	else left_edata = &imaginary_edata;
+	if ((mb_col>0) && (mb_row>0)) above_left_edata = &(frames.e_data[mb_num-video.mb_width-1]);
+	else above_left_edata = &imaginary_edata;
+	union mv mb_mv_list[4];
+	cl_int cnt[4];
+	union mv *mb_mv = mb_mv_list;
+	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
+	cl_int *cntx  = cnt;
+	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
+	if (above_edata->is_inter_mb == 1)
+	{
+		if (above_edata->base_mv.raw)
+		{
+			++mb_mv; mb_mv->raw = above_edata->base_mv.raw;
+			++cntx;
+		}
+		*cntx += 2;
+	}
+	if (left_edata->is_inter_mb == 1)
+	{
+		if (left_edata->base_mv.raw)
+		{
+			if (left_edata->base_mv.raw != mb_mv->raw)
+			{
+				++mb_mv; mb_mv->raw = left_edata->base_mv.raw;
+				++cntx;
+			}
+			*cntx += 2;
+		} 
+		else cnt[0] += 2;
+	}
+	if (above_left_edata->is_inter_mb == 1)
+	{
+		if (above_left_edata->base_mv.raw)
+		{
+			if (above_left_edata->base_mv.raw != mb_mv->raw)
+			{
+				++mb_mv; mb_mv->raw = above_left_edata->base_mv.raw;
+				++cntx;
+			}
+			*cntx += 1;
+		} else cnt[0] += 1;
+	}
+
+	if (cnt[3]) 
+		if (mb_mv->raw == mb_mv_list[1].raw)
+			cnt[1] += 1;
+	cnt[3] = (
+		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		)*2 + 
+		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
+	if (cnt[2] > cnt[1])
+	{
+		cl_int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
+		tmp = mb_mv_list[1].raw; mb_mv_list[1].raw = mb_mv_list[2].raw; mb_mv_list[2].raw = tmp;
+	}
+	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
+	Prob mv_ref_p[4];
+	mv_ref_p[0] = vp8_mode_contexts[cnt[0]][0]; 
+	mv_ref_p[1] = vp8_mode_contexts[cnt[1]][1]; 
+	mv_ref_p[2] = vp8_mode_contexts[cnt[2]][2];
+	mv_ref_p[3] = vp8_mode_contexts[cnt[3]][3];
+
+	// encode SPLITMV mode
+	// -		we count only now
+	// encode sub_mv_mode
+	// -
+	if (frames.transformed_blocks[mb_num].parts == are8x8)
+	{
+		cl_int b_num;
+		for (b_num = 0; b_num < 4; ++b_num)
+		{
+			// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
+			// b_num being part number and block number
+			union mv left_mv, above_mv, this_mv;
+			cl_int b_col, b_row;
+			b_row = b_num / 2; b_col = b_num % 2;
+			// read previous vectors (they are already updated, or zeros if it's border case)
+			if (b_col > 0) {
+				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
+			}
+			else if (left_edata->is_inter_mb == 1) {
+				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
+				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
+			} 
+			else {
+				left_mv.d.x = 0; // because there are zeroes there
+				left_mv.d.y = 0;
+			}
+			if (b_row > 0) {
+				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
+			}
+			else if (above_edata->is_inter_mb == 1) {
+				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
+				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
+			} 
+			else {
+				above_mv.d.x = 0; 
+				above_mv.d.y = 0;
+			}
+			// here we take out computed vectors and update them to refence to previous
+			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
+			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
+			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			cl_int aez = !(above_mv.raw);
+			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			cl_int ctx = 0;
+			if (lea&&lez) ctx = 4; 
+			else if (lea) ctx = 3;
+			else if (aez) ctx = 2;
+			else if (lez) ctx = 1;
+			if ((this_mv.raw != left_mv.raw) &&
+				(this_mv.raw != above_mv.raw) &&
+				(this_mv.raw != 0)) 
+			{ // NEW = "111" 
+				this_mv.d.x -= mb_mv_list[0].d.x;
+				this_mv.d.y -= mb_mv_list[0].d.y;
+				count_mv(vbe, this_mv, num_mv_context, denom_mv_context);
+			}
+		}
+	}
+	else if (frames.transformed_blocks[mb_num].parts == are16x16)
+	{
+		if ((mb_edata->base_mv.raw != 0) && 
+			(mb_edata->base_mv.raw != mb_mv_list[1].raw) &&
+			(mb_edata->base_mv.raw != mb_mv_list[2].raw)) {
+			union mv mv_delta;
+			mv_delta.d.x = mb_edata->base_mv.d.x - mb_mv_list[0].d.x;
+			mv_delta.d.y = mb_edata->base_mv.d.y - mb_mv_list[0].d.y;
+			count_mv(vbe, mv_delta, num_mv_context, denom_mv_context);
+		}
+	}
+	else printf("\nUnsupported macroblock partitioning %d! (counting)\n",frames.transformed_blocks[mb_num].parts);
+	// according to spec vector [15] is set as base (we have 3th on that place)
+	// that will be referenced by below, right and below_right macroblocks
+	mb_edata->base_mv.d.x = (cl_short)frames.transformed_blocks[mb_num].vector_x[3];
+	mb_edata->base_mv.d.y = (cl_short)frames.transformed_blocks[mb_num].vector_y[3]; 
+	return;
+}
+
+
+void encode_header(cl_uchar* partition) // return  size of encoded header
+{
+	// TODO: move all functions used to count probabilities from root to additional function
+
+	cl_int prob_intra, prob_last, prob_gf, mb_num, segmentation_enabled;
+	const Prob *new_ymode_prob = ymode_prob;
+	const Prob *new_uv_mode_prob = uv_mode_prob;
+
+	// uncompressed first part(frame tag..) of frame header will be encoded last
+	// because it has size of 1st partition
+
+	//using functions taken from Multimedia Mike's encoder
+	//write_bool(encoder, prob, 1bit_value)
+		//encoded 1bit value with Prob probability
+	//write_flag(encoder, 1_bit_value)
+		//encodes 1bit with probability 128
+	//write_literal(encoder, value, N)
+		//writes N bits of value with probabilities 128 each
+	//write_quantizer_delta(encoder, delta-value)
+		// delta-value encoded as 4 bit absolute value first and 1 bit sign next. Probabilities are 128
+	
+	vp8_bool_encoder *vbe = (vp8_bool_encoder*)malloc(sizeof(vp8_bool_encoder));
+	// start of encoding header
+	// at the start of every partition - init
+	cl_int bool_offset;
+	if (!frames.current_is_key_frame) 
+		bool_offset = 3;
+	else 
+		bool_offset = 10;
+	init_bool_encoder(vbe, partition+bool_offset); // 10(3) bytes for uncompressed data chunk
+
+	/*------------------------------------------------- | ----- |
+    |   if (key_frame) {                                |       |
+    |       color_space                                 | L(1)  |
+    |       clamping_type                               | L(1)  |
+    |   }                                               |       |*/
+	if (frames.current_is_key_frame)
+	{
+		write_flag(vbe, 0); //YUV (no other options at this time)
+		write_flag(vbe, 0); // decoder have to clamp reconstructed values
+	}
+
+	/*  segmentation_enabled                            | L(1)  | 
+	|  if (segmentation_enabled)						|       | 
+    | start of update_segmentation() block	
+    |		update_segmentation()						| Type	|
+	| ------------------------------------------------- | ----- | 
+	|		update_mb_segmentation_map					| L(1)	| 
+	|		update_segment_feature_data					| L(1)	| 
+	|		if (update_segment_feature_data) {			|		| 
+	|			segment_feature_mode					| L(1)	| 
+	|			for (i = 0; i < 4; i++) {				|		| 
+	|				quantizer_update					| L(1)	| 
+	|				if (quantizer_update) {				|		| 
+	|					quantizer_update_value			| L(7)	| 
+	|					quantizer_update_sign			| L(1)	| 
+	|				}									|		| 
+	|			}										|		| 
+	|			for (i = 0; i < 4; i++) {				|		| 
+	|				loop_filter_update					| L(1)	|
+	|				if (loop_filter_update) {			|		|
+	|					lf_update_value					| L(6)	|
+	|					lf_update_sign					| L(1)	|
+	|				}									|		|
+	|			}										|		| 
+	|		}											|		|
+	|		if (update_mb_segmentation_map) {			|		|
+	|			for (i = 0; i < 3; i++) {				|		|
+	|				segment_prob_update					| L(1)	|
+	|				if (segment_prob_update)			|		|
+	|					segment_prob					| L(8)	|
+	|			}										|		|
+	|		}											|		| */
+	segmentation_enabled = !frames.current_is_key_frame; //only for inter frames;
+    write_flag(vbe, segmentation_enabled);     // segmentation test
+	if (segmentation_enabled) 
+	{
+		cl_int update_mb_segmentation_map, update_segment_feature_data;
+		update_mb_segmentation_map = 1;
+		update_segment_feature_data = 1;
+		write_flag(vbe, update_mb_segmentation_map);
+		write_flag(vbe, update_segment_feature_data);
+		if (update_segment_feature_data) 
+		{
+			write_flag(vbe, 1); // 1 - absolute; 0 - delta
+			int i;
+			for (i = 0; i < 4; ++i)
+			{ 
+				write_flag(vbe, 1);//always update
+				write_literal(vbe, frames.segments_data[i].y_ac_i, 7);
+				write_flag(vbe, 0); // sign for absolute values is 0
+			}
+			for (i = 0; i < 4; ++i)
+			{ 
+				write_flag(vbe, 1);//always update
+				write_literal(vbe, frames.segments_data[i].loop_filter_level, 6);
+				write_flag(vbe, 0); // sign for absolute values is 0
+			}
+		}
+		if (update_mb_segmentation_map) 
+		{
+			int i,seg_count[4];
+			seg_count[0] = seg_count[1] = seg_count[2] = seg_count[3] = 0;
+			for (i = 0; i < video.mb_count; ++i)
+				++seg_count[frames.transformed_blocks[i].segment_id];
+			// 1 bit choose between 0,1 (0) and 2,3 (1) segments
+			i = (seg_count[0]+seg_count[1])*255/video.mb_count;
+			new_segment_prob[0] = i;
+			// 2 bit :  0 (0) and 1 (1) segments
+			i = (seg_count[0]+seg_count[1]); i+=(i==0); i = seg_count[0]*255/i;
+			new_segment_prob[1] = i;
+			// 3 bit :  2 (0) and 3 (1) segments
+			i = (seg_count[2]+seg_count[3]); i+=(i==0); i = seg_count[2]*255/i;
+			new_segment_prob[2] = i;
+			
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[0], 8); 
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[1], 8); 
+			write_flag(vbe, 1); write_literal(vbe, new_segment_prob[2], 8); 
+		}
+	}
+    /* end of update_segmentation() block	*/
+
+	/*  filter_type                                     | L(1)  | */
+	write_flag(vbe, video.loop_filter_type);
+    /*  loop_filter_level                               | L(6)  | */
+	write_literal(vbe, frames.segments_data[0].loop_filter_level, 6);
+    /*  sharpness_level                                 | L(3)  | */
+	write_literal(vbe, video.loop_filter_sharpness, 3);
+
+	/*  start of mb_lf_adjustments() block */
+    /*  loop_filter_adj_enable                          | L(1)  | */
+    write_flag(vbe, 0); // do not adjust loop filter
+    /*  if (loop_filter_adj_enable) ...                 |       |
+    // but we do not adjust here						|		|
+    /*  end of mb_lf_adjustments() block */
+
+	/*  log2_nbr_of_dct_partitions                      | L(2)  | */
+    if (video.number_of_partitions == 1)
+		write_literal(vbe, 0, 2); // only 1 partition (2 bits)
+	else 
+		if (video.number_of_partitions == 2)
+			write_literal(vbe, 1, 2);
+		else 
+			if (video.number_of_partitions == 4)
+				write_literal(vbe, 2, 2);
+			else 
+				write_literal(vbe, 3, 2);
+
+	/*  start of quant_indices() block */
+    /*  y_ac_qi                                         | L(7)  |
+    |   y_dc_delta_present                              | L(1)  |
+    |   if (y_dc_delta_present) {                       |       |
+    |       y_dc_delta_magnitude                        | L(4)  |
+    |       y_dc_delta_sign                             | L(1)  |
+    |   }                                               |       |
+    |   y2_dc_delta_present                             | L(1)  |
+    |   if (y2_dc_delta_present) {                      |       |
+    |       y2_dc_delta_magnitude                       | L(4)  |
+    |       y2_dc_delta_sign                            | L(1)  |
+    |   }                                               |       |
+    |   y2_ac_delta_present                             | L(1)  |
+    |   if (y2_ac_delta_present) {                      |       |
+    |       y2_ac_delta_magnitude                       | L(4)  |
+    |       y2_ac_delta_sign                            | L(1)  |
+    |   }                                               |       |
+    |   uv_dc_delta_present                             | L(1)  |
+    |   if (uv_dc_delta_present) {                      |       |
+    |       uv_dc_delta_magnitude                       | L(4)  |
+    |       uv_dc_delta_sign                            | L(1)  |
+    |   }                                               |       |
+    |   uv_ac_delta_present                             | L(1)  |
+    |   if (uv_ac_delta_present) {                      |       |
+    |       uv_ac_delta_magnitude                       | L(4)  |
+    |       uv_ac_delta_sign                            | L(1)  |
+    |   }                                               |       | */
+    // encode quantizers
+	write_literal(vbe, frames.segments_data[0].y_ac_i, 7); // Y AC quantizer index (full 7 bits)
+	write_quantizer_delta(vbe, frames.segments_data[0].y_dc_idelta); // Y DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].y2_dc_idelta); // Y2 DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].y2_ac_idelta); // Y2 AC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].uv_dc_idelta); // UV DC index delta
+	write_quantizer_delta(vbe, frames.segments_data[0].uv_ac_idelta); // UV AC index delta
+
+    /* end of quant_indices() block */
+
+	/*  if (key_frame)                                  |       |
+    |       refresh_entropy_probs                       | L(1)  | */
+    // do not update coefficient probabilities
+    // refresh_entropy_probs determines whether updated token probabilities are used only for this frame or until further update.
+    // Explanation found in google.groups:
+    //On a key frame, all probabilities are reset to default baseline probabilities, then on each subsequent frame,
+    //these probabilities are combined with individual updates for use in coefficient decoding within the frame.
+    //1. When refresh_entropy_probs flag is 1, the updated combined probabilities become the new baseline for next frame.
+    //2. When refresh_entropy_probs flag is 0, current frame's probability updates are discarded after coefficient decoding is completed for the frame .
+    //      The baseline probabilities prior to this frame's probability updates are then used as the baseline for the next frame.
+    if (frames.current_is_key_frame)
+		write_flag(vbe, 0); // no updatng probabilities now
+	else
+	{
+    /*  else {											|		|
+    |       refresh_golden_frame                        | L(1)  |*/
+		write_flag(vbe, frames.current_is_golden_frame);
+    /*      refresh_alternate_frame                     | L(1)  |*/
+		write_flag(vbe, frames.current_is_altref_frame);
+    /*      if (!refresh_golden_frame)                  |       |
+    |           copy_buffer_to_golden                   | L(2)  | */// 0: no copying; 1: last -> golden; 2: altref -> golden
+		if (!frames.current_is_golden_frame)
+			write_literal(vbe, 0, 2);
+    /*      if (!refresh_alternate_frame)               |       |
+    |           copy_buffer_to_alternate                | L(2)  | */// 0: no; 1: last -> altref; 2: golden -> altref
+		if (!frames.current_is_altref_frame)
+			write_literal(vbe, 0, 2);
+    /*      sign_bias_golden                            | L(1)  |
+    |       sign_bias_alternate                         | L(1)  |*/
+	//These values are used to control the sign of the motion vectors when
+	// golden or altref frames are referenced
+		write_flag(vbe, 0);
+		write_flag(vbe, 0); 
+    /*      refresh_entropy_probs                       | L(1)  | */
+		write_flag(vbe, 0); // no updating probabilities now
+    /*      refresh_last                                | L(1)  | */
+		write_flag(vbe, 1); // we will always refresh  last
+    /*   }												|		| */
+	}
+
+	/*  start of token_prob_update() block */
+    /* bitstream from page 120+ version */
+    /*  for (i = 0; i < 4; i++) {                       |       |
+    |       for (j = 0; j < 8; j++) {                   |       |
+    |           for (k = 0; k < 3; k++) {               |       |
+    |               for (l = 0; l < 11; l++) {          |       |
+    |                   coeff_prob_update_flag          | L(1)  |
+    |                   if (coeff_prob_update_flag)     |       |
+    |                       coeff_prob                  | L(8)  |
+    |               }                                   |       |
+    |           }                                       |       |
+    |       }                                           |       |
+    |   }                                               |       |
+    | ------------------------------------------------- | ----- |    */
+    /* BUT in example with read probabilities from middle of the spec (explanation parts):
+    ---- Begin code block --------------------------------------
+    int i = 0; do {
+        int j = 0; do {
+            int k = 0; do {
+                int t = 0; do {
+                    if (read_bool(d, coeff_update_probs [i] [j] [k] [t]))
+                        coeff_probs [i] [j] [k] [t] = read_literal(d, 8);
+                } while (++t < num_dct_tokens - 1);
+            } while (++k < 3);
+        } while (++j < 8);
+    } while (++i < 4);
+    ---- End code block ---------------------------------------- */
+    // so Flag is B(coeff_probs [i] [j] [k] [t]), but prob is L(8)
+    // last one (and the code version) is right. Bitstream.pdf mistake there is.
+	{ cl_int i,j,k,l;
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 8; j++)
+            for (k = 0; k < 3; k++)
+				for (l = 0; l < 11; l++) {
+					if (frames.new_probs_denom[i][j][k][l] < 2) 
+						write_bool(vbe, coeff_update_probs[i][j][k][l], 0); 
+					else {
+						write_bool(vbe, coeff_update_probs[i][j][k][l], 1); 
+						write_literal(vbe, frames.new_probs[i][j][k][l], 8);
+					}
+				}
+	}
+    /*  end of token_prob_update() block */
+
+    /*  mb_no_skip_coeff                                | L(1)  | */
+    /*  if (mb_no_skip_coeff)                           |       |
+    |       prob_skip_false                             | L(8)  | */
+	write_flag(vbe, 1);
+	write_literal(vbe, frames.skip_prob, 8);
+
+	/*  if (!key_frame) {                               |       |*/
+	if (!frames.current_is_key_frame)
+	{
+		int i;
+    /*      prob_intra                                  | L(8)  |*/
+		// probability, that block intra encoded. We use only inter in not-key frames
+		prob_intra = frames.replaced*255/video.mb_count;
+		if ((frames.replaced > 0) && (prob_intra < 2)) prob_intra = 2;
+		if ((frames.replaced < video.mb_count) && (prob_intra > 254)) prob_intra = 254;
+		write_literal(vbe, prob_intra, 8); 
+    /*      prob_last                                   | L(8)  |*/
+		// probability of last frame used as reference  for inter encoding
+		prob_last = 0; // flag value for last is ZERO; prob of flag being ZERO 
+		prob_gf = 0;
+		for (i = 0; i < video.mb_count; ++i)
+		{
+			prob_last += (frames.transformed_blocks[i].reference_frame == LAST);
+			prob_gf += (frames.transformed_blocks[i].reference_frame == GOLDEN);
+		}
+		prob_gf = (prob_gf*256)/(video.mb_count-prob_last+1);
+		prob_last = (prob_last*256)/video.mb_count;
+		prob_gf = (prob_gf > 255) ? 255 : ((prob_gf < 1) ? 1 : prob_gf);
+		prob_last = (prob_last > 255) ? 255 : ((prob_last < 1) ? 1 : prob_last);
+		//prob_last = prob_gf = 128;
+		write_literal(vbe, prob_last, 8); // we use lasts and goldens
+    /*      prob_gf                                     | L(8)  |*/
+		// probability of golden frame used as reference  for inter encoding
+		write_literal(vbe, prob_gf, 8); 
+    /*      intra_16x16_prob_update_flag                | L(1)  |*/
+		// indicates if the branch probabilities used in the decoding of the luma intra-prediction(for inter-frames only) mode are updated
+    /*      if (intra_16x16_prob_update_flag) {         |       |
+    |           for (i = 0; i < 4; i++)                 |       |
+    |               intra_16x16_prob                    | L(8)  |
+    |       }                                           |       |*/
+	/*      intra_chroma prob_update_flag               | L(1)  |*/
+    /*      if (intra_chroma_prob_update_flag) {        |       |
+    |           for (i = 0; i < 3; i++)                 |       |
+    |               intra_chroma_prob                   | L(8)  |
+    |       }                                           |       |*/
+		if (frames.replaced > 7) 
+		{
+			write_flag(vbe, 1);
+			new_ymode_prob = B_ymode_prob;
+			for (i = 0; i < 4; ++i)
+				write_literal(vbe, 0, 8); //fixed on B_PRED 
+			write_flag(vbe, 1);
+			new_uv_mode_prob = TM_uv_mode_prob;
+			for (i = 0; i < 3; ++i)
+				write_literal(vbe, 0, 8); //fixed on TM_PRED 
+
 		}
 		else {
-			const char gpu_options[] = "-cl-std=CL1.2";
-			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
+			write_flag(vbe, 0);	
+			write_flag(vbe, 0);
 		}
-		if(device.state_gpu < 0)  //print log if there were mistakes during kernel building
-		{
-			error_file.handle = fopen(error_file.path,"w");
-		    printf("\n -=kernel build fail=- \n");
-			static char *program_log;
-			size_t log_size;
-			clGetProgramBuildInfo(device.program_gpu, *(device.device_gpu), CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-				program_log = (char*)malloc((log_size+1) * (sizeof(char)));
-			clGetProgramBuildInfo(device.program_gpu, *(device.device_gpu), CL_PROGRAM_BUILD_LOG, log_size, program_log, NULL);
-				fprintf(error_file.handle, "%s\n", program_log);
-			free(program_log);
-			fclose(error_file.handle);
-			return device.state_gpu;
-		}
-		{ char kernel_name[] = "reset_vectors";
-		device.reset_vectors = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_search_1step";
-		device.luma_search_1step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "luma_search_2step";
-		device.luma_search_2step = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "downsample_x2";
-		device.downsample = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "select_reference";
-		device.select_reference = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "prepare_predictors_and_residual";
-		device.prepare_predictors_and_residual = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "pack_8x8_into_16x16";
-		device.pack_8x8_into_16x16 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "dct4x4";
-		device.dct4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "wht4x4_iwht4x4";
-		device.wht4x4_iwht4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "idct4x4";
-		device.idct4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		if (video.do_loop_filter_on_gpu)
-		{
-			{ char kernel_name[] = "prepare_filter_mask"; //and non zero coeffs count
-			device.prepare_filter_mask = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-			{ char kernel_name[] = "normal_loop_filter_MBH";
-			device.normal_loop_filter_MBH = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-			{ char kernel_name[] = "normal_loop_filter_MBV";
-			device.normal_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		}
-		{ char kernel_name[] = "count_SSIM_luma";
-		device.count_SSIM_luma = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "count_SSIM_chroma";
-		device.count_SSIM_chroma = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "gather_SSIM";
-		device.gather_SSIM = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
-	}
-	// CPU:
-	printf("reading CPU program...\n");
-	program_handle = fopen(CPUPATH, "rb");
-	fseek(program_handle, 0, SEEK_END);
-	program_size = ftell(program_handle);
-	rewind(program_handle); // set to start
-	char** device_program_source_cpu = (char**)malloc(sizeof(char*));
-		*device_program_source_cpu = (char*)malloc(program_size+1);
-	(*device_program_source_cpu)[program_size] = '\0';
-	fread(*device_program_source_cpu, sizeof(char),	program_size, program_handle);
-	fclose(program_handle);
-	device.program_cpu = clCreateProgramWithSource(device.context_cpu, 1, (const char**)device_program_source_cpu, NULL, &device.state_cpu);
-	printf("building CPU program...\n");
-	if (!video.do_loop_filter_on_gpu) {
-		const char cpu_options[] = "-cl-std=CL1.0 -DLOOP_FILTER";
-		device.state_cpu = clBuildProgram(device.program_cpu, 1, device.device_cpu, cpu_options, NULL, NULL);
-	}
-	else {
-		const char cpu_options[] = "-cl-std=CL1.0";
-		device.state_cpu = clBuildProgram(device.program_cpu, 1, device.device_cpu, cpu_options, NULL, NULL);
-	}
-	if(device.state_cpu < 0)  //print log if there were mistakes during kernel building
-	{
-		error_file.handle = fopen(error_file.path,"w");
-	    printf("\n -=kernel build fail=- \n");
-		static char *program_log;
-		size_t log_size;
-		clGetProgramBuildInfo(device.program_cpu, *(device.device_cpu), CL_PROGRAM_BUILD_LOG, 0, NULL, &log_size);
-		program_log = (char*) malloc((log_size+1) * (sizeof(char)));
-		clGetProgramBuildInfo(device.program_cpu, *(device.device_cpu), CL_PROGRAM_BUILD_LOG, log_size, program_log, NULL);
-		fprintf(error_file.handle, "%s\n", program_log);
-		free(program_log);
-		fclose(error_file.handle);
-		return device.state_cpu;
-	}
-	{ char kernel_name[] = "encode_coefficients";
-	device.encode_coefficients = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
-	{ char kernel_name[] = "count_probs";
-	device.count_probs = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
-	{ char kernel_name[] = "num_div_denom";
-	device.num_div_denom = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
-	if (!video.do_loop_filter_on_gpu)
-	{
-		{ char kernel_name[] = "prepare_filter_mask"; //and non zero coeffs count
-		device.prepare_filter_mask = clCreateKernel(device.program_cpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "loop_filter_frame";
-		device.loop_filter_frame = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
-	}
-
-
-    video.src_frame_size_luma = video.src_height*video.src_width;
-    video.src_frame_size_chroma = video.src_frame_size_luma >> 2;
-    int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1) ;
-
-    video.wrk_height = video.dst_height;
-    video.wrk_width = video.dst_width;
-    if (video.dst_height % 16) // if non divisible by MB size - pad
-        video.wrk_height = video.dst_height + (16 - (video.dst_height % 16));
-    if (video.dst_width % 16) // if non divisible by MB size - pad
-        video.wrk_width = video.dst_width + (16 - (video.dst_width % 16));
-
-    video.wrk_frame_size_luma = video.wrk_height*video.wrk_width;
-    video.wrk_frame_size_chroma = video.wrk_frame_size_luma >> 2;
-
-
-    video.mb_height = video.wrk_height >> 4;
-    video.mb_width = video.wrk_width >> 4;
-    video.mb_count = video.mb_width*video.mb_height;
-
-	frames.input_pack_size = 1;
-    frames.input_pack = (cl_uchar*)malloc(src_frame_size_full*frames.input_pack_size);
-    // all buffers of previous frames must be padded
-    frames.reconstructed_Y =(cl_uchar*)malloc(video.wrk_frame_size_luma);
-    frames.reconstructed_U =(cl_uchar*)malloc(video.wrk_frame_size_chroma);
-    frames.reconstructed_V =(cl_uchar*)malloc(video.wrk_frame_size_chroma);
-    frames.transformed_blocks =(macroblock*)malloc(sizeof(macroblock)*video.mb_count);
-	frames.e_data = (macroblock_extra_data*)malloc(video.mb_count*sizeof(macroblock_extra_data));
-    frames.encoded_frame = (cl_uchar*)malloc(src_frame_size_full<<1); // extra size
-	frames.partition_0 = (cl_uchar*)malloc(64*video.mb_count + 128); 
-	video.partition_step = sizeof(cl_short)*800*(video.mb_count)/2;
-	frames.partitions = (cl_uchar*)malloc(video.partition_step); 
-
-	frames.last_U = (cl_uchar*)malloc(video.wrk_frame_size_chroma);
-	frames.last_V = (cl_uchar*)malloc(video.wrk_frame_size_chroma);
-    if (((video.src_height != video.dst_height) || (video.src_width != video.dst_width)) ||
-        ((video.wrk_height != video.dst_height) || (video.wrk_width != video.dst_width)))
-    {
-        // then we need buffer to store resized input frame (and padded along the way, to avoid double-copy) - 1st if-line
-        // we need to store padded data - 2nd if-line
-        frames.current_Y = (cl_uchar*)malloc(video.wrk_frame_size_luma);
-        frames.current_U = (cl_uchar*)malloc(video.wrk_frame_size_chroma);
-        frames.current_V = (cl_uchar*)malloc(video.wrk_frame_size_chroma);
-    }
-	else 
-	{ // to avoid reading from unknown space (for example memcpy in get_yuv420_frame before first frame read)
-		// also could be done by checking if frame is first (done too, both for safety)
-		frames.current_U = frames.last_U;
-		frames.current_V = frames.last_V;
-	} // later these buffers are being reassigned
-
-	if (video.GOP_size > 1) {
-		device.predictors_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with predictors_Y\n", device.state_gpu); return -1; }
-		device.predictors_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with predictors_U\n", device.state_gpu); return -1; }
-		device.predictors_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with predictors_V\n", device.state_gpu); return -1; }
-		device.residual_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma*sizeof(short), NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with residual_Y\n", device.state_gpu); return -1; }
-		device.residual_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma*sizeof(short), NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with residual_U\n", device.state_gpu); return -1; }
-		device.residual_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma*sizeof(short), NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with residual_V\n", device.state_gpu); return -1; }
-		device.current_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.current_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_U\n", device.state_gpu); return -1; }
-		device.current_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_V\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.reconstructed_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_Y\n", device.state_gpu); return -1; }
-		device.reconstructed_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_U\n", device.state_gpu); return -1; }
-		device.reconstructed_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_V\n", device.state_gpu); return -1; }
-		device.golden_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y\n", device.state_gpu); return -1; }
-		device.altref_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y\n", device.state_gpu); return -1; }
-		device.transformed_blocks_gpu = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with transformed_blocks_gpu\n", device.state_gpu); return -1; }	
-		device.last_vnet1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last vnet1\n", device.state_gpu); return -1; }
-		device.golden_vnet1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden vnet1\n", device.state_gpu); return -1; }
-		device.altref_vnet1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref vnet1\n", device.state_gpu); return -1; }
-		device.last_vnet2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last vnet2\n", device.state_gpu); return -1; }
-		device.golden_vnet2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden vnet2\n", device.state_gpu); return -1; }
-		device.altref_vnet2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(vector_net)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref vnet2\n", device.state_gpu); return -1; }
-		device.metrics1 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(cl_int)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_metrics\n", device.state_gpu); return -1; }
-		device.metrics2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(cl_int)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_metrics\n", device.state_gpu); return -1; }
-		device.metrics3 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(cl_int)*video.mb_count*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_metrics\n", device.state_gpu); return -1; }
-		
-		if (video.do_loop_filter_on_gpu)
-		{
-			device.mb_mask = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sizeof(cl_int)*video.mb_count, NULL , &device.state_gpu);
-			if (device.state_gpu != 0) { printf("GPU device memory problem %d with mb_mask\n", device.state_gpu); return -1; }
-		}
-		else
-		{
-			device.mb_mask = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(cl_int)*video.mb_count, NULL , &device.state_cpu);
-			if (device.state_cpu != 0) { printf("CPU device memory problem %d with mb_mask\n", device.state_cpu); return -1; }
-			device.cpu_frame_Y = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_cpu);
-			if (device.state_gpu != 0) { printf("GPU device memory problem %d with cpu_frame_Y\n", device.state_gpu); return -1; }
-			device.cpu_frame_U = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_cpu);
-			if (device.state_gpu != 0) { printf("GPU device memory problem %d with cpu_frame_U\n", device.state_gpu); return -1; }
-			device.cpu_frame_V = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_cpu);
-			if (device.state_gpu != 0) { printf("GPU device memory problem %d with cpu_frame_V\n", device.state_gpu); return -1; }
-		
-		}
-		device.segments_data_gpu = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, sizeof(segment_data)*4, NULL , &device.state_gpu);
-		if (device.state_gpu != 0) { printf("GPU device memory problem %d with segments_data\n", device.state_gpu); return -1; }
-		device.segments_data_cpu = clCreateBuffer(device.context_cpu, CL_MEM_READ_ONLY, sizeof(segment_data)*4, NULL , &device.state_cpu);
-		if (device.state_cpu != 0) { printf("CPU device memory problem %d with segments_data\n", device.state_cpu); return -1; }
-
-		// and now creating image obhects
-		device.image_format.image_channel_order = CL_R;
-		device.image_format.image_channel_data_type = CL_UNSIGNED_INT8;
-		device.last_frame_Y_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width,video.wrk_height,0,NULL,&device.state_gpu);
-		device.last_frame_U_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		device.last_frame_V_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		device.golden_frame_Y_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width,video.wrk_height,0,NULL,&device.state_gpu);
-		device.golden_frame_U_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		device.golden_frame_V_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		device.altref_frame_Y_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width,video.wrk_height,0,NULL,&device.state_gpu);
-		device.altref_frame_U_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		device.altref_frame_V_image = clCreateImage2D(device.context_gpu, CL_MEM_READ_ONLY, &device.image_format,
-													video.wrk_width/2,video.wrk_height/2,0,NULL,&device.state_gpu);
-		if (device.state_gpu != 0) 
-			printf("=> create buffer problem!\n");
-		
-	}
-	device.transformed_blocks_cpu = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(macroblock)*video.mb_count, NULL , &device.state_cpu);
-	device.partitions = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, video.partition_step, NULL , &device.state_cpu);
-	device.partitions_sizes = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*sizeof(cl_int), NULL , &device.state_cpu);
-	device.third_context = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, sizeof(cl_uchar)*25*video.mb_count, NULL , &device.state_cpu);
-	device.coeff_probs = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(cl_uint), NULL , &device.state_cpu);
-	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(cl_uint), NULL , &device.state_cpu);
-
-	if (video.GOP_size > 1) {
-		/*__kernel void reset_vectors ( __global vector_net *const last_net, //0
-								__global vector_net *const golden_net, //1
-								__global vector_net *const altref_net, //2
-								__global int *const last_Bdiff, //3
-								__global int *const golden_Bdiff, //4
-								__global int *const altref_Bdiff) //5*/
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 0, sizeof(cl_mem), &device.last_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 1, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 3, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 4, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clSetKernelArg(device.reset_vectors, 5, sizeof(cl_mem), &device.metrics3);
-
-		/*__kernel void downsample(__global uchar *const src_frame, //0
-									__global uchar *const dst_frame, //1
-									const signed int src_width, //2
-									const signed int src_height) //3*/
-		// all parameters variable
-
-		/*__kernel void luma_search_1step //when looking into downsampled and original frames
-									( 	__global uchar *const current_frame, //0
-										__global uchar *const prev_frame, //1
-										__global vector_net *const src_net, //2
-										__global vector_net *const dst_net, //3
-										const signed int net_width, //4 //in 8x8 blocks
-										const signed int width, //5
-										const signed int height, //6
-										const signed int pixel_rate) //7 */
-		cl_int net_width = video.mb_width*2;
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 4, sizeof(cl_int), &net_width);
-		// frames, nets, sizes, pixel_rate will be variable on kernel launch
-
-		/*__kernel void luma_search_2step //searching in interpolated picture
-									( 	__global uchar *const current_frame, //0
-										__read_only image2d_t ref_frame, //1
-										__global vector_net *const net, //2
-										__global vector_net *const ref_net, //3
-										__global int *const ref_Bdiff, //4
-										const int width, //5
-										const int height) //6*/
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 0, sizeof(cl_mem), &device.current_frame_Y);
-	    // nets, metrics and reference frames are set just before launch
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 5, sizeof(cl_int), &video.wrk_width);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 6, sizeof(cl_int), &video.wrk_height);
-
-		/*__kernel void select_reference(__global vector_net *const last_net, //0
-										__global vector_net *const golden_net, //1
-										__global vector_net *const altref_net, //2
-										__global int *const last_Bdiff, //3
-										__global int *const golden_Bdiff, //4
-										__global int *const altref_Bdiff, //5
-										__global macroblock *const MBs, //6
-										const int width, //7
-										const int use_golden, //8
-										const int use_altref) //9*/
-		device.state_gpu = clSetKernelArg(device.select_reference, 0, sizeof(cl_mem), &device.last_vnet1);
-		device.state_gpu = clSetKernelArg(device.select_reference, 1, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.select_reference, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.select_reference, 3, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.select_reference, 4, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clSetKernelArg(device.select_reference, 5, sizeof(cl_mem), &device.metrics3);
-		device.state_gpu = clSetKernelArg(device.select_reference, 6, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.select_reference, 7, sizeof(cl_int), &video.wrk_width);
-
-		/*__kernel void pack_8x8_into_16x16(__global macroblock *const MBs) //0*/
-		device.state_gpu = clSetKernelArg(device.pack_8x8_into_16x16, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
-
-		/*__kernel void prepare_predictors_and_residual(__global uchar *const current_frame, //0
-														__read_only image2d_t ref_frame, //1
-														__global uchar *const predictor, //2
-														__global short *const residual, //3
-														__global macroblock *const MBs, //4
-														const int width, //5
-														const int plane, //6
-														const int ref) //7*/
-		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		// all other options are set just before execution
-
-
-		/*__kernel void dct4x4(__global short *const residual, //0
-					__global macroblock *const MBs, //1
-					const int width, //2
-					__constant segment_data *const SD, //3
-					const int segment_id, //4
-					const float SSIM_target, //5
-					const int plane) //6*/
-		device.state_gpu = clSetKernelArg(device.dct4x4, 1, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.dct4x4, 3, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.dct4x4, 5, sizeof(cl_int), &video.SSIM_target);
-		// frames, width, segments data, id, and plane are set before launch
-
-		/*__kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
-										__constant segment_data *const SD, //1
-										const int segment_id, //2
-										const float SSIM_target) //3*/
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 1, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 3, sizeof(cl_int), &video.SSIM_target);
-		//segment_id is set before launch
-
-		/*__kernel void idct4x4(__global uchar *const recon_frame, //0
-					__global uchar *const predictor, //1
-					__global macroblock *const MBs, //2
-					const int width, //3
-					__constant segment_data *const SD, //4
-					const int segment_id, //5
-					const float SSIM_target, //6
-					const int plane) //7*/
-		device.state_gpu = clSetKernelArg(device.idct4x4, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.idct4x4, 4, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.idct4x4, 6, sizeof(cl_int), &video.SSIM_target);
-		// frames, width, segments data, id and plane are set before launch
-
-		if (video.do_loop_filter_on_gpu)
-		{
-			/*__kernel prepare_filter_mask(__global macroblock *const MBs,
-											__global int *const mb_mask)*/
-			device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
-			device.state_gpu = clSetKernelArg(device.prepare_filter_mask, 1, sizeof(cl_mem), &device.mb_mask);
-
-			/*__kernel void normal_loop_filter_MBH(__global uchar * const frame, //0
-													const int width, //1
-													__constant segment_data *const SD, //2
-													__global macroblock *const MB, //3
-													const int mb_size, //4
-													const int stage, //5
-													__global int *const mb_mask) //6*/
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 2, sizeof(cl_mem), &device.segments_data_gpu);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 6, sizeof(cl_mem), &device.mb_mask);
-
-			/*__kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
-													const int width, //1
-													__constant segment_data *const SD, //2
-													__global macroblock *const MB, //3
-													const int mb_size, //4
-													const int stage, //5
-													__global int *const mb_mask) //6*/
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 2, sizeof(cl_mem), &device.segments_data_gpu);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(cl_mem), &device.mb_mask);
-		}
-		/*__kernel void count_SSIM_luma(__global uchar *const frame1, //0
-										__global uchar *const frame2, //1
-										__global macroblock *const MBs, //2
-										__global float *const metric, //3
-										signed int width, //4
-										const int segment_id)//5*/
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 0, sizeof(cl_mem), &device.current_frame_Y);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 3, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 4, sizeof(cl_int), &video.wrk_width);
-
-		/*__kernel void count_SSIM_chroma(__global uchar *const frame1, //0
-										__global uchar *const frame2, //1
-										__global macroblock *const MBs, //2
-										__global float *const metric, //3
-										signed int cwidth, //4
-										const int segment_id)// 5*/
-		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		cl_int cwidth = video.wrk_width/2;
-		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 4, sizeof(cl_int), &cwidth);
-
-		/*void __kernel gather_SSIM(__global float *const metric1, //0
-							__global float *const metric2, //1
-							__global float *const metric3, //2
-							__global macroblock *const MBs) //3*/
-		device.state_gpu = clSetKernelArg(device.gather_SSIM, 0, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.gather_SSIM, 1, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clSetKernelArg(device.gather_SSIM, 2, sizeof(cl_mem), &device.metrics3);
-		device.state_gpu = clSetKernelArg(device.gather_SSIM, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
-
-		device.commandQueue1_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
-		device.commandQueue2_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
-		device.commandQueue3_gpu = clCreateCommandQueue(device.context_gpu, device.device_gpu[0], 0, &device.state_gpu);
-	}
-
-	/*__kernel void encode_coefficients(	__global macroblock *MBs, - 0
-											__global uchar *output, - 1
-											__global int *partition_sizes, - 2
-											__global uchar *third_context, - 3
-											__global uint *coeff_probs, - 4
-											__global uint *coeff_probs_denom, - 5
-											int mb_height, - 6
-											int mb_width, - 7
-											int num_partitions, - 8
-											int key_frame, - 9
-											int partition_step, - 10
-											int skip_prob) - 11 */
-	
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 0, sizeof(cl_mem), &device.transformed_blocks_cpu);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 1, sizeof(cl_mem), &device.partitions);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 2, sizeof(cl_mem), &device.partitions_sizes);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 3, sizeof(cl_mem), &device.third_context);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 4, sizeof(cl_mem), &device.coeff_probs);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 5, sizeof(cl_mem), &device.coeff_probs_denom);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 6, sizeof(cl_int), &video.mb_height);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 7, sizeof(cl_int), &video.mb_width);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 8, sizeof(cl_int), &video.number_of_partitions);
-	// 9 before launch each time
-	video.partition_step = video.partition_step / video.number_of_partitions;
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 10, sizeof(cl_int), &video.partition_step);
-	// 10 different for each frame
-
-	/*__kernel void count_probs(	__global macroblock *MBs, - 0
-									__global uint *coeff_probs, - 1
-									__global uint *coeff_probs_denom, - 2
-									__global uchar *third_context, - 3
-									int mb_height, - 4
-									int mb_width, - 5
-									int num_partitions, - 6
-									int key_frame, - 7
-									int partition_step) - 8 */
-	
-	device.state_cpu = clSetKernelArg(device.count_probs, 0, sizeof(cl_mem), &device.transformed_blocks_cpu);
-	device.state_cpu = clSetKernelArg(device.count_probs, 1, sizeof(cl_mem), &device.coeff_probs);
-	device.state_cpu = clSetKernelArg(device.count_probs, 2, sizeof(cl_mem), &device.coeff_probs_denom);
-	device.state_cpu = clSetKernelArg(device.count_probs, 3, sizeof(cl_mem), &device.third_context);
-	device.state_cpu = clSetKernelArg(device.count_probs, 4, sizeof(cl_int), &video.mb_height);
-	device.state_cpu = clSetKernelArg(device.count_probs, 5, sizeof(cl_int), &video.mb_width);
-	device.state_cpu = clSetKernelArg(device.count_probs, 6, sizeof(cl_int), &video.number_of_partitions);
-	// 7 before launch each time
-	device.state_cpu = clSetKernelArg(device.count_probs, 8, sizeof(cl_int), &video.partition_step);
-
-	/*__kernel void num_div_denom(	__global uint *coeff_probs, 
-									__global uint *coeff_probs_denom,
-									int num_partitions)*/
-	device.state_cpu = clSetKernelArg(device.num_div_denom, 0, sizeof(cl_mem), &device.coeff_probs);
-	device.state_cpu = clSetKernelArg(device.num_div_denom, 1, sizeof(cl_mem), &device.coeff_probs_denom);
-	device.state_cpu = clSetKernelArg(device.num_div_denom, 2, sizeof(cl_int), &video.number_of_partitions);
-
-	if (!video.do_loop_filter_on_gpu)
-	{
-		/*__kernel void prepare_filter_mask(__global macroblock *const MBs, //0
-											__global int *const mb_mask, //1
-											const int width, //2
-											const int height, //3
-											const int parts) //4*/
-		cl_int parts = 4;
-		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 0, sizeof(cl_mem), &device.transformed_blocks_cpu);
-		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 1, sizeof(cl_mem), &device.mb_mask);
-		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 2, sizeof(cl_int), &video.wrk_height);
-		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 3, sizeof(cl_int), &video.wrk_width);
-		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 4, sizeof(cl_int), &parts);
-
-
-		/*__kernel void loop_filter_frame(__global uchar *const frame, //0
-											__global macroblock *const MBs, //1
-											__global int *const mb_mask, //2
-											__constant const segment_data *const SD, //3
-											const int width, //4
-											const int height, //5
-											const int mb_size) //6*/
-		device.state_cpu = clSetKernelArg(device.loop_filter_frame, 1, sizeof(cl_mem), &device.transformed_blocks_cpu);
-		device.state_cpu = clSetKernelArg(device.loop_filter_frame, 2, sizeof(cl_mem), &device.mb_mask);
-		device.state_gpu = clSetKernelArg(device.loop_filter_frame, 3, sizeof(cl_mem), &device.segments_data_cpu);
-	}
-
-	device.loopfilterY_commandQueue_cpu = clCreateCommandQueue(device.context_cpu, device.device_cpu[0], 0, &device.state_cpu);
-	device.loopfilterU_commandQueue_cpu = clCreateCommandQueue(device.context_cpu, device.device_cpu[0], 0, &device.state_cpu);
-	device.loopfilterV_commandQueue_cpu = clCreateCommandQueue(device.context_cpu, device.device_cpu[0], 0, &device.state_cpu);
-	device.boolcoder_commandQueue_cpu = clCreateCommandQueue(device.context_cpu, device.device_cpu[0], 0, &device.state_cpu);
-	return 1;
-}
-
-int string_to_value(char *str)
-{
-	int i = 0, new_digit, retval = 0;
-	while ((str[i] != '\n') && (str[i] != '\0'))
-	{
-		new_digit = (int)(str[i]) - 48;
-		if ((new_digit > 9) || (new_digit < 0))
-			return -1;
-		retval *= 10;
-		retval += new_digit;
-		++i;
-	}
-	return retval;
-}
-
-int ParseArgs(int argc, char *argv[])
-{
-    char f_o = 0, f_i = 0, f_qmax = 0, f_qmin = 0, f_qintra = 0, f_g = 0, f_partitions = 0, f_threads = 0, f_ls = 0,f_SSIM_target=0,f_altref_range=0; 
-	int i,ii;
-    i = 1;
-	video.do_loop_filter_on_gpu = 0;
-    while (i < argc)
-    {
-		ii = i;
-        if (argv[i][0] == '-')
-        {
-			if ((argv[i][1] == 'h') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
-			{
-				printf("%s\n", small_help);
-				return -1;
+    /*		for (i = 0; i < 2; i++) {					|		| // it is a start of mv_prob_update()
+	|			for (j = 0; j < 19; j++) {				|		|
+	|				mv_prob_update_flag					| L(1)	|
+	|				if (mv_prob_update_flag)			|		|
+	|					prob							| L(7)	|
+	|			}										|		|
+	|		}											|		|*/
+		// same here. spec says L(1), but it's B(p) !!11!!1one!!1oneone
+		{ cl_int i,j, mb_num;
+		for (i = 0; i < 2; ++i)
+			for (j = 0; j < 19; ++j) {
+				num_mv_context[i][j] = 0;
+				denom_mv_context[i][j] = 1;
 			}
-            if ((argv[i][1] == 'i') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					input_file.path = argv[i];
-                    f_i = 1;
-                    printf("input file : %s;\n", input_file.path);
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for YUV input;\n");
-                    return -1;
-                }
-            }
-            if ((argv[i][1] == 'o')&& ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					output_file.path = argv[i];
-                    f_o = 1;
-                    printf("output file : %s;\n", output_file.path);
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no destination for output;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "threads", 7)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.thread_limit = string_to_value(argv[i]);
-					if (video.thread_limit < 1)
-					{
-						printf ("wrong maximum number of threads;\n");
-						return -1;
-					}
-                    f_threads = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for threads;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "qmax", 4)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.qi_max = string_to_value(argv[i]);
-					if (video.qi_max < 0)
-					{
-						printf ("wrong quantizer index format for intra i-frames! must be an integer from 0 to 127;\n");
-						return -1;
-					}
-                    f_qmax = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for quantizer;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "qmin", 4)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.qi_min = string_to_value(argv[i]);
-					if (video.qi_min < 0)
-					{
-						printf ("wrong quantizer index format for inter p-frames! must be an integer from 0 to 127;\n");
-						return -1;
-					}
-                    f_qmin = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for quantizer;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "altref-range", 12)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.altref_range = string_to_value(argv[i]);
-					if (video.altref_range < 0)
-					{
-						printf ("wrong altref range format\n");
-						return -1;
-					}
-                    f_altref_range = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for altref range;\n");
-                    return -1;
-                }
-            }
-            if ((argv[i][1] == 'g') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.GOP_size = string_to_value(argv[i]);
-					if (video.GOP_size < 1)
-					{
-						printf ("wrong GOP format! must be an integer from 1 to even more;\n");
-						return -1;
-					}
-                    f_g = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for group of pictures size;\n");
-                    return -1;
-                }
-            }
-            if (memcmp(&argv[i][1], "partitions", 7)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.number_of_partitions = (size_t)string_to_value(argv[i]);
-					if (video.number_of_partitions < 0)
-					{
-						printf ("wrong number of partitions;\n");
-						return -1;
-					}
-					if ((video.number_of_partitions != 1) 
-						&& (video.number_of_partitions != 2) 
-						&& (video.number_of_partitions != 4) 
-						&& (video.number_of_partitions != 8))
-						video.number_of_partitions = 1;
-                    f_partitions = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for partitions;\n");
-                    return -1;
-                }
-            }
-			if ((argv[i][1] == 'l') && (argv[i][2] == 's') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
-            {
-                ++i;
-                if (i < argc)
-                {
-					video.loop_filter_sharpness = string_to_value(argv[i]);
-					if (video.loop_filter_sharpness < 0)
-					{
-						printf ("wrong format for loop_filter_sharpness! must be an integer from 0 to 63;\n");
-						return -1;
-					} else 
-						video.loop_filter_sharpness = (video.loop_filter_sharpness > 7) ? 7 : video.loop_filter_sharpness;
-                    f_ls = 1;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for loop_filter_sharpness;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "SSIM-target", 11)==0)
-            {
-                ++i;
-                if (i < argc)
-                {
-					int buf = string_to_value(argv[i]);
-					if ((buf < 0) || (buf > 99))
-					{
-						printf ("wrong SSIM level! must be an integer from 0 to 99;\n");
-						return -1;
-					}
-                    f_SSIM_target = 1;
-					video.SSIM_target = ((float)buf)/100.0f;
-					if (++i >= argc) break;
-                }
-                else
-                {
-                    printf ("no value for SSIM-target;\n");
-                    return -1;
-                }
-            }
-			if (memcmp(&argv[i][1], "loop-filter-on-gpu", 11)==0)
-            {
-				video.do_loop_filter_on_gpu = 1;
-				if (++i >= argc) break;
-            }
-		}    
-		if (i == ii)
-		{
-			printf("unknown option %s\n",argv[i]);
-			return -1;
+		for (mb_num = 0; mb_num < video.mb_count; ++mb_num) {
+			if (frames.e_data[mb_num].is_inter_mb) count_mv_probs(vbe, mb_num);
 		}
-	}
-    if (f_i == 0)
-    {
-		printf("no input file specified;\n");
-		return -1;
-    }
-    if (f_o == 0)
-    {
-		printf("no output file specified;\n");
-		return -1;
-    }
-	if (f_qmax == 0)
-    {
-		printf("no min quantizer index -> set to 0;\n");
-		video.qi_min = 0;
-    }
-	if (f_qmin == 0)
-    {
-		printf("no max quantizer index -> set to 48;\n");
-		video.qi_max = 48;
-    }
-	if (f_g == 0)
-    {
-		printf("no size of group of pictures specified - set to 150;\n");
-		video.GOP_size = 150;
-    }
-	if (f_partitions == 0)
-    {
-		printf("no number of partitions specified - set to 1;\n");
-		video.number_of_partitions = 1;
-    }
-	if (f_threads == 0)
-	{
-		printf("no maximum number of threads specified - set to 2;\n");
-		video.thread_limit = 2;
-	}
-	if (f_ls == 0)
-    {
-		printf("no loop filter sharpness is specified - set to 0;\n");
-		video.loop_filter_sharpness = 0;
-    }
-	if (f_SSIM_target == 0)
-	{
-		printf("no SSIM intra-in-inter tuning");
-		video.SSIM_target = -1.0f;
-	}
-	if (f_altref_range == 0)
-	{
-		printf("no altref range value, set to default %d\n",DEFAULT_ALTREF_RANGE);
-		video.altref_range = DEFAULT_ALTREF_RANGE;
-	}
-	video.loop_filter_type = 0; //this is fixed now
-
-	if (video.qi_max < video.qi_min) 
-	{
-		printf("wrong quantizer min-max range -> swap \n");
-		cl_int buf = video.qi_max;
-		video.qi_max = video.qi_min;
-		video.qi_min = buf;
-		
-	}
-	video.lastqi[UQ_segment] = (video.qi_max + video.qi_min*3 + 2)/4;
-	video.lastqi[HQ_segment] = (video.qi_max + video.qi_min + 1)/2;
-	video.lastqi[AQ_segment] = (video.qi_max*3 + video.qi_min + 2)/4;
-	video.lastqi[LQ_segment] = video.qi_max;
-
-	video.altrefqi[UQ_segment] = video.lastqi[UQ_segment]/4;
-	video.altrefqi[HQ_segment] = video.lastqi[HQ_segment]/3;
-	video.altrefqi[AQ_segment] = video.lastqi[AQ_segment]/3;
-	video.altrefqi[LQ_segment] = video.lastqi[LQ_segment]/2;
-
-	video.altrefqi[UQ_segment] = (video.altrefqi[UQ_segment] < video.qi_min) ? video.qi_min : video.altrefqi[UQ_segment];
-
-	frames.threads_free = video.thread_limit;
-
-    return 0;
-}
-
-int OpenYUV420FileAndParseHeader()
-{
-    // add framerate
-	char magic_word[] = "YUV4MPEG2 ";
-	char ch;
-	int frame_start = 0;
-	if (input_file.path[0] == '@') {
-		input_file.handle = stdin;
-		setmode(0, O_BINARY); //0x8000
-	}
-	else 
-		input_file.handle = fopen(input_file.path,"rb");
-	output_file.handle = fopen(output_file.path,"wb");
-	int i = 0, j = 0;
-	video.src_height = 0; video.src_width = 0;
-
-	for (i = 0; i < 10; ++i)
-	{
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1;
-		frames.header[j++] = ch;
-		if (ch != magic_word[i]) 
-			return -1;
-	}
-	for (i = 0; i < 3; ++i)
-	{
-		while ((ch != 'W') && (ch != 'H') && (ch != 'F')) {
-			if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-				return -1 ;
-			frames.header[j++] = ch;
-		}
-		if (ch == 'W')
-		{
-			while (1)
-			{
-				if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-					return -1 ;
-				frames.header[j++] = ch;
-				if (ch == 0x20) break;
-				video.src_width*=10;
-				video.src_width+=(ch - 0x30);
+		for (i = 0; i < 2; ++i)
+			for (j = 0; j < 19; ++j) {
+				write_bool(vbe, vp8_mv_update_probs[i][j], 1);
+				new_mv_context[i][j] = (cl_uchar)((num_mv_context[i][j] << 8) / denom_mv_context[i][j]);
+				// standard says that these probs are stored as 7 bit values (7 most significant of total 8)
+				// so we have to set LSB = 0;
+				new_mv_context[i][j] &= (~(0x1));
+				// spec decoder sets prob to 1 when pulls 0 from header
+				// but we'll clamp for safety to 2..254
+				new_mv_context[i][j] = ((new_mv_context[i][j] < 2) ? 2 : new_mv_context[i][j]);
+				new_mv_context[i][j] = ((new_mv_context[i][j] > 254) ? 254 : new_mv_context[i][j]);
+				write_literal(vbe, (new_mv_context[i][j]>>1), 7);
 			}
 		}
-		if (ch == 'H')
-		{
-			while (1)
-			{
-				if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-					return -1 ;
-				frames.header[j++] = ch;
-				if (ch == 0x20) break;
-				video.src_height*=10;
-				video.src_height+=(ch - 0x30);
-			}
-		}
-		if (ch == 'F')
-		{
-			int denom = 0, num = 0;
-			while (1)
-			{
-				if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-					return -1 ;
-				frames.header[j++] = ch;
-				if (ch == ':') break;
-				num*=10;
-				num+=(ch - 0x30);
-			}
-			while (1)
-			{
-				if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-					return -1 ;
-				frames.header[j++] = ch;
-				if (ch == 0x20) break;
-				denom*=10;
-				denom+=(ch - 0x30);
-			}
-			video.framerate = (num+denom/2)/denom;
-		}
+    /*  }                                               |       | *///end of  /*  if (!key_frame) { prob_intra....
 	}
 
-	if ((video.src_width + video.src_height) == 0)
-		return -1;
+								//// Now per MacroBlock data
 
-	while (1)
+    //each macroblock(MB) will have these
+    /*  Macroblock Data                                 | Type  |
+    | ------------------------------------------------- | ----- |
+    |   macroblock_header()                             |       | <---- this in 1st  partition
+    |   residual_data()                                 |       | <---- this in 1..8 next patitions */
+    // encode mode for each macroblock
+    // vertical mode for the first pass
+	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
 	{
-		while (ch != 'F') 
+        /*  start of macroblock_header() block  */
+        /*  macroblock_header()                         | Type  |
+        | --------------------------------------------- | ----- |
+        |   if (update_mb_segmentation_map)             |       |
+        |       segment_id                              |   T   | */
+        if (segmentation_enabled)
 		{
-			if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-				return -1 ;
-			frames.header[j++] = ch;
+			encoding_symbol s_tmp;
+			s_tmp.bits = frames.transformed_blocks[mb_num].segment_id;
+			s_tmp.size = 2;
+			write_symbol(vbe, s_tmp, new_segment_prob, mb_segment_tree);
 		}
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1 ;
-		frames.header[j++] = ch;
-		if (ch != 'R') 
-			continue;
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1 ;
-		frames.header[j++] = ch;
-		if (ch != 'A') 
-			continue;
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1 ;
-		frames.header[j++] = ch;
-		if (ch != 'M') 
-			continue;
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1 ;
-		frames.header[j++] = ch;
-		if (ch != 'E') 
-			continue;
-		if (!fread(&ch, sizeof(char), 1, input_file.handle)) 
-			return -1 ;
-		frames.header[j++] = ch;
-		if (ch != 0x0A) 
-			return -1;
-		break;
+
+        /*  if (mb_no_skip_coeff)                       |       |
+        |       mb_skip_coeff                           | B(p)  | */
+		if (frames.transformed_blocks[mb_num].non_zero_coeffs != 0) 
+			write_bool(vbe, frames.skip_prob, 0);
+		else write_bool(vbe, frames.skip_prob, 1);
+
+        /*  if (!key_frame)                             |       |
+        |       is_inter_mb                             | B(p)  | */
+			//  from spec:
+			/*After the feature specification (which is described in Section 10 and
+					is identical for intraframes and interframes), there comes a
+					Bool(prob_intra), which indicates inter-prediction (i.e., prediction
+					from prior frames) when true and intra-prediction (i.e., prediction
+					from already-coded portions of the current frame) when false. The
+					zero-probability prob_intra is set by field J of the frame header.*/
+		if (frames.current_is_key_frame == 0) 
+			write_bool(vbe, prob_intra, (frames.e_data[mb_num].is_inter_mb == 1));
+		if ((frames.current_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
+		{
+		/*  if (is_inter_mb) {                          |       |
+        |       mb_ref_frame_sel1                       | B(p)  |*/
+			//selects the reference frame to be used; last frame (0), golden/alternate (1)
+			int ref = (frames.transformed_blocks[mb_num].reference_frame != LAST);
+			write_bool(vbe, prob_last, ref);
+
+		/*      if (mb_ref_frame_sel1)                  |       |
+        |           mb_ref_frame_sel2                   | B(p)  |*/
+			if (ref == 1) {
+				ref = (frames.transformed_blocks[mb_num].reference_frame == ALTREF);
+				write_bool(vbe, prob_gf, ref);
+
+			}
+
+        /*      mv_mode                                 |   T   |// determines the macroblock motion vectormode
+        |       if (mv_mode == SPLITMV) {               |       |
+        |           mv_split_mode                       |   T   |
+        |           for (i = 0; i < numMvs; i++) {      |       |
+        |               sub_mv_mode                     |   T   |
+        |               if (sub_mv_mode == NEWMV4x4) {  |       |
+        |                   read_mvcomponent()          |       |
+        |                   read_mvcomponent()          |       |
+        |               }                               |       |
+        |           }                                   |       |
+        |       } else if (mv_mode == NEWMV) {          |       |
+        |           read_mvcomponent()                  |       |
+        |       }                                       |       |*/
+			//we'll do all these left inter encodings in distinct function
+			bool_encode_inter_mb_modes_and_mvs(vbe, mb_num); 
+			// part for only inter over
+		}
+        /*  } else { /* intra mb                        |       | */
+		else if (frames.current_is_key_frame == 1)
+		{
+        /*      intra_y_mode                            |   T   | */
+        /*      if (intra_y_mode == B_PRED) {           |       |
+        |           for (i = 0; i < 16; i++)            |       |
+        |               intra_b_mode                    |   T   |
+        |       }                                       |       | */
+        /*      intra_uv_mode                           |   T   |
+        |   }                                           |       |  */
+			encoding_symbol s_tmp;
+			// now encode B_PRED as luma mode
+			// prefix kf_ (!!!) for probabilitiess in key frame (and kf_ymode_tree)
+			s_tmp.bits = 0; // B_PRED = "0" in spec in kf_mode
+			s_tmp.size = 1; 
+			write_symbol(vbe, s_tmp, kf_ymode_prob, kf_ymode_tree);
+			{ int b_num, ctx1, ctx2, bp, mbp; //"p" for "previous"
+			for(b_num = 0; b_num < 16; ++b_num)
+			{
+				// imaginary blocks outside frame - B_DC_PRED
+				if ( (mb_num < video.mb_width) && (b_num < 4) )
+					ctx1 = B_DC_PRED;
+				else {
+					if (b_num < 4) {
+						mbp = mb_num - video.mb_width;
+						bp = b_num + 12;
+					} 
+					else {
+						mbp = mb_num;
+						bp = b_num - 4;
+					}
+					ctx1 = frames.e_data[mbp].mode[bp];
+				}
+				if ( ((mb_num % video.mb_width) == 0) && ((b_num & 0x3) == 0) )
+					ctx2 = B_DC_PRED;
+				else {
+					if ((b_num & 0x3) == 0) {
+						mbp = mb_num - 1;
+						bp = b_num + 3;
+					} 
+					else {
+						mbp = mb_num;
+						bp = b_num - 1;
+					}
+					ctx2 = frames.e_data[mbp].mode[bp];
+				}
+
+				// in spec there is a bmode_tree
+				// while the tree itself is correct, 
+				// HU, HD, VL and LD tokens in comments have one extra "1"
+				// so read the trees, not the spec :)
+				const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
+				const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
+
+				s_tmp.bits = bmode_bits[frames.e_data[mb_num].mode[b_num]];
+				s_tmp.size = bmode_size[frames.e_data[mb_num].mode[b_num]];
+				write_symbol(vbe, s_tmp, kf_bmode_prob[ctx1][ctx2], bmode_tree);
+			} }
+
+
+			// and now TM_PRED as chroma (different bits value!!!);
+			s_tmp.bits = 7; //TM_PRED = "111"
+			s_tmp.size = 3;
+			write_symbol(vbe, s_tmp, kf_uv_mode_prob, uv_mode_tree);
+		}
+		else // intra MB in inter-frame
+		{
+			// similar but different context
+			encoding_symbol s_tmp;
+			// now encode B_PRED as luma mode
+			s_tmp.bits = 7; // B_PRED = "111" for P-frames
+			s_tmp.size = 3; 
+			write_symbol(vbe, s_tmp, new_ymode_prob, ymode_tree);
+			cl_int b_num;
+			const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
+			const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
+			for(b_num = 0; b_num < 16; ++b_num)
+			{
+				s_tmp.bits = bmode_bits[frames.e_data[mb_num].mode[b_num]];
+				s_tmp.size = bmode_size[frames.e_data[mb_num].mode[b_num]];
+				write_symbol(vbe, s_tmp, bmode_prob, bmode_tree);
+			}
+			// chroma tree is the same for I and P, but probs are different
+			s_tmp.bits = 7; //TM_PRED = "111"
+			s_tmp.size = 3;
+			write_symbol(vbe, s_tmp, new_uv_mode_prob, uv_mode_tree);
+		}
+        /*  end of macroblock_header() block  */
+    } // end of per macroblock cycle
+
+	// at the end of each partition - flush
+	flush_bool_encoder(vbe);
+	frames.encoded_frame_size = vbe->count + bool_offset;
+
+	//now we put uncompressed data at the first 10 bytes of partition
+	/*frame_tag											| f(24) |
+	| if (key_frame) {									|		|
+	|	start_code										| f(24) |
+	|	horizontal_size_code							| f(16) |
+	|	vertical_size_code								| f(16) |
+	| }													|		| */
+	// frame tag : 1 bit = key(0), not-key(1)
+	// The start_code is a constant 3-byte pattern having value 0x9d012a. (byte0->2)
+
+	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
+	cl_uint buf;
+	buf = (frames.current_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
+	buf |= (0 << 1); /* version 0 in bits 3-1 */
+	// version 0 - bicubic interpolation
+	// version 1-2 - bilinear
+	// version 3 - no interpolation
+	// doesn't make difference for decoder's loop filter
+	buf |= 0x10; /* this bit indicates that the frame should be shown */
+	buf |= (vbe->count << 5); 
+
+	partition[0] = (cl_uchar)(buf & 0xff);
+	partition[1] = (cl_uchar)((buf>>8) & 0xff);
+	partition[2] = (cl_uchar)((buf>>16) & 0xff);
+
+	if (frames.current_is_key_frame)
+	{
+		partition[3] = 0x9d;
+		partition[4] = 0x01;
+		partition[5] = 0x2a;
+		// upscaling == 0
+		partition[6] = (cl_uchar)(video.dst_width & 0x00FF);
+		partition[7] = (cl_uchar)((video.dst_width >> 8) & 0x00FF);
+		partition[8] = (cl_uchar)(video.dst_height & 0x00FF);
+		partition[9] = (cl_uchar)((video.dst_height >> 8) & 0x00FF);
 	}
 
-	video.dst_width = video.src_width; //output of the same size for now
-	video.dst_height = video.src_height;
-	frames.header_sz = j - 6; //exclude FRAME<0x0A> from header
-	frames.header[frames.header_sz] = 0;
-	printf("%d:%s", frames.header_sz, frames.header);
-	return 0;
+	return;
 }
