@@ -1,7 +1,6 @@
-#include <CL\cl.h>
+#include <CL/cl.h>
 #include <conio.h>
 #include <stdio.h>
-#include <io.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <memory.h>

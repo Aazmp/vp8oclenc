@@ -981,7 +981,9 @@ int OpenYUV420FileAndParseHeader()
 	int frame_start = 0;
 	if (input_file.path[0] == '@') {
 		input_file.handle = stdin;
+#ifdef _WIN32
 		setmode(0, O_BINARY); //0x8000
+#endif
 	}
 	else 
 		input_file.handle = fopen(input_file.path,"rb");

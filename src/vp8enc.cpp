@@ -256,7 +256,7 @@ int main(int argc, char *argv[])
 	if (ParseArgs(argc, argv) < 0) 
 	{
 		printf("\npress any key to quit\n");
-		getch(); return -1;
+		return -1;
 	}
 	
     OpenYUV420FileAndParseHeader();
@@ -265,7 +265,7 @@ int main(int argc, char *argv[])
     init_all();
 	if ((device.state_cpu != 0) || (device.state_gpu != 0)) {
 		printf("\npress any key to quit\n");
-		getch(); return -1; 
+		return -1; 
 	}
 	printf("initialization complete;\n");
 
