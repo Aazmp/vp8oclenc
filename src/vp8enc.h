@@ -1,13 +1,15 @@
 #include <CL/cl.h>
-#include <conio.h>
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <memory.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <io.h>
+#endif
 
-#define QUANT_TO_FILTER_LEVEL 4
+#define QUANT_TO_FILTER_LEVEL 8
 #define DEFAULT_ALTREF_RANGE 5
 
 static const cl_uchar vp8_dc_qlookup[128] =
@@ -266,6 +268,7 @@ struct videoContext
 
 	int do_loop_filter_on_gpu;
 	int thread_limit;
+	int print_info;
 
 	float SSIM_target;
 
@@ -298,6 +301,8 @@ struct hostFrameBuffers
 	segment_data segments_data[4];
     cl_uchar *encoded_frame;
 	cl_uint encoded_frame_size;
+	cl_uint prev_frame_size;
+	cl_ulong video_size;
     cl_uchar *current_frame_pos_in_pack;
     cl_int current_is_key_frame;
 	cl_int current_is_altref_frame;
@@ -329,6 +334,14 @@ struct fileContext
     FILE * handle;
     char * path;
     int cur_pos;
+};
+
+struct encoderStatistics
+{
+	int scene_changes_by_color;
+	int scene_changes_by_ssim;
+	int scene_changes_by_bitrate;
+	int scene_changes_by_replaced;
 };
 
 static const unsigned char k_default_coeff_probs [4][8][3][11] =

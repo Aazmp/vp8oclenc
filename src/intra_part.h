@@ -865,6 +865,11 @@ float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_ucha
 	denom = (M1f*M1f + M2f*M2f + c1)*((float)D1 + (float)D2 + c2);
 	ssim += num/denom;
 
+	M1 -= M2;
+	M1 = (M1 < 0) ? -M1 : M1;
+	M1f = (M1 > 4) ? (float)M1*0.02f : 0.0f;
+	ssim -= M1f;
+
 	for(i = 0; i < 8; ++i)
 		for(j = 0; j < 8; ++j) {
 			M1 += (int)frame1V[i*cwidth1+j];
@@ -889,6 +894,12 @@ float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_ucha
 	denom = (M1f*M1f + M2f*M2f + c1)*((float)D1 + (float)D2 + c2);
 
 	ssim += num/denom;
+
+	M1 -= M2;
+	M1 = (M1 < 0) ? -M1 : M1;
+	M1f = (M1 > 4) ? (float)M1*0.02f : 0.0f;
+	ssim -= M1f;
+
 	ssim /= 3;
 
 	return ssim;

@@ -1,6 +1,3 @@
-//a way to define path to OpenCL.lib
-#pragma comment(lib,"C:\\Program Files (x86)\\AMD APP SDK\\2.9\\lib\\x86\\OpenCL.lib")
-
 // all global structure definitions (fileContext, videoContext, deviceContext...)
 #include "vp8enc.h"
 
@@ -12,6 +9,7 @@ struct fileContext	input_file, //YUV4MPEG2
 struct deviceContext device; //both GPU and CPU OpenCL-devices (different handles, memory-objects, commlines...)
 struct videoContext video; //properties of the video (sizes, indicies, vector limits...)
 struct hostFrameBuffers frames; // host buffers, frame number, current/previous frame flags...
+struct encoderStatistics encStat;
 
 #include "encIO.h"
 #include "init.h"
@@ -193,7 +191,8 @@ void check_SSIM()
 	}
 	
 	frames.new_SSIM /= (float)video.mb_count;
-	//printf("Fr %d(P)=> Avg SSIM=%f; MinSSIM=%f(%f); replaced:%d\n", frames.frame_number,frames.new_SSIM,min1,min2,frames.replaced);
+	if (video.print_info) 
+		printf("%d>AvgSSIM=%f; MinSSIM=%f(%f); repl:%d ", frames.frame_number,frames.new_SSIM,min1,min2,frames.replaced);
 	return;
 }
 
@@ -269,6 +268,11 @@ int main(int argc, char *argv[])
 	}
 	printf("initialization complete;\n");
 
+	encStat.scene_changes_by_color = 0;
+	encStat.scene_changes_by_ssim = 0;
+	encStat.scene_changes_by_replaced = 0;
+	encStat.scene_changes_by_bitrate = 0;
+
     frames.frames_until_key = 1;
 	frames.frames_until_altref = 2;
     frames.frame_number = 0;
@@ -278,6 +282,8 @@ int main(int argc, char *argv[])
 	write_output_header();
 	//open_dump_file();
 
+	frames.video_size = 0;
+	frames.encoded_frame_size = 0;
     while (get_yuv420_frame() > 0)
     {
 		frames.prev_is_key_frame = frames.current_is_key_frame; 
@@ -292,6 +298,9 @@ int main(int argc, char *argv[])
 		frames.golden_frame_number = (frames.current_is_golden_frame) ? frames.frame_number : frames.golden_frame_number;
 		frames.altref_frame_number = (frames.current_is_altref_frame) ? frames.frame_number : frames.altref_frame_number;
 
+		frames.prev_frame_size = frames.encoded_frame_size;
+		frames.video_size += frames.encoded_frame_size;
+
         if (frames.current_is_key_frame)
         {
 			prepare_segments_data();
@@ -299,6 +308,7 @@ int main(int argc, char *argv[])
 		}
         else if (scene_change()) 
 		{
+			++encStat.scene_changes_by_color;
 			frames.current_is_key_frame = 1;
 			prepare_segments_data(); // redo because loop filtering differs
 			intra_transform();
@@ -321,18 +331,20 @@ int main(int argc, char *argv[])
 			check_SSIM();
 			if ((frames.replaced > (video.mb_count/4)) || (frames.new_SSIM < video.SSIM_target))
 			{
+				if (frames.new_SSIM < video.SSIM_target) ++encStat.scene_changes_by_ssim;
+				else ++encStat.scene_changes_by_replaced;
 				// redo as intra
 				frames.current_is_key_frame = 1;
 				prepare_segments_data();
 				intra_transform();
-				printf("key frame FORCED by bad inter-result: replaced(%d) and SSIM(%f)!\n",frames.replaced,frames.new_SSIM);
+				if (video.print_info) 
+					printf("\nkey frame FORCED by bad inter-result: replaced(%d) and SSIM(%f)!\n",frames.replaced,frames.new_SSIM);
 			}
 
         }
 		// searching for MBs to be skiped 
 		prepare_filter_mask_and_non_zero_coeffs();
 		do_loop_filter();
-		//dump();
 
 		if (video.do_loop_filter_on_gpu)
 			device.state_cpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
@@ -341,6 +353,26 @@ int main(int argc, char *argv[])
 
 		//if ((frames.frame_number % video.framerate) == 0) printf("second %d encoded\n", frames.frame_number/video.framerate);
 		gather_frame();
+		if (video.print_info) 
+			printf("br=%dk, frame~%dk\n", (int)(frames.video_size*video.framerate*8/(frames.frame_number+1)/1024), (frames.encoded_frame_size+512)/1024);
+		if ((frames.encoded_frame_size/1024 > frames.prev_frame_size*12/1024) 
+			&& (!frames.current_is_key_frame) && (!frames.current_is_altref_frame))
+		{
+			++encStat.scene_changes_by_bitrate;
+			if (video.print_info) 
+				printf("frames size jumped from %dk to %dk (by %d times)\n", frames.prev_frame_size/1024, frames.encoded_frame_size/1024, frames.encoded_frame_size/frames.prev_frame_size);
+			// redo as intra
+			frames.current_is_key_frame = 1;
+			prepare_segments_data();
+			intra_transform();
+			prepare_filter_mask_and_non_zero_coeffs();
+			do_loop_filter();
+			if (video.do_loop_filter_on_gpu)
+				device.state_cpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
+			entropy_encode();
+			gather_frame();
+		}
+		//dump();
 		write_output_file();
         ++frames.frame_number;
     }
@@ -348,6 +380,10 @@ int main(int argc, char *argv[])
 	//fclose(dump_file.handle);
 	finalize();
 
+	printf("%d scene changes detected by color change\n", encStat.scene_changes_by_color);
+	printf("%d scene changes detected by low ssim value\n", encStat.scene_changes_by_ssim);
+	printf("%d scene changes detected by high amount of replaced blocks\n", encStat.scene_changes_by_replaced);
+	printf("%d scene changes detected by bitrate raise\n", encStat.scene_changes_by_bitrate);
 	//getch();
 	return 777;
 }

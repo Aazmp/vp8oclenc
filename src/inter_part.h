@@ -136,7 +136,7 @@ void inter_transform()
 	cl_int val;
 	// if golden and altref buffers represent different from last buffer frame
 	// and altref is not the same as altref
-	cl_int use_golden = !frames.prev_is_golden_frame;
+	cl_int use_golden = !frames.prev_is_golden_frame; 
 	cl_int use_altref = (!frames.prev_is_altref_frame) && (frames.altref_frame_number != frames.golden_frame_number);
 	//prepare downsampled frames and image objects
 	prepare_GPU_buffers();

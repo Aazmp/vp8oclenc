@@ -675,6 +675,7 @@ int ParseArgs(int argc, char *argv[])
 	int i,ii;
     i = 1;
 	video.do_loop_filter_on_gpu = 0;
+	video.print_info = 0;
     while (i < argc)
     {
 		ii = i;
@@ -889,6 +890,11 @@ int ParseArgs(int argc, char *argv[])
 				video.do_loop_filter_on_gpu = 1;
 				if (++i >= argc) break;
             }
+			if (memcmp(&argv[i][1], "print-info", 10)==0)
+            {
+				video.print_info = 1;
+				if (++i >= argc) break;
+            }
 		}    
 		if (i == ii)
 		{
@@ -981,9 +987,7 @@ int OpenYUV420FileAndParseHeader()
 	int frame_start = 0;
 	if (input_file.path[0] == '@') {
 		input_file.handle = stdin;
-#ifdef _WIN32
 		setmode(0, O_BINARY); //0x8000
-#endif
 	}
 	else 
 		input_file.handle = fopen(input_file.path,"rb");
