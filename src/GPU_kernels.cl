@@ -75,6 +75,7 @@ static const int vp8_ac_qlookup[128] =
 };
 
 __constant int vector_diff_weight = 64;
+__constant int DC_UNSIGNIFICANCE = 4;
 
 void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __L3) 
 {
@@ -125,7 +126,7 @@ void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __
 	*__L2 = convert_int4(abs(*__L2));
 	*__L3 = convert_int4(abs(*__L3));
 	
-	(*__L0).x /= 4;
+	(*__L0).x /= DC_UNSIGNIFICANCE;
 	// just a SATD
 	(*__L0).x +=(*__L0).y + (*__L0).z + (*__L0).w +
 	(*__L1).x + (*__L1).y + (*__L1).z + (*__L1).w +
@@ -201,7 +202,8 @@ void weight_opt(int4 *const XX, int16 *const L)
 	(*L).sF = ((((*L).sF * 2217) - ((*XX).w *5352) + 51000) >> 16);
 	
 	*L = convert_int16(abs(*L));
-	(*XX).x = (*L).s0/4 + (*L).s1 + (*L).s2 + (*L).s3 +
+	(*L).s0/=DC_UNSIGNIFICANCE;
+	(*XX).x = (*L).s0 + (*L).s1 + (*L).s2 + (*L).s3 +
 				(*L).s4 + (*L).s5 + (*L).s6 + (*L).s7 +
 				(*L).s8 + (*L).s9 + (*L).sA + (*L).sB +
 				(*L).sC + (*L).sD + (*L).sE + (*L).sF;
@@ -1793,6 +1795,11 @@ __kernel void count_SSIM_chroma
 	cIL += (convert_float8(cFL7) - M1)*(convert_float8(cSL7) - M2);
 	C = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
 	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
+	
+	D1 = (M1 - M2);
+	D1 = select(D1,-D1,D1 < 0);
+	D2 = select(0.0f,0.02f*D1,D1 > 4);
+	C -= D2;
 	
 	metric[mb_num] = C;
 	return;
