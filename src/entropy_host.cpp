@@ -549,6 +549,7 @@ void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 	macroblock_extra_data imaginary_edata;
 
 	imaginary_edata.base_mv.raw = 0;
+	imaginary_edata.is_inter_mb = 0;
 	imaginary_edata.parts = are16x16;
 
 	mb_edata = &(frames.e_data[mb_num]);
