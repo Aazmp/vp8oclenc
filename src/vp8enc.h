@@ -7,9 +7,10 @@
 
 #ifdef _WIN32
 #include <io.h>
+#pragma warning(disable: 4996)
 #endif
 
-#define QUANT_TO_FILTER_LEVEL 8
+#define QUANT_TO_FILTER_LEVEL 3
 #define DEFAULT_ALTREF_RANGE 5
 
 static const cl_uchar vp8_dc_qlookup[128] =
@@ -44,8 +45,10 @@ static const cl_short vp8_ac_qlookup[128] =
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
+//#define CPUPATH "CPU_kernels.cl"
+//#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	cl_uint raw;
@@ -224,6 +227,8 @@ struct deviceContext
 	size_t gpu_work_group_size_per_dim[1];
 	size_t cpu_work_items_per_dim[1];
 	size_t cpu_work_group_size_per_dim[1];
+
+	cl_int gpu_preferred_platform_number;
 
 };
 
