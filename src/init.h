@@ -20,6 +20,86 @@ char small_help[] = "\n"
 					"\n\n"
 					;
 
+int cl_info()
+{
+	int i, j;
+	char* value;
+	size_t valueSize;
+    cl_uint platformCount;
+    cl_platform_id* platforms;
+    cl_uint deviceCount;
+    cl_device_id* devices;
+    cl_uint uintVal;
+ 
+    // get all platforms
+    clGetPlatformIDs(0, NULL, &platformCount);
+    platforms = (cl_platform_id*) malloc(sizeof(cl_platform_id) * platformCount);
+    clGetPlatformIDs(platformCount, platforms, NULL);
+ 
+    for (i = 0; i < platformCount; i++) 
+	{
+		clGetPlatformInfo(platforms[i], CL_PLATFORM_NAME, 0, NULL, &valueSize);
+		value = (char*) malloc(valueSize);
+		clGetPlatformInfo(platforms[i], CL_PLATFORM_NAME, valueSize, value, NULL);
+        printf("%d. Platform: %s\n", i, value);
+        free(value);
+
+         // get all devices
+        clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, 0, NULL, &deviceCount);
+        devices = (cl_device_id*) malloc(sizeof(cl_device_id) * deviceCount);
+        clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL);
+ 
+        // for each device print critical attributes
+        for (j = 0; j < deviceCount; j++) 
+		{
+            // print device name
+            clGetDeviceInfo(devices[j], CL_DEVICE_NAME, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_NAME, valueSize, value, NULL);
+            printf(" %d. Device: %s\n", j, value);
+            free(value);
+ 
+            // print hardware device version
+            clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_VERSION, valueSize, value, NULL);
+            printf("  %d.%d Hardware version: %s\n", j, 1, value);
+            free(value);
+ 
+            // print software driver version
+            clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DRIVER_VERSION, valueSize, value, NULL);
+            printf("  %d.%d Software version: %s\n", j, 2, value);
+            free(value);
+
+            // print c version supported by compiler for device
+            clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, 0, NULL, &valueSize);
+            value = (char*) malloc(valueSize);
+            clGetDeviceInfo(devices[j], CL_DEVICE_OPENCL_C_VERSION, valueSize, value, NULL);
+            printf("  %d.%d OpenCL C version: %s\n", j, 3, value);
+            free(value);
+
+            // print parallel compute units
+            clGetDeviceInfo(devices[j], CL_DEVICE_MAX_COMPUTE_UNITS,
+                    sizeof(uintVal), &uintVal, NULL);
+            printf("  %d.%d Parallel compute units: %d\n", j, 4, uintVal);
+
+			// print max work group size
+            clGetDeviceInfo(devices[j], CL_DEVICE_MAX_WORK_GROUP_SIZE,
+                    sizeof(uintVal), &uintVal, NULL);
+            printf("  %d.%d Max work group size: %d\n", j, 4, uintVal);
+ 
+        }
+ 
+        free(devices);
+ 
+    }
+ 
+    free(platforms);
+    return 0;
+}
+
 int init_all()
 {
 	video.timestep = 1;
@@ -54,7 +134,8 @@ int init_all()
 	if (video.GOP_size > 1) {
 		device.device_gpu = (cl_device_id*)malloc(sizeof(cl_device_id));
 		device.gpu_device_type = CL_DEVICE_TYPE_GPU;
-		device.state_gpu = clGetDeviceIDs(device.platforms[0], device.gpu_device_type, 1, device.device_gpu, NULL);
+		device.gpu_preferred_platform_number = (device.gpu_preferred_platform_number >= num_platforms) ? 0 : device.gpu_preferred_platform_number;
+		device.state_gpu = clGetDeviceIDs(device.platforms[device.gpu_preferred_platform_number], device.gpu_device_type, 1, device.device_gpu, NULL);
 		i = 1;
 		while ((device.state_gpu != CL_SUCCESS) && (i < (int)num_platforms)) 
 		{
@@ -77,8 +158,18 @@ int init_all()
 	if (video.GOP_size > 1) {
 		printf("reading GPU program...\n");
 		program_handle = fopen(GPUPATH, "rb");
+		if (program_handle == NULL)
+		{
+			printf("no file %s", GPUPATH);
+			return -1;
+		}
 		fseek(program_handle, 0, SEEK_END);
 		program_size = ftell(program_handle);
+		if (program_size < 32)
+		{
+			printf("no program in file %s", GPUPATH);
+			return -1;
+		}
 		rewind(program_handle); // set to start
 		char** device_program_source_gpu = (char**)malloc(sizeof(char*));
 		*device_program_source_gpu = (char*)malloc(program_size+1);
@@ -88,11 +179,11 @@ int init_all()
 		device.program_gpu = clCreateProgramWithSource(device.context_gpu, 1, (const char**)device_program_source_gpu, NULL, &device.state_gpu);
 		printf("building GPU program...\n");
 		if (video.do_loop_filter_on_gpu) {
-			const char gpu_options[] = "-cl-std=CL1.2 -DLOOP_FILTER";
+			const char gpu_options[] = "-cl-std=CL1.0 -DLOOP_FILTER";
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		else {
-			const char gpu_options[] = "-cl-std=CL1.2";
+			const char gpu_options[] = "-cl-std=CL1.0";
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		if(device.state_gpu < 0)  //print log if there were mistakes during kernel building
@@ -148,8 +239,18 @@ int init_all()
 	// CPU:
 	printf("reading CPU program...\n");
 	program_handle = fopen(CPUPATH, "rb");
+	if (program_handle == NULL)
+	{
+		printf("no file %s", CPUPATH);
+		return -1;
+	}
 	fseek(program_handle, 0, SEEK_END);
 	program_size = ftell(program_handle);
+	if (program_size < 32)
+	{
+		printf("no program in file %s", GPUPATH);
+		return -1;
+	}
 	rewind(program_handle); // set to start
 	char** device_program_source_cpu = (char**)malloc(sizeof(char*));
 		*device_program_source_cpu = (char*)malloc(program_size+1);
@@ -671,11 +772,12 @@ int string_to_value(char *str)
 
 int ParseArgs(int argc, char *argv[])
 {
-    char f_o = 0, f_i = 0, f_qmax = 0, f_qmin = 0, f_qintra = 0, f_g = 0, f_partitions = 0, f_threads = 0, f_ls = 0,f_SSIM_target=0,f_altref_range=0; 
+    char f_o = 0, f_i = 0, f_qmax = 0, f_qmin = 0, f_qintra = 0, f_g = 0, f_partitions = 0, f_threads = 0, f_gpupn = 0,f_SSIM_target=0,f_altref_range=0; 
 	int i,ii;
     i = 1;
 	video.do_loop_filter_on_gpu = 0;
 	video.print_info = 0;
+	device.gpu_preferred_platform_number = 0;
     while (i < argc)
     {
 		ii = i;
@@ -684,6 +786,7 @@ int ParseArgs(int argc, char *argv[])
 			if ((argv[i][1] == 'h') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
 			{
 				printf("%s\n", small_help);
+				cl_info();
 				return -1;
 			}
             if ((argv[i][1] == 'i') && ((argv[i][2] == '\n') || (argv[i][2] == '\0')))
@@ -843,24 +946,23 @@ int ParseArgs(int argc, char *argv[])
                     return -1;
                 }
             }
-			if ((argv[i][1] == 'l') && (argv[i][2] == 's') && ((argv[i][3] == '\n') || (argv[i][3] == '\0')))
+			if (memcmp(&argv[i][1], "gpu-preferred-platform-number", 29) == 0)
             {
                 ++i;
                 if (i < argc)
                 {
-					video.loop_filter_sharpness = string_to_value(argv[i]);
+					device.gpu_preferred_platform_number = string_to_value(argv[i]);
 					if (video.loop_filter_sharpness < 0)
 					{
-						printf ("wrong format for loop_filter_sharpness! must be an integer from 0 to 63;\n");
+						printf ("wrong format for gpu-preferred-platform-number! must be a positive integer;\n");
 						return -1;
-					} else 
-						video.loop_filter_sharpness = (video.loop_filter_sharpness > 7) ? 7 : video.loop_filter_sharpness;
-                    f_ls = 1;
+					}
+                    f_gpupn = 1;
 					if (++i >= argc) break;
                 }
                 else
                 {
-                    printf ("no value for loop_filter_sharpness;\n");
+                    printf ("no value for gpu-preferred-platform-number;\n");
                     return -1;
                 }
             }
@@ -937,11 +1039,6 @@ int ParseArgs(int argc, char *argv[])
 		printf("no maximum number of threads specified - set to 2;\n");
 		video.thread_limit = 2;
 	}
-	if (f_ls == 0)
-    {
-		printf("no loop filter sharpness is specified - set to 0;\n");
-		video.loop_filter_sharpness = 0;
-    }
 	if (f_SSIM_target == 0)
 	{
 		printf("no SSIM intra-in-inter tuning");
