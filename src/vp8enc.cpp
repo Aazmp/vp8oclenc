@@ -1,3 +1,6 @@
+//a way to define path to OpenCL.lib
+//#pragma comment(lib,"C:\\Program Files (x86)\\AMD APP SDK\\2.9\\lib\\x86\\OpenCL.lib")
+
 // all global structure definitions (fileContext, videoContext, deviceContext...)
 #include "vp8enc.h"
 
@@ -73,6 +76,25 @@ void entropy_encode()
     return;
 }
 
+void get_loopfilter_strength(int *const red, cl_int *const sh)
+{
+	int i, avg = 0, div = 0;
+	for(i = 0; i < video.wrk_frame_size_luma; ++i)
+		avg += frames.current_Y[i];
+	avg += video.wrk_frame_size_luma/2;
+	avg /= video.wrk_frame_size_luma;
+	for(i = 0; i < video.wrk_frame_size_luma; ++i)
+		div += (frames.current_Y[i] - avg)*(frames.current_Y[i] - avg);
+	div += video.wrk_frame_size_luma/2;
+	div /= video.wrk_frame_size_luma;
+
+	*sh = div/64;
+	*sh = (*sh > 7) ? 7 : *sh;
+
+	*red = (avg*5/255) + 3;
+	return;
+}
+
 void prepare_segments_data()
 {
 	int i,qi;
@@ -96,6 +118,10 @@ void prepare_segments_data()
 	if (frames.current_is_altref_frame)
 		refqi = video.altrefqi;
 	else refqi = video.lastqi;
+
+	int reductor;
+	get_loopfilter_strength(&reductor, &video.loop_filter_sharpness);
+	
 	for (i = 0; i < 4; ++i)
 	{
 		frames.segments_data[i].y_ac_i = (frames.current_is_key_frame) ? video.qi_min : refqi[i];
@@ -121,7 +147,7 @@ void prepare_segments_data()
 		if (frames.uv_dc_q[i] > 132)
 			frames.uv_dc_q[i] = 132;
 		
-		frames.segments_data[i].loop_filter_level = frames.y_dc_q[i]/QUANT_TO_FILTER_LEVEL;
+		frames.segments_data[i].loop_filter_level = frames.y_dc_q[i]/reductor;
 		frames.segments_data[i].loop_filter_level = (frames.segments_data[i].loop_filter_level > 63) ? 63 : frames.segments_data[i].loop_filter_level;
 		frames.segments_data[i].loop_filter_level = (frames.segments_data[i].loop_filter_level < 0) ? 0 : frames.segments_data[i].loop_filter_level;
 
@@ -254,7 +280,6 @@ int main(int argc, char *argv[])
 	error_file.path = ERRORPATH;
 	if (ParseArgs(argc, argv) < 0) 
 	{
-		printf("\npress any key to quit\n");
 		return -1;
 	}
 	
@@ -262,8 +287,8 @@ int main(int argc, char *argv[])
     
 	printf("initialization started;\n");
     init_all();
-	if ((device.state_cpu != 0) || (device.state_gpu != 0)) {
-		printf("\npress any key to quit\n");
+	if ((device.state_cpu != 0) || (device.state_gpu != 0)) 
+	{
 		return -1; 
 	}
 	printf("initialization complete;\n");
@@ -329,7 +354,7 @@ int main(int argc, char *argv[])
 				frames.e_data[mb_num].is_inter_mb = 1;
 
 			check_SSIM();
-			if ((frames.replaced > (video.mb_count/4)) || (frames.new_SSIM < video.SSIM_target))
+			if ((frames.replaced > (video.mb_count/6)) || (frames.new_SSIM < video.SSIM_target))
 			{
 				if (frames.new_SSIM < video.SSIM_target) ++encStat.scene_changes_by_ssim;
 				else ++encStat.scene_changes_by_replaced;
