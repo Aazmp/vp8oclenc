@@ -50,7 +50,7 @@ typedef struct {
 	int vector_y;
 } vector_net;
 
-static const int vp8_dc_qlookup[128] =
+__constant const int vp8_dc_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  10,  11,  12,  13,  14,  15,  16,  17,  17,
      18,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  25,  25,  26,  27,  28,
@@ -62,7 +62,7 @@ static const int vp8_dc_qlookup[128] =
     122, 124, 126, 128, 130, 132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
 };
 
-static const int vp8_ac_qlookup[128] =
+__constant const int vp8_ac_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,
      20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,
@@ -532,7 +532,7 @@ __kernel void downsample_x2(__global uchar *const src_frame, //0 // bilinear
 }
 
 __kernel void luma_search_1step //when looking into downsampled and original frames
-						( 	__global uchar *const current_frame, //0
+						( 	__global uchar4 *const current_frame, //0
 							__global uchar *const prev_frame, //1
 							__global vector_net *const src_net, //2
 							__global vector_net *const dst_net, //3
@@ -577,42 +577,23 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	vector_x0 = vector_x; 
 	vector_y0 = vector_y;
 	
-	/*
-	vector_x0 = 0; 
-	vector_y0 = 0;
-	for (py = cy - 8; py <= (cy + 8); py += 8)
-		for (px = cx - 8; px <= (cx + 8); px += 8)
-		{
-			px = select(px,0,px<0); px = select(px,width-8,px>(width-8));
-			py = select(py,0,py<0); py = select(py,height-8,py>(height-8));
-			b8x8_num = (py/16)*net_width + (px/16);
-			vector_x0 += src_net[b8x8_num].vector_x;
-			vector_y0 += src_net[b8x8_num].vector_y;
-		}
-	vector_x0 /= 9*pixel_rate;
-	vector_y0 /= 9*pixel_rate;
-	*/
-	
 	b8x8_num = (cy/8)*net_width + (cx/8);
 	ci = cy*width + cx;
 	
-	CL0 = vload8(0, current_frame + ci); ci += width;
-	CL1 = vload8(0, current_frame + ci); ci += width;
-	CL2 = vload8(0, current_frame + ci); ci += width;
-	CL3 = vload8(0, current_frame + ci); ci += width;
-	CL4 = vload8(0, current_frame + ci); ci += width;
-	CL5 = vload8(0, current_frame + ci); ci += width;
-	CL6 = vload8(0, current_frame + ci); ci += width;
-	CL7 = vload8(0, current_frame + ci); 
+	ci /= 4;
+	CL0.s0123 = current_frame[ci]; CL0.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL1.s0123 = current_frame[ci]; CL1.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL2.s0123 = current_frame[ci]; CL2.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL3.s0123 = current_frame[ci]; CL3.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL4.s0123 = current_frame[ci]; CL4.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL5.s0123 = current_frame[ci]; CL5.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL6.s0123 = current_frame[ci]; CL6.s4567 = current_frame[ci + 1]; ci+=width/4;
+	CL7.s0123 = current_frame[ci]; CL7.s4567 = current_frame[ci + 1];
 
 	MinDiff = 0xffff;
 
-	int delta = 2;
-	//delta = (pixel_rate < 16) ? (delta+1) : delta;
-	//delta = (pixel_rate < 4) ? (delta+1) : delta;
-	
-	start_x	= cx + vector_x - delta;	end_x = cx + vector_x + delta;
-	start_y = cy + vector_y - delta;	end_y = cy + vector_y + delta;
+	start_x	= cx + vector_x - 2;	end_x = cx + vector_x + 2;
+	start_y = cy + vector_y - 2;	end_y = cy + vector_y + 2;
 	
 	start_x = (start_x < 0) ? 0 : start_x;
 	end_x = (end_x > (width - 8)) ? (width - 8) : end_x;
@@ -665,14 +646,18 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
 			
 			
-			vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
-			vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
+			//vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
+			vector_x = (Diff < MinDiff) ? px : vector_x;
+			//vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
+			vector_y = (Diff < MinDiff) ? py : vector_y;
 			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;			
     	} 
     } 
 	
-	dst_net[b8x8_num].vector_x = (vector_x*pixel_rate);
-	dst_net[b8x8_num].vector_y = (vector_y*pixel_rate);
+	//dst_net[b8x8_num].vector_x = (vector_x*pixel_rate);
+	dst_net[b8x8_num].vector_x = (vector_x-cx)*pixel_rate;
+	//dst_net[b8x8_num].vector_y = (vector_y*pixel_rate);
+	dst_net[b8x8_num].vector_y = (vector_y-cy)*pixel_rate;
 	
 	return;
 	
@@ -1091,8 +1076,10 @@ void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const s
 	return;
 }
 
-__kernel void luma_search_2step //searching in interpolated picture
-						( 	__global uchar *const current_frame, //0
+__kernel 
+__attribute__((reqd_work_group_size(256, 1, 1)))
+void luma_search_2step //searching in interpolated picture
+						( 	__global uchar4 *const current_frame, //0
 							__read_only image2d_t ref_frame, //1
 							__global vector_net *const net, //2
 							__global vector_net *const ref_net, //3
@@ -1111,142 +1098,125 @@ __kernel void luma_search_2step //searching in interpolated picture
 	int4 li;
 	uint4 buf4ui;
 	
-	__private int MinDiff, Diff, b8x8_num;  
+	__private int MinDiff, Diff;
+	__private const int b8x8_num = get_global_id(0); 
+	if (b8x8_num >= (width*height/64)) return;
+	__private const short lid = get_local_id(0);
+	__private const short lsz = get_local_size(0);
 	
 	__local uchar4 LDS[4*1024]; //16kb
 	
 	// the code has become unreadable, but it's better not to use defines (compiler probably go mad)
 		
 	// now b8x8_num represents absolute number of 8x8 block (net_index)
-	b8x8_num = get_global_id(0);
 	pdata1.s4 = net[b8x8_num].vector_x; //vector_x = ...
 	pdata1.s5 = net[b8x8_num].vector_y; //vector_y = ...
-	pdata1.s4 *= 4;	pdata1.s5 *= 4;
+	pdata1.s4 *= 4; pdata1.s5 *= 4;
 	pdata1.s6 = pdata1.s4; // vector_x0 = vector_x
 	pdata1.s7 = pdata1.s5; // vector_y0 = vector_y
 	
-	pdata2.s0 = (b8x8_num % (width/8))*8; // x = ...
-	pdata2.s1 = (b8x8_num / (width/8))*8; // y = ...
+	Diff = width/8;
+	pdata2.s0 = (b8x8_num % (Diff))*8; // x = ...
+	pdata2.s1 = (b8x8_num / (Diff))*8; // y = ...
 	
-	/*
-	// vector around (Diff as index)
-	// left (if x >= 8 or else the same as current)
-	Diff = select(b8x8_num, b8x8_num - 1, pdata2.s0 >= 8);
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// upleft (ix >= 8 and y>=8)
-	Diff = select(Diff, Diff - (width/8), pdata2.s1 >= 8);
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// up
-	Diff = select(b8x8_num, b8x8_num - (width/8), pdata2.s1 >= 8);
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// upright
-	Diff = select(Diff, Diff + 1, pdata2.s0 < (width - 8));
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// right
-	Diff = select(b8x8_num, b8x8_num + 1, pdata2.s0 < (width - 8));
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// downright
-	Diff = select(Diff, Diff + (width/8), pdata2.s1 < (width - 8));
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// down
-	Diff = select(b8x8_num, b8x8_num + (width/8), pdata2.s1 < (width - 8));
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	// downleft
-	Diff = select(Diff, Diff - 1, pdata2.s0 >= 8);
-	pdata1.s6 += net[Diff].vector_x*4; //vector_x0 += ...
-	pdata1.s7 += net[Diff].vector_y*4; //vector_y0 += ...
-	pdata1.s6 /= 9;
-	pdata1.s7 /= 9;
-	*/
+	Diff = (pdata2.s1*width + pdata2.s0)/4;
+	MinDiff = width/4;
 	
-	Diff = pdata2.s1*width + pdata2.s0;
-	LDS[(int)get_local_id(0)] = vload4(0, current_frame + Diff);; 
-	LDS[(int)get_local_size(0) + (int)get_local_id(0)] = vload4(0, current_frame + Diff + 4);  Diff += width;
-	LDS[mad24((int)get_local_size(0),2,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),3,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),4,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),5,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),6,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),7,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),8,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),9,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),10,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),11,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),12,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),13,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); Diff += width;
-	LDS[mad24((int)get_local_size(0),14,(int)get_local_id(0))] = vload4(0, current_frame + Diff);
-	LDS[mad24((int)get_local_size(0),15,(int)get_local_id(0))] = vload4(0, current_frame + Diff + 4); 
-
+	LDS[(int)lid] = current_frame[Diff];
+	LDS[(int)lsz + (int)lid] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*2+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*3+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*4+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*5+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*6+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*7+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*8+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*9+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*10+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*11+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*12+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*13+lid)] = current_frame[Diff+1]; Diff += MinDiff;
+	LDS[(int)(lsz*14+lid)] = current_frame[Diff];
+	LDS[(int)(lsz*15+lid)] = current_frame[Diff+1];	
+	
+	
 	MinDiff = 0x7fff;
-	pdata2.s0 *= 4; pdata2.s1 *= 4;
+	pdata2.s0 *= 4; 
+	pdata2.s1 *= 4;
 	
 	pdata1.s0 = pdata2.s0 + pdata1.s4 - 2;	pdata1.s1 = pdata2.s0 + pdata1.s4 + 2;
 	pdata1.s2 = pdata2.s1 + pdata1.s5 - 2;	pdata1.s3 = pdata2.s1 + pdata1.s5 + 2;
 	
-	pdata1.s4 = 0; pdata1.s5 = 0; 
+	pdata1.s4 = width*4 - 32; 
+	pdata1.s5 = height*4 - 32; 
 	
 	pdata1.s0 = (pdata1.s0 < 0) ? 0 : pdata1.s0;
-	pdata1.s1 = (pdata1.s1 > (width*4 - 32)) ? (width*4 - 32) : pdata1.s1;
+	pdata1.s1 = (pdata1.s1 > pdata1.s4) ? pdata1.s4 : pdata1.s1;
 	pdata1.s2 = (pdata1.s2 < 0) ? 0 : pdata1.s2;
-	pdata1.s3 = (pdata1.s3 > (height*4 - 32)) ? (height*4 - 32) : pdata1.s3;
-
-	#pragma unroll 1
+	pdata1.s3 = (pdata1.s3 > pdata1.s5) ? pdata1.s5 : pdata1.s3;
+	//pdata1.s0 = select(pdata1.s0,(short)0,(short)(pdata1.s0 < 0));
+	//pdata1.s1 = select(pdata1.s1,pdata1.s4,(short)(pdata1.s1 > pdata1.s4));
+	//pdata1.s2 = select(pdata1.s2,(short)0,(short)(pdata1.s2 < 0));
+	//pdata1.s3 = select(pdata1.s3,pdata1.s5,(short)(pdata1.s3 > pdata1.s5));
+	
+	//#pragma unroll 1
 	for (pdata2.s2 = pdata1.s0; pdata2.s2 <= pdata1.s1; ++pdata2.s2)
 	{
-		#pragma unroll 1
+		//#pragma unroll 1
 		for (pdata2.s3 = pdata1.s2; pdata2.s3 <= pdata1.s3; ++pdata2.s3)
 		{
-			pdata2.s6=pdata2.s2%4; pdata2.s7=pdata2.s3%4;
-			pdata2.s67 *= 2;
+			pdata2.s6=pdata2.s2%4; //x qpel displacement
+			pdata2.s7=pdata2.s3%4; //y qpel displacement
+			pdata2.s6 *= 2; 
+			pdata2.s7 *= 2;
 			pdata2.s4 = pdata2.s2/4; pdata2.s5 = pdata2.s3/4;
 			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[(int)get_local_id(0)]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)get_local_size(0),2,(int)get_local_id(0))]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)get_local_size(0),4,(int)get_local_id(0))]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)get_local_size(0),6,(int)get_local_id(0))]) - DL.sCDEF;
+			DL.s0123 = convert_int4(LDS[(int)lid]) - DL.s0123;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,2,(int)lid)]) - DL.s4567;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,4,(int)lid)]) - DL.s89AB;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,6,(int)lid)]) - DL.sCDEF;
 			weight_opt(&li, &DL);	
 			Diff = li.s0;
-			pdata2.s4 = (pdata2.s2 + 16)/4; pdata2.s5 = pdata2.s3/4; 
+			//pdata2.s4 = (pdata2.s2 + 16)/4; pdata2.s5 = pdata2.s3/4; 
+			pdata2.s4 += 4; //(0;4)
 			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[(int)get_local_size(0)+(int)get_local_id(0)]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)get_local_size(0),3,(int)get_local_id(0))]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)get_local_size(0),5,(int)get_local_id(0))]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)get_local_size(0),7,(int)get_local_id(0))]) - DL.sCDEF;
+			DL.s0123 = convert_int4(LDS[(int)lsz+(int)lid]) - DL.s0123;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,3,(int)lid)]) - DL.s4567;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,5,(int)lid)]) - DL.s89AB;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,7,(int)lid)]) - DL.sCDEF;
 			weight_opt(&li, &DL);	
 			Diff += li.s0;
 			pdata2.s4 = pdata2.s2/4; pdata2.s5 = (pdata2.s3 + 16)/4; 
+			//pdata2.s4 -= 4; pdata2.s5 += 4;
 			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[mad24((int)get_local_size(0),8,(int)get_local_id(0))]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)get_local_size(0),10,(int)get_local_id(0))]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)get_local_size(0),12,(int)get_local_id(0))]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)get_local_size(0),14,(int)get_local_id(0))]) - DL.sCDEF;
+			DL.s0123 = convert_int4(LDS[mad24((int)lsz,8,(int)lid)]) - DL.s0123;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,10,(int)lid)]) - DL.s4567;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,12,(int)lid)]) - DL.s89AB;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,14,(int)lid)]) - DL.sCDEF;
 			weight_opt(&li, &DL);	
 			Diff += li.s0;
-			pdata2.s4 = (pdata2.s2 + 16)/4; pdata2.s5 = (pdata2.s3 + 16)/4;
+			pdata2.s4 = (pdata2.s2 + 16)/4; //pdata2.s5 = (pdata2.s3 + 16)/4;
 			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[mad24((int)get_local_size(0),9,(int)get_local_id(0))]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)get_local_size(0),11,(int)get_local_id(0))]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)get_local_size(0),13,(int)get_local_id(0))]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)get_local_size(0),15,(int)get_local_id(0))]) - DL.sCDEF;
+			DL.s0123 = convert_int4(LDS[mad24((int)lsz,9,(int)lid)]) - DL.s0123;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,11,(int)lid)]) - DL.s4567;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,13,(int)lid)]) - DL.s89AB;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,15,(int)lid)]) - DL.sCDEF;
 			weight_opt(&li, &DL);	
 			Diff += li.s0;
+		
 			
-			pdata2.s67 /= 2;
 			Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
+			pdata2.s6 = (Diff < MinDiff); 
 			
-			pdata1.s4 = (Diff < MinDiff) ? (pdata2.s2 - pdata2.s0) : pdata1.s4;
-			pdata1.s5 = (Diff < MinDiff) ? (pdata2.s3 - pdata2.s1) : pdata1.s5;
-			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
+			pdata1.s4 = pdata2.s6 ? pdata2.s2 : pdata1.s4;
+			pdata1.s5 = pdata2.s6 ? pdata2.s3 : pdata1.s5;
+			
+			MinDiff = pdata2.s6 ? Diff : MinDiff;
     	} 
     } 
 
+	pdata1.s4 -= pdata2.s0;
+	pdata1.s5 -= pdata2.s1;
 	MinDiff -= ((int)abs(pdata1.s4 - pdata1.s6) + (int)abs(pdata1.s5 - pdata1.s7))*vector_diff_weight;
 	
 	ref_net[b8x8_num].vector_x = pdata1.s4;
@@ -1255,7 +1225,6 @@ __kernel void luma_search_2step //searching in interpolated picture
 	
 	return;
 }
-
 
 __kernel void select_reference(__global vector_net *const last_net, //0
 								__global vector_net *const golden_net, //1
@@ -1411,7 +1380,6 @@ __kernel void prepare_predictors_and_residual(__global uchar *const current_fram
 	
 	return;	
 }
-
 
 __kernel void pack_8x8_into_16x16(__global macroblock *const MBs) //0
 {
@@ -1599,7 +1567,7 @@ __kernel void idct4x4(__global uchar *const recon_frame, //0
 	return;
 }
 
-__kernel void count_SSIM_luma(__global uchar *const frame1, //0
+/*__kernel void count_SSIM_luma1(__global uchar *const frame1, //0
 								__global uchar *const frame2, //1
 								__global macroblock *const MBs, //2
 								__global float *const metric, //3
@@ -1722,9 +1690,372 @@ __kernel void count_SSIM_luma(__global uchar *const frame1, //0
 	metric[mb_num] = C;
 
 	return;
-}												
+}*/
 
-__kernel void count_SSIM_chroma
+__kernel void count_SSIM_luma(__global uchar4 *const frame1, //0
+								__global uchar4 *const frame2, //1
+								__global macroblock *const MBs, //2
+								__global float *const metric, //3
+								const int width, //4
+								const int segment_id)//5
+{
+    __private int mb_num, i;
+    __private float4 IL, IL1;
+    __private float M1, M2, D, C;
+	__private int w;
+    mb_num = get_global_id(0);
+	if (MBs[mb_num].segment_id != segment_id) return;
+	w = width/16;
+    i = ((mb_num / (w))*16)*width + ((mb_num % (w))*16);
+	w = width/4;
+	i /= 4;
+	
+    IL = convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i += w;
+	IL += convert_float4(frame1[i]);  
+	IL += convert_float4(frame1[i + 1]);
+	IL += convert_float4(frame1[i + 2]);
+	IL += convert_float4(frame1[i + 3]); i -= 15*w; 
+	M1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/256;
+	
+	IL = convert_float4(frame1[i]) - M1; IL *= IL; 
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame1[i + 2]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 3]) - M1; IL = mad(IL1,IL1,IL); i -= 15*w;
+	D = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/256;
+
+    IL = convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i += w;
+	IL += convert_float4(frame2[i]);  
+	IL += convert_float4(frame2[i + 1]);
+	IL += convert_float4(frame2[i + 2]);
+	IL += convert_float4(frame2[i + 3]); i -= 15*w; 
+	M2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/256;
+	
+	IL = convert_float4(frame2[i]) - M2; IL *= IL; 
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); 
+	IL1 = convert_float4(frame2[i + 2]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 3]) - M2; IL = mad(IL1,IL1,IL); i -= 15*w;
+	D += (IL.s0 + IL.s1 + IL.s2 + IL.s3)/256;
+
+	IL = (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); 
+	IL += (convert_float4(frame1[i + 2]) - M1)*(convert_float4(frame2[i + 2]) - M2); 
+	IL += (convert_float4(frame1[i + 3]) - M1)*(convert_float4(frame2[i + 3]) - M2);
+	C = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/256;
+
+	const float c1 = 0.01f*0.01f*255*255;
+	const float c2 = 0.03f*0.03f*255*255;
+	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D + c2));
+		
+	// so we lower SSIM (cheat) for each 1 point(over 4) by 0.02 
+	D = (M1 - M2);
+	D = select(D,-D,D < 0);
+	D = select(0.0f,0.02f*D,D > 4);
+	C -= D;
+	
+	metric[mb_num] = C;
+
+	return;
+}							
+
+/*__kernel void count_SSIM_chroma
 						(__global uchar *const frame1, //0
 						__global uchar *const frame2, //1
 						__global macroblock *const MBs, //2
@@ -1801,6 +2132,130 @@ __kernel void count_SSIM_chroma
 	D2 = select(0.0f,0.02f*D1,D1 > 4);
 	C -= D2;
 	
+	metric[mb_num] = C;
+	return;
+}*/
+
+__kernel void count_SSIM_chroma
+						(__global uchar4 *const frame1, //0
+						__global uchar4 *const frame2, //1
+						__global macroblock *const MBs, //2
+						__global float *const metric, //3
+                        const int cwidth, //4
+						const int segment_id)// 5
+{
+	const float c1 = 0.01f*0.01f*255*255;
+	const float c2 = 0.03f*0.03f*255*255;
+	__private int mb_num, i;
+	__private float M1, M2, D, C;
+	__private int w;
+	mb_num = get_global_id(0);
+	if (MBs[mb_num].segment_id != segment_id) return;
+	
+	__private float4 IL, IL1;
+	
+	w = cwidth/8;
+	i = ((mb_num / (w))*8)*cwidth + ((mb_num % (w))*8);
+	w = cwidth/4;
+	i /= 4;	
+
+	IL = convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i += w; 
+	IL += convert_float4(frame1[i]);
+	IL += convert_float4(frame1[i + 1]); i -= 7*w; 
+	M1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/64;
+	
+	IL = convert_float4(frame1[i]) - M1; IL *= IL; 
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame1[i]) - M1; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame1[i + 1]) - M1; IL = mad(IL1,IL1,IL); i -= 7*w;
+	D = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/64;
+	
+	IL = convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i += w; 
+	IL += convert_float4(frame2[i]);
+	IL += convert_float4(frame2[i + 1]); i -= 7*w; 
+	M2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/64;
+	
+	IL = convert_float4(frame2[i]) - M2; IL *= IL; 
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i += w;
+	IL1 = convert_float4(frame2[i]) - M2; IL = mad(IL1,IL1,IL);
+	IL1 = convert_float4(frame2[i + 1]) - M2; IL = mad(IL1,IL1,IL); i -= 7*w;
+	D += (IL.s0 + IL.s1 + IL.s2 + IL.s3)/64;
+	
+	IL = (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2); i += w;
+	IL += (convert_float4(frame1[i]) - M1)*(convert_float4(frame2[i]) - M2); 
+	IL += (convert_float4(frame1[i + 1]) - M1)*(convert_float4(frame2[i + 1]) - M2);
+	C = (IL.s0 + IL.s1 + IL.s2 + IL.s3)/64;
+	
+	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D + c2));
+	
+	D = (M1 - M2);
+	D = select(D,-D,D < 0);
+	D = select(0.0f,0.02f*D,D > 4);
+	C -= D;
+
 	metric[mb_num] = C;
 	return;
 }
