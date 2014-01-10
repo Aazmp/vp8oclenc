@@ -313,6 +313,9 @@ void inter_transform()
 
 	// search in image with interpolation on the run
 	device.gpu_work_items_per_dim[0] = video.mb_count*4;
+	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
+										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
+										0;
 	// LAST
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.last_frame_Y_image);
 	device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.last_vnet2);
