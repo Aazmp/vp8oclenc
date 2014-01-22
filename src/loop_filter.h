@@ -4,7 +4,7 @@ static void prepare_on_gpu()
 	frames.skip_prob = 0;
 
 	// we need to grab transformed data from host memory
-	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.transformed_blocks_gpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.transformed_blocks_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
 	device.gpu_work_items_per_dim[0] = video.mb_count;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.prepare_filter_mask, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	// need to return info about non_zero coeffs
@@ -28,7 +28,7 @@ static void prepare_on_cpu()
 	frames.skip_prob = 0;
 
 	// we need to grab transformed data from host memory
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.transformed_blocks_cpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
 	device.gpu_work_items_per_dim[0] = 4;
 	device.gpu_work_group_size_per_dim[0] = 1;
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterY_commandQueue_cpu, device.prepare_filter_mask, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
@@ -60,9 +60,9 @@ static void do_loop_filter_on_gpu()
 
 	if (frames.replaced > 0)
 	{
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 	}
 
 	cl_int stage, mb_size, plane_width;
@@ -133,14 +133,14 @@ static void do_loop_filter_on_cpu()
 	cl_int cheight = video.wrk_height/2;
 	cl_int mb_size = 16;
 
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 	
 	//after check SSIM we already have reconstructed buffers on device
-	device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
-	device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
-	device.state_cpu = clFinish(device.loopfilterV_commandQueue_cpu);
+	//device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
+	//device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
+	//device.state_cpu = clFinish(device.loopfilterV_commandQueue_cpu);
 	// Y
 	device.state_cpu = clSetKernelArg(device.loop_filter_frame, 0, sizeof(cl_mem), &device.cpu_frame_Y);
 	device.state_cpu = clSetKernelArg(device.loop_filter_frame, 4, sizeof(cl_int), &video.wrk_width);

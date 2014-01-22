@@ -1,6 +1,3 @@
-//a way to define path to OpenCL.lib
-//#pragma comment(lib,"C:\\Program Files (x86)\\AMD APP SDK\\2.9\\lib\\x86\\OpenCL.lib")
-
 // all global structure definitions (fileContext, videoContext, deviceContext...)
 #include "vp8enc.h"
 
@@ -45,11 +42,9 @@ void entropy_encode()
 	clSetKernelArg(device.count_probs, 7, sizeof(cl_int), &frames.current_is_key_frame);	
 	clEnqueueNDRangeKernel(device.boolcoder_commandQueue_cpu, device.count_probs, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
 	frames.threads_free -= video.number_of_partitions;
-	clFinish(device.boolcoder_commandQueue_cpu); 
 
 	// just dividing nums by denoms and getting probability of bit being ZERO
 	clEnqueueNDRangeKernel(device.boolcoder_commandQueue_cpu, device.num_div_denom, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
-	clFinish(device.boolcoder_commandQueue_cpu); // Blocking, we need prob-values before encoding coeffs and header
 
 	// read calculated values
 	clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.coeff_probs ,CL_TRUE, 0, 11*3*8*4*sizeof(cl_uint), frames.new_probs, 0, NULL, NULL);
@@ -62,7 +57,7 @@ void entropy_encode()
 					if (frames.new_probs_denom[i][j][k][l] < 2) // this situation never happened (no bit encoded with this context)
 						frames.new_probs[i][j][k][l] = k_default_coeff_probs[i][j][k][l];
 	}
-	device.state_gpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.coeff_probs, CL_TRUE, 0, 11*3*8*4*sizeof(cl_uint), frames.new_probs, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.coeff_probs, CL_FALSE, 0, 11*3*8*4*sizeof(cl_uint), frames.new_probs, 0, NULL, NULL);
 
 	// start of encoding coefficients 
 	clSetKernelArg(device.encode_coefficients, 9, sizeof(cl_int), &frames.current_is_key_frame);
@@ -78,24 +73,38 @@ void entropy_encode()
 
 void get_loopfilter_strength(int *const red, cl_int *const sh)
 {
-	int i, avg = 0, div = 0;
+	int i,j, avg = 0, div = 0;
 	for(i = 0; i < video.wrk_frame_size_luma; ++i)
 		avg += frames.current_Y[i];
 	avg += video.wrk_frame_size_luma/2;
 	avg /= video.wrk_frame_size_luma;
-	for(i = 0; i < video.wrk_frame_size_luma; ++i)
-		div += (frames.current_Y[i] - avg)*(frames.current_Y[i] - avg);
-	div += video.wrk_frame_size_luma/2;
-	div /= video.wrk_frame_size_luma;
+	*red = (avg*5/255) + 3;
 
-	*sh = div/64;
+	for(i = 1; i < video.wrk_height - 1; ++i)
+		for(j = 1; j < video.wrk_width - 1; ++j)
+		{
+			const int p = i*video.wrk_width + j;
+			avg = frames.current_Y[p - video.wrk_width - 1] +
+				frames.current_Y[p - video.wrk_width] +
+				frames.current_Y[p - video.wrk_width + 1] +
+				frames.current_Y[p - 1] +
+				frames.current_Y[p + 1] +
+				frames.current_Y[p + video.wrk_width - 1] +
+				frames.current_Y[p + video.wrk_width] +
+				frames.current_Y[p + video.wrk_width + 1];
+			avg /= 8;
+			div += (frames.current_Y[p] - avg)*(frames.current_Y[p] - avg);
+		}
+	div += (video.wrk_height - 1)*(video.wrk_width - 1)/2;
+	div /= (video.wrk_height - 1)*(video.wrk_width - 1);
+
+	*sh = div/8;
 	*sh = (*sh > 7) ? 7 : *sh;
 
-	*red = (avg*5/255) + 3;
 	return;
 }
 
-void prepare_segments_data()
+void prepare_segments_data(const int update_filter = 0, const int shrpnss = 0)
 {
 	int i,qi;
 	int *refqi;
@@ -121,6 +130,12 @@ void prepare_segments_data()
 
 	int reductor;
 	get_loopfilter_strength(&reductor, &video.loop_filter_sharpness);
+	if (update_filter)
+	{
+		reductor *= 2;
+		video.loop_filter_sharpness = shrpnss;
+	}
+
 	
 	for (i = 0; i < 4; ++i)
 	{
@@ -184,10 +199,10 @@ void prepare_segments_data()
 	}
 	if (video.GOP_size < 2) return;
 	//always to gpu
-	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.segments_data_gpu, CL_TRUE, 0, sizeof(segment_data)*4, frames.segments_data, 0, NULL, NULL); 
+	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.segments_data_gpu, CL_FALSE, 0, sizeof(segment_data)*4, frames.segments_data, 0, NULL, NULL); 
 	// and for loop filter on cpu
 	if (!video.do_loop_filter_on_gpu)
-		device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.segments_data_cpu, CL_TRUE, 0, sizeof(segment_data)*4, frames.segments_data, 0, NULL, NULL); 
+		device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.segments_data_cpu, CL_FALSE, 0, sizeof(segment_data)*4, frames.segments_data, 0, NULL, NULL); 
 	return;
 }
 
@@ -198,7 +213,7 @@ void check_SSIM()
 	device.state_gpu = clEnqueueReadBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 
 	frames.new_SSIM = 0;
-	float min1 = 2, min2 = 2;
+	float min1 = 2.0f, min2 = 2.0f;
 	int mb_num;
 	frames.replaced = 0;
 	for (mb_num = 0; mb_num < video.mb_count; ++mb_num)
@@ -219,6 +234,8 @@ void check_SSIM()
 	frames.new_SSIM /= (float)video.mb_count;
 	if (video.print_info) 
 		printf("%d>AvgSSIM=%f; MinSSIM=%f(%f); repl:%d ", frames.frame_number,frames.new_SSIM,min1,min2,frames.replaced);
+	if (min1 > 0.95) 
+		prepare_segments_data(1, 7);
 	return;
 }
 
@@ -341,9 +358,9 @@ int main(int argc, char *argv[])
 		} 
 		else
         {
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.current_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.current_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.current_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.current_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.current_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.current_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
 			
 			prepare_segments_data();
 			inter_transform(); 
@@ -372,7 +389,7 @@ int main(int argc, char *argv[])
 		do_loop_filter();
 
 		if (video.do_loop_filter_on_gpu)
-			device.state_cpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu, CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
+			device.state_cpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL); 
 		// else already there because were uploaded before loop filter
 		entropy_encode();
 
@@ -492,6 +509,7 @@ void finalize()
 		clReleaseKernel(device.idct4x4);
 		clReleaseKernel(device.count_SSIM_luma);
 		clReleaseKernel(device.count_SSIM_chroma);
+		clReleaseKernel(device.gather_SSIM);
 		clReleaseKernel(device.prepare_filter_mask);
 		clReleaseKernel(device.normal_loop_filter_MBH);
 		clReleaseKernel(device.normal_loop_filter_MBV);

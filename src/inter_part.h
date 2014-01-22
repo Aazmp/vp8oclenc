@@ -5,24 +5,24 @@ void prepare_GPU_buffers()
 	//if filter was done on CPU we need to extract reconstructed frames from CPU device
 	if (!video.do_loop_filter_on_gpu)
 	{
-		device.state_gpu = clFinish(device.loopfilterY_commandQueue_cpu);
-		device.state_gpu = clFinish(device.loopfilterU_commandQueue_cpu);
-		device.state_gpu = clFinish(device.loopfilterV_commandQueue_cpu);
+		//device.state_gpu = clFinish(device.loopfilterY_commandQueue_cpu);
+		//device.state_gpu = clFinish(device.loopfilterU_commandQueue_cpu);
+		//device.state_gpu = clFinish(device.loopfilterV_commandQueue_cpu);
 		// cpu device --> host
 		device.state_cpu = clEnqueueReadBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
 		device.state_cpu = clEnqueueReadBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
 		device.state_cpu = clEnqueueReadBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 		// host --> gpu device
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 	}
 	frames.threads_free = video.thread_limit; // by this time boolcoder definetly already finished
 	
 	// first reset vector nets to zeros
 	device.gpu_work_items_per_dim[0] = video.mb_count*4;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.reset_vectors, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFlush(device.commandQueue1_gpu);
 
 	// now prepare downsampled LAST buffers
 	//prepare downsampled by 2
@@ -36,7 +36,7 @@ void prepare_GPU_buffers()
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.current_frame_Y);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by2);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.downsample, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFlush(device.commandQueue1_gpu);
 	//prepare downsampled by 4
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by2);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by4);
@@ -50,7 +50,7 @@ void prepare_GPU_buffers()
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by2);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by4);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.downsample, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFlush(device.commandQueue1_gpu);
 	//prepare downsampled by 8
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by4);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by8);
@@ -64,7 +64,7 @@ void prepare_GPU_buffers()
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by4);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by8);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.downsample, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFlush(device.commandQueue1_gpu);
 	//prepare downsampled by 16
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by8);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by16);
@@ -78,7 +78,7 @@ void prepare_GPU_buffers()
 	device.state_gpu = clSetKernelArg(device.downsample, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by8);
 	device.state_gpu = clSetKernelArg(device.downsample, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by16);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.downsample, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFlush(device.commandQueue1_gpu);
 	
 	if (frames.prev_is_golden_frame)
 	{
@@ -96,8 +96,7 @@ void prepare_GPU_buffers()
 		device.state_gpu = clEnqueueCopyBuffer(device.commandQueue1_gpu, device.last_frame_Y_downsampled_by8, device.altref_frame_Y_downsampled_by8, 0, 0, video.wrk_frame_size_luma/64, 0, NULL, NULL);
 		device.state_gpu = clEnqueueCopyBuffer(device.commandQueue1_gpu, device.last_frame_Y_downsampled_by16, device.altref_frame_Y_downsampled_by16, 0, 0, video.wrk_frame_size_luma/256, 0, NULL, NULL);
 	}
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
-
+	
 	// prepare images (if they need to be renewed)
 	const size_t origin[3] = {0, 0, 0};
 	const size_t region_y[3] = {video.wrk_width, video.wrk_height, 1};
@@ -107,9 +106,9 @@ void prepare_GPU_buffers()
 	device.state_gpu = clEnqueueReadBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
 	device.state_gpu = clEnqueueReadBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue1_gpu, device.last_frame_Y_image, CL_TRUE, origin, region_y, 0, 0, frames.reconstructed_Y, 0, NULL, NULL);
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue2_gpu, device.last_frame_U_image, CL_TRUE, origin, region_uv, 0, 0, frames.reconstructed_U, 0, NULL, NULL);
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_V_image, CL_TRUE, origin, region_uv, 0, 0, frames.reconstructed_V, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteImage(device.commandQueue1_gpu, device.last_frame_Y_image, CL_FALSE, origin, region_y, 0, 0, frames.reconstructed_Y, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteImage(device.commandQueue2_gpu, device.last_frame_U_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_U, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_V_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_V, 0, NULL, NULL);
 
 	if (frames.prev_is_golden_frame)
 	{
@@ -129,9 +128,9 @@ void prepare_GPU_buffers()
 
 void inter_transform()
 {
-	clFinish(device.commandQueue1_gpu);
-	clFinish(device.commandQueue2_gpu);
-	clFinish(device.commandQueue3_gpu);
+	//clFinish(device.commandQueue1_gpu);
+	//clFinish(device.commandQueue2_gpu);
+	//clFinish(device.commandQueue3_gpu);
 
 	cl_int val;
 	// if golden and altref buffers represent different from last buffer frame
@@ -351,9 +350,11 @@ void inter_transform()
 		device.state_gpu = clFlush(device.commandQueue3_gpu);
 	}
 
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
-	device.state_gpu = clFinish(device.commandQueue2_gpu);
-	device.state_gpu = clFinish(device.commandQueue3_gpu);
+	//device.state_gpu = clFinish(device.commandQueue1_gpu);
+	if (use_golden)
+		device.state_gpu = clFinish(device.commandQueue2_gpu);
+	if (use_altref)
+		device.state_gpu = clFinish(device.commandQueue3_gpu);
 
 	// now set each MB with the best reference
 	device.gpu_work_items_per_dim[0] = video.mb_count;
@@ -364,8 +365,9 @@ void inter_transform()
 	// set 16x16 mode for macroblocks, whose blocks have identical vectors
 	device.gpu_work_items_per_dim[0] = video.mb_count;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.pack_8x8_into_16x16, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
-
+	if ((use_golden)||(use_altref))
+		device.state_gpu = clFinish(device.commandQueue1_gpu);
+	
 	// now for each plane and reference frame fill predictors and residual buffers
 	cl_int plane, ref;
 	cl_int cwidth = video.wrk_width/2;
@@ -464,13 +466,14 @@ void inter_transform()
 		device.state_gpu = clFlush(device.commandQueue3_gpu);
 	}
 	
+	device.state_gpu = clFinish(device.commandQueue2_gpu);
+	device.state_gpu = clFinish(device.commandQueue3_gpu);
+
 	// now for each segment (begin with highest quantizer (last index))
 	cl_int seg_id;
 	for (seg_id = LQ_segment; seg_id >= UQ_segment; --seg_id)
 	{
 		device.state_gpu = clFinish(device.commandQueue1_gpu);
-		device.state_gpu = clFinish(device.commandQueue2_gpu);
-		device.state_gpu = clFinish(device.commandQueue3_gpu);
 
 		device.state_gpu = clSetKernelArg(device.dct4x4, 4, sizeof(cl_int), &seg_id);
 		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 2, sizeof(cl_int), &seg_id);
@@ -547,16 +550,12 @@ void inter_transform()
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.count_SSIM_chroma, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		device.state_gpu = clFlush(device.commandQueue3_gpu);
 
-		device.state_gpu = clFinish(device.commandQueue1_gpu);
+		//device.state_gpu = clFinish(device.commandQueue1_gpu);
 		device.state_gpu = clFinish(device.commandQueue2_gpu);
 		device.state_gpu = clFinish(device.commandQueue3_gpu);
 
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.gather_SSIM, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	}
-
-	device.state_gpu = clFinish(device.commandQueue1_gpu);
-	device.state_gpu = clFinish(device.commandQueue2_gpu);
-	device.state_gpu = clFinish(device.commandQueue3_gpu);
 
 	if (device.state_gpu != 0)
 		printf("bad kernel %d",device.state_gpu);

@@ -1,7 +1,6 @@
 void gather_frame()
 {
 	// get info about partition sizes
-	device.state_cpu = clFinish(device.boolcoder_commandQueue_cpu);
 	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(cl_int), frames.partition_sizes, 0, NULL, NULL);
 	// write partition size data
 	// each size = 3 byte in little endian (LSB first)

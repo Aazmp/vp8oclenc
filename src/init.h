@@ -118,7 +118,7 @@ int init_all()
 	device.state_cpu = clGetPlatformIDs(num_platforms, device.platforms, NULL);
 	device.device_cpu = (cl_device_id*)malloc(sizeof(cl_device_id));
 	device.state_cpu = clGetDeviceIDs(device.platforms[0], CL_DEVICE_TYPE_CPU, 1, device.device_cpu, NULL);
-	i = 1;
+	i = 0;
 	while ((device.state_cpu != CL_SUCCESS) && (i < (int)num_platforms)) 
 	{
 		device.state_cpu = clGetDeviceIDs(device.platforms[i], CL_DEVICE_TYPE_CPU, 1, device.device_cpu, NULL);
@@ -136,7 +136,7 @@ int init_all()
 		device.gpu_device_type = CL_DEVICE_TYPE_GPU;
 		device.gpu_preferred_platform_number = (device.gpu_preferred_platform_number >= num_platforms) ? 0 : device.gpu_preferred_platform_number;
 		device.state_gpu = clGetDeviceIDs(device.platforms[device.gpu_preferred_platform_number], device.gpu_device_type, 1, device.device_gpu, NULL);
-		i = 1;
+		i = 0;
 		while ((device.state_gpu != CL_SUCCESS) && (i < (int)num_platforms)) 
 		{
 			device.state_cpu = clGetDeviceIDs(device.platforms[i], device.gpu_device_type, 1, device.device_gpu, NULL);
@@ -183,7 +183,7 @@ int init_all()
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		else {
-			const char gpu_options[] = "-cl-std=CL1.0";
+			const char gpu_options[] = "-cl-std=CL1.0 -x clc++";
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		if(device.state_gpu < 0)  //print log if there were mistakes during kernel building
