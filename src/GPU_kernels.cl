@@ -50,7 +50,7 @@ typedef struct {
 	int vector_y;
 } vector_net;
 
-__constant const int vp8_dc_qlookup[128] =
+__constant int vp8_dc_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  10,  11,  12,  13,  14,  15,  16,  17,  17,
      18,  19,  20,  20,  21,  21,  22,  22,  23,  23,  24,  25,  25,  26,  27,  28,
@@ -62,7 +62,7 @@ __constant const int vp8_dc_qlookup[128] =
     122, 124, 126, 128, 130, 132, 134, 136, 138, 140, 143, 145, 148, 151, 154, 157,
 };
 
-__constant const int vp8_ac_qlookup[128] =
+__constant int vp8_ac_qlookup[128] =
 {
       4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,  17,  18,  19,
      20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,  33,  34,  35,
@@ -136,7 +136,7 @@ void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __
 	return;
 }
 
-void weight_opt(int4 *const XX, int16 *const L) 
+inline void weight_opt(int4 *const restrict XX, int16 *const restrict L) 
 {
 	*XX = (*L).s0123;
 	(*L).s0123 = (((*L).s0123 + (*L).sCDEF) << 3);	// a1 = ((ip[0] + ip[3])<<3);
@@ -645,18 +645,13 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			// this helps keep neighbouring vectors close
 			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
 			
-			
-			//vector_x = (Diff < MinDiff) ? (px - cx) : vector_x;
 			vector_x = (Diff < MinDiff) ? px : vector_x;
-			//vector_y = (Diff < MinDiff) ? (py - cy) : vector_y;
 			vector_y = (Diff < MinDiff) ? py : vector_y;
 			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;			
     	} 
     } 
 	
-	//dst_net[b8x8_num].vector_x = (vector_x*pixel_rate);
 	dst_net[b8x8_num].vector_x = (vector_x-cx)*pixel_rate;
-	//dst_net[b8x8_num].vector_y = (vector_y*pixel_rate);
 	dst_net[b8x8_num].vector_y = (vector_y-cy)*pixel_rate;
 	
 	return;
@@ -676,7 +671,7 @@ __constant int f[8][6] = { /* indexed by displacement */
 	{ 0, -1, 12, 123, -6, 0 } /* 7/8 = reverse of 1/8 */
 };
 
-void construct(__read_only image2d_t ref_frame, const int2 coords, const int2 d, int4 *const DL0, int4 *const DL1, int4 *const DL2, int4 *const DL3)
+inline void construct(__read_only image2d_t ref_frame, const int2 coords, const int2 d, int4 *const DL0, int4 *const DL1, int4 *const DL2, int4 *const DL3)
 {
 	__private int2 c;
 	__private uint4 buf4ui;
@@ -878,8 +873,8 @@ void construct(__read_only image2d_t ref_frame, const int2 coords, const int2 d,
 	return;
 }
 
-void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const short2 d, int16 *const DL,
-					uchar16 *const l, uchar16 *const lap4p2, int4 *const li, uint4 *const buf4ui)
+void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const short2 d, int16 *const restrict DL,
+					uchar16 *const restrict l, uchar16 *const restrict lap4p2, int4 *const restrict li, uint4 *const restrict buf4ui)
 {
 	__private int2 c;
 	
@@ -1144,8 +1139,10 @@ void luma_search_2step //searching in interpolated picture
 	pdata2.s0 *= 4; 
 	pdata2.s1 *= 4;
 	
-	pdata1.s0 = pdata2.s0 + pdata1.s4 - 2;	pdata1.s1 = pdata2.s0 + pdata1.s4 + 2;
-	pdata1.s2 = pdata2.s1 + pdata1.s5 - 2;	pdata1.s3 = pdata2.s1 + pdata1.s5 + 2;
+	pdata1.s0 = pdata2.s0 + pdata1.s4 - 2; //startX
+	pdata1.s1 = pdata2.s0 + pdata1.s4 + 2; //endX
+	pdata1.s2 = pdata2.s1 + pdata1.s5 - 2; //startY
+	pdata1.s3 = pdata2.s1 + pdata1.s5 + 2; //endY
 	
 	pdata1.s4 = width*4 - 32; 
 	pdata1.s5 = height*4 - 32; 
@@ -1175,7 +1172,7 @@ void luma_search_2step //searching in interpolated picture
 			DL.s4567 = convert_int4(LDS[mad24((int)lsz,2,(int)lid)]) - DL.s4567;
 			DL.s89AB = convert_int4(LDS[mad24((int)lsz,4,(int)lid)]) - DL.s89AB;
 			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,6,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);	
+			weight_opt(&li, &DL);
 			Diff = li.s0;
 			//pdata2.s4 = (pdata2.s2 + 16)/4; pdata2.s5 = pdata2.s3/4; 
 			pdata2.s4 += 4; //(0;4)
@@ -1184,7 +1181,7 @@ void luma_search_2step //searching in interpolated picture
 			DL.s4567 = convert_int4(LDS[mad24((int)lsz,3,(int)lid)]) - DL.s4567;
 			DL.s89AB = convert_int4(LDS[mad24((int)lsz,5,(int)lid)]) - DL.s89AB;
 			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,7,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);	
+			weight_opt(&li, &DL);
 			Diff += li.s0;
 			pdata2.s4 = pdata2.s2/4; pdata2.s5 = (pdata2.s3 + 16)/4; 
 			//pdata2.s4 -= 4; pdata2.s5 += 4;
@@ -1193,7 +1190,7 @@ void luma_search_2step //searching in interpolated picture
 			DL.s4567 = convert_int4(LDS[mad24((int)lsz,10,(int)lid)]) - DL.s4567;
 			DL.s89AB = convert_int4(LDS[mad24((int)lsz,12,(int)lid)]) - DL.s89AB;
 			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,14,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);	
+			weight_opt(&li, &DL);
 			Diff += li.s0;
 			pdata2.s4 = (pdata2.s2 + 16)/4; //pdata2.s5 = (pdata2.s3 + 16)/4;
 			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
@@ -1201,10 +1198,10 @@ void luma_search_2step //searching in interpolated picture
 			DL.s4567 = convert_int4(LDS[mad24((int)lsz,11,(int)lid)]) - DL.s4567;
 			DL.s89AB = convert_int4(LDS[mad24((int)lsz,13,(int)lid)]) - DL.s89AB;
 			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,15,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);	
+			weight_opt(&li, &DL);
 			Diff += li.s0;
 		
-			
+		
 			Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
 			pdata2.s6 = (Diff < MinDiff); 
 			
@@ -1225,6 +1222,7 @@ void luma_search_2step //searching in interpolated picture
 	
 	return;
 }
+
 
 __kernel void select_reference(__global vector_net *const last_net, //0
 								__global vector_net *const golden_net, //1
@@ -1331,8 +1329,8 @@ __kernel void prepare_predictors_and_residual(__global uchar *const current_fram
 {
 	__private int b_num, mb_num, g;
 	__private int i;
-	__private int4 DL0,DL1,DL2,DL3;
-	__private uchar4 L0,L1,L2,L3;
+	__private int4 DL0, DL1, DL2, DL3;
+	__private uchar4 L0, L1, L2, L3;
 	__private int2 coords,d,v,pos;
 	__private int mb_size = (plane == 0) ? 16 : 8;
 
@@ -1401,17 +1399,18 @@ __kernel void pack_8x8_into_16x16(__global macroblock *const MBs) //0
 	return;
 }
 
-__kernel void dct4x4(__global short *const residual, //0
-					__global macroblock *const MBs, //1
+__kernel void dct4x4(__global short2 *const restrict residual, //0
+					__global macroblock *const restrict MBs, //1
 					const int width, //2
 					__constant segment_data *const SD, //3
-					const int segment_id, //4
+					const segment_ids segment_id, //4
 					const float SSIM_target, //5
 					const int plane) //6
 {	
 	__private int b_num, mb_num, ac_q,dc_q,uv_dc_q,uv_ac_q;
 	__private int i;
-	__private int4 DL0,DL1,DL2,DL3;
+	__private int16 L;
+	__private int4 XX;
 	__private int2 pos,v;
 	__private int mb_size = (plane == 0) ? 16 : 8;
 
@@ -1440,29 +1439,100 @@ __kernel void dct4x4(__global short *const residual, //0
 	ac_q = select(uv_ac_q,ac_q,plane==0);
 
 	i = pos.y*width + pos.x;
-	DL0 = convert_int4(vload4(0, residual+i)); i+= width;	
-	DL1 = convert_int4(vload4(0, residual+i)); i+= width;
-	DL2 = convert_int4(vload4(0, residual+i)); i+= width;	
-	DL3 = convert_int4(vload4(0, residual+i));
-	DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	i /= 2;
+	L.s01 = convert_int2(residual[i]); L.s23 = convert_int2(residual[i+1]); /*L.s0123 = convert_int4(vload4(0, residual+i));*/ i+= width/2;	
+	L.s45 = convert_int2(residual[i]); L.s67 = convert_int2(residual[i+1]); /*L.s4567 = convert_int4(vload4(0, residual+i));*/ i+= width/2;
+	L.s89 = convert_int2(residual[i]); L.sAB = convert_int2(residual[i+1]); /*L.s89AB = convert_int4(vload4(0, residual+i));*/ i+= width/2;	
+	L.sCD = convert_int2(residual[i]); L.sEF = convert_int2(residual[i+1]); /*L.sCDEF = convert_int4(vload4(0, residual+i));*/
 	
+	//DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
+	////	
+	XX = L.s0123;
+	L.s0123 = ((L.s0123 + L.sCDEF) << 3);	// a1 = ((ip[0] + ip[3])<<3);
+	L.sCDEF = ((XX - L.sCDEF) << 3);	// d1 = ((ip[0] - ip[3])<<3);
+	XX = L.s4567;
+	L.s4567 = ((L.s4567 + L.s89AB) << 3);	// b1 = ((ip[1] + ip[2])<<3);
+	L.s89AB = ((XX - L.s89AB) << 3);	// c1 = ((ip[1] - ip[2])<<3);
+
+	XX = L.s89AB;
+	L.s89AB = L.s0123 - L.s4567;				// op[2] = (a1 - b1);
+	L.s0123 = L.s0123 + L.s4567;				// op[0] = (a1 + b1); 
+	
+	L.s4567 = (((XX * 2217) + (L.sCDEF * 5352) + 14500) >> 12);
+														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
+	L.sCDEF = (((L.sCDEF * 2217) - (XX * 5352) + 7500) >> 12);
+														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
+
+	(XX).x = L.s0; (XX).y = L.s4; (XX).z = L.s8; (XX).w = L.sC;
+	// a1 = op[0] + op[3];
+	L.s0 = L.s0 + L.s3;
+	L.s4 = L.s4 + L.s7;
+	L.s8 = L.s8 + L.sB;
+	L.sC = L.sC + L.sF;
+	// d1 = op[0] - op[3];	
+	L.s3 = (XX).x - L.s3;
+	L.s7 = (XX).y - L.s7;
+	L.sB = (XX).z - L.sB;
+	L.sF = (XX).w - L.sF;
+	(XX).x = L.s1; (XX).y = L.s5; (XX).z = L.s9; (XX).w = L.sD;
+	// b1 = op[1] + op[2];
+	L.s1 = L.s1 + L.s2;
+	L.s5 = L.s5 + L.s6;
+	L.s9 = L.s9 + L.sA;
+	L.sD = L.sD + L.sE;
+	// c1 = op[1] - op[2];
+	L.s2 = (XX).x - L.s2;
+	L.s6 = (XX).y - L.s6;
+	L.sA = (XX).z - L.sA;
+	L.sE = (XX).w - L.sE;
+	
+	(XX).x = L.s2; (XX).y = L.s6; (XX).z = L.sA; (XX).w = L.sE;
+	// op[2] = (( a1 - b1 + 7)>>4);
+	L.s2 = ((L.s0 - L.s1 + 7) >> 4);
+	L.s6 = ((L.s4 - L.s5 + 7) >> 4);
+	L.sA = ((L.s8 - L.s9 + 7) >> 4);
+	L.sE = ((L.sC - L.sD + 7) >> 4);
+	// op[0] = (( a1 + b1 + 7)>>4);	
+	L.s0 = ((L.s0 + L.s1 + 7) >> 4);
+	L.s4 = ((L.s4 + L.s5 + 7) >> 4);
+	L.s8 = ((L.s8 + L.s9 + 7) >> 4);
+	L.sC = ((L.sC + L.sD + 7) >> 4);
+	
+	// op[1]  = (((c1 * 2217 + d1 * 5352 +  12000)>>16) + (d1!=0));
+	L.s1 = ((((XX).x * 2217) + (L.s3 *5352) + 12000) >> 16) + (L.s3!=0);
+	L.s5 = ((((XX).y * 2217) + (L.s7 *5352) + 12000) >> 16) + (L.s7!=0);
+	L.s9 = ((((XX).z * 2217) + (L.sB *5352) + 12000) >> 16) + (L.sB!=0);
+	L.sD = ((((XX).w * 2217) + (L.sF *5352) + 12000) >> 16) + (L.sF!=0);
+	
+	// op[3] = ((d1 * 2217 - c1 * 5352 +  51000)>>16);
+	L.s3 = (((L.s3 * 2217) - ((XX).x *5352) + 51000) >> 16);
+	L.s7 = (((L.s7 * 2217) - ((XX).y *5352) + 51000) >> 16);
+	L.sB = (((L.sB * 2217) - ((XX).z *5352) + 51000) >> 16);
+	L.sF = (((L.sF * 2217) - ((XX).w *5352) + 51000) >> 16);
+	
+	L.s0123 /= (int4)(dc_q,ac_q,ac_q,ac_q);
+	L.s4567 /= ac_q;
+	L.s89AB /= ac_q;
+	L.sCDEF /= ac_q;
+	////
+		
 	v.x = (pos.x%mb_size)/4;
 	v.y = (pos.y%mb_size)/4;
 	b_num = v.y*(mb_size/4) + v.x;
 	b_num += (plane == 1) ? 16 : 0;
 	b_num += (plane == 2) ? 20 : 0;
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
-	MBs[mb_num].coeffs[b_num][inv_zigzag[0]]=(short)DL0.s0;  MBs[mb_num].coeffs[b_num][inv_zigzag[1]]=(short)DL0.s1;  MBs[mb_num].coeffs[b_num][inv_zigzag[2]]=(short)DL0.s2;  MBs[mb_num].coeffs[b_num][inv_zigzag[3]]=(short)DL0.s3;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[4]]=(short)DL1.s0;  MBs[mb_num].coeffs[b_num][inv_zigzag[5]]=(short)DL1.s1;  MBs[mb_num].coeffs[b_num][inv_zigzag[6]]=(short)DL1.s2;  MBs[mb_num].coeffs[b_num][inv_zigzag[7]]=(short)DL1.s3;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[8]]=(short)DL2.s0;  MBs[mb_num].coeffs[b_num][inv_zigzag[9]]=(short)DL2.s1;  MBs[mb_num].coeffs[b_num][inv_zigzag[10]]=(short)DL2.s2; MBs[mb_num].coeffs[b_num][inv_zigzag[11]]=(short)DL2.s3;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[12]]=(short)DL3.s0; MBs[mb_num].coeffs[b_num][inv_zigzag[13]]=(short)DL3.s1; MBs[mb_num].coeffs[b_num][inv_zigzag[14]]=(short)DL3.s2; MBs[mb_num].coeffs[b_num][inv_zigzag[15]]=(short)DL3.s3;
+	MBs[mb_num].coeffs[b_num][inv_zigzag[0]]=(short)L.s0;  MBs[mb_num].coeffs[b_num][inv_zigzag[1]]=(short)L.s1;  MBs[mb_num].coeffs[b_num][inv_zigzag[2]]=(short)L.s2;  MBs[mb_num].coeffs[b_num][inv_zigzag[3]]=(short)L.s3;
+	MBs[mb_num].coeffs[b_num][inv_zigzag[4]]=(short)L.s4;  MBs[mb_num].coeffs[b_num][inv_zigzag[5]]=(short)L.s5;  MBs[mb_num].coeffs[b_num][inv_zigzag[6]]=(short)L.s6;  MBs[mb_num].coeffs[b_num][inv_zigzag[7]]=(short)L.s7;
+	MBs[mb_num].coeffs[b_num][inv_zigzag[8]]=(short)L.s8;  MBs[mb_num].coeffs[b_num][inv_zigzag[9]]=(short)L.s9;  MBs[mb_num].coeffs[b_num][inv_zigzag[10]]=(short)L.sA; MBs[mb_num].coeffs[b_num][inv_zigzag[11]]=(short)L.sB;
+	MBs[mb_num].coeffs[b_num][inv_zigzag[12]]=(short)L.sC; MBs[mb_num].coeffs[b_num][inv_zigzag[13]]=(short)L.sD; MBs[mb_num].coeffs[b_num][inv_zigzag[14]]=(short)L.sE; MBs[mb_num].coeffs[b_num][inv_zigzag[15]]=(short)L.sF;
 
 	return;
 }
 
 __kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
 							__constant segment_data *const SD, //1
-							const int segment_id, //2
+							const segment_ids segment_id, //2
 							const float SSIM_target) //3
 {
 	__private int mb_num,y2_dc_q,y2_ac_q;
@@ -1505,12 +1575,12 @@ __kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
 	return;
 }
 
-__kernel void idct4x4(__global uchar *const recon_frame, //0
-					__global uchar *const predictor, //1
+__kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
+					__global uchar4 *const restrict predictor, //1
 					__global macroblock *const MBs, //2
 					const int width, //3
 					__constant segment_data *const SD, //4
-					const int segment_id, //5
+					const segment_ids segment_id, //5
 					const float SSIM_target, //6
 					const int plane) //7
 {	
@@ -1555,142 +1625,18 @@ __kernel void idct4x4(__global uchar *const recon_frame, //0
 	DL3.s0=MBs[mb_num].coeffs[b_num][inv_zigzag[12]];  DL3.s1=MBs[mb_num].coeffs[b_num][inv_zigzag[13]];  DL3.s2=MBs[mb_num].coeffs[b_num][inv_zigzag[14]];  DL3.s3=MBs[mb_num].coeffs[b_num][inv_zigzag[15]];
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	i = y*width + x;
-	DL0 += convert_int4(vload4(0, predictor+i)); i+= width;
-	DL1 += convert_int4(vload4(0, predictor+i)); i+= width;
-	DL2 += convert_int4(vload4(0, predictor+i)); i+= width;
-	DL3 += convert_int4(vload4(0, predictor+i)); i-= 3*width;
-	vstore4(convert_uchar4_sat(DL0), 0, recon_frame+i); i+= width;
-	vstore4(convert_uchar4_sat(DL1), 0, recon_frame+i); i+= width;
-	vstore4(convert_uchar4_sat(DL2), 0, recon_frame+i); i+= width;
-	vstore4(convert_uchar4_sat(DL3), 0, recon_frame+i);
+	i /= 4;
+	DL0 += convert_int4(predictor[i]); i+= width/4;
+	DL1 += convert_int4(predictor[i]); i+= width/4;
+	DL2 += convert_int4(predictor[i]); i+= width/4;
+	DL3 += convert_int4(predictor[i]); i-= 3*width/4;
+	recon_frame[i] = convert_uchar4_sat(DL0); i+= width/4;
+	recon_frame[i] = convert_uchar4_sat(DL1); i+= width/4;
+	recon_frame[i] = convert_uchar4_sat(DL2); i+= width/4;
+	recon_frame[i] = convert_uchar4_sat(DL3);
 
 	return;
 }
-
-/*__kernel void count_SSIM_luma1(__global uchar *const frame1, //0
-								__global uchar *const frame2, //1
-								__global macroblock *const MBs, //2
-								__global float *const metric, //3
-								signed int width, //4
-								const int segment_id)//5
-{
-    __private int mb_num, i;
-    __private uchar16 FL0, FL1, FL2, FL3, FL4, FL5, FL6, FL7, FL8, FL9, FL10, FL11, FL12, FL13, FL14, FL15;
-    __private uchar16 SL0, SL1, SL2, SL3, SL4, SL5, SL6, SL7, SL8, SL9, SL10, SL11, SL12, SL13, SL14, SL15;
-    __private float16 IL, IL1;
-    __private float M1, M2, D1, D2, C;
-    mb_num = get_global_id(0);
-	if (MBs[mb_num].segment_id != segment_id) return;
-    i = ((mb_num / (width/16))*16)*width + ((mb_num % (width/16))*16);
-        
-    FL0 = vload16(0, frame1 + i); i += width; IL = convert_float16(FL0);
-    FL1 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL1);
-	FL2 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL2);
-	FL3 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL3);
-	FL4 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL4);
-	FL5 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL5);
-	FL6 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL6);
-	FL7 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL7);
-	FL8 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL8);
-	FL9 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL9);
-	FL10 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL10);
-	FL11 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL11);
-	FL12 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL12);
-	FL13 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL13);
-	FL14 = vload16(0, frame1 + i); i += width; IL += convert_float16(FL14);
-	FL15 = vload16(0, frame1 + i); i -= 15*width; IL += convert_float16(FL15);
-	M1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-	IL = convert_float16(FL0) - M1; IL *= IL;
-	IL1 = convert_float16(FL1) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL2) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL3) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL4) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL5) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL6) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL7) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL8) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL9) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL10) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL11) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL12) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL13) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL14) - M1; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(FL15) - M1; IL = mad(IL1,IL1,IL);
-	D1 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-
-	SL0 = vload16(0, frame2 + i); i += width; IL = convert_float16(SL0);
-	SL1 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL1);
-	SL2 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL2);
-	SL3 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL3);
-	SL4 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL4); 
-	SL5 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL5);
-	SL6 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL6);
-	SL7 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL7);
-	SL8 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL8);
-	SL9 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL9);
-	SL10 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL10);
-	SL11 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL11);
-	SL12 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL12);
-	SL13 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL13);
-	SL14 = vload16(0, frame2 + i); i += width; IL += convert_float16(SL14);
-	SL15 = vload16(0, frame2 + i); IL += convert_float16(SL15);
-	M2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-	IL = convert_float16(SL0) - M2; IL *= IL;
-	IL1 = convert_float16(SL1) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL2) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL3) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL4) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL5) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL6) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL7) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL8) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL9) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL10) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL11) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL12) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL13) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL14) - M2; IL = mad(IL1,IL1,IL);
-	IL1 = convert_float16(SL15) - M2; IL = mad(IL1,IL1,IL);
-	D2 = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-
-	IL = (convert_float16(FL0) - M1)*(convert_float16(SL0) - M2);
-	IL += (convert_float16(FL1) - M1)*(convert_float16(SL1) - M2);
-	IL += (convert_float16(FL2) - M1)*(convert_float16(SL2) - M2);
-	IL += (convert_float16(FL3) - M1)*(convert_float16(SL3) - M2);
-	IL += (convert_float16(FL4) - M1)*(convert_float16(SL4) - M2);
-	IL += (convert_float16(FL5) - M1)*(convert_float16(SL5) - M2);
-	IL += (convert_float16(FL6) - M1)*(convert_float16(SL6) - M2);
-	IL += (convert_float16(FL7) - M1)*(convert_float16(SL7) - M2);
-	IL += (convert_float16(FL8) - M1)*(convert_float16(SL8) - M2);
-	IL += (convert_float16(FL9) - M1)*(convert_float16(SL9) - M2);
-	IL += (convert_float16(FL10) - M1)*(convert_float16(SL10) - M2);
-	IL += (convert_float16(FL11) - M1)*(convert_float16(SL11) - M2);
-	IL += (convert_float16(FL12) - M1)*(convert_float16(SL12) - M2);
-	IL += (convert_float16(FL13) - M1)*(convert_float16(SL13) - M2);
-	IL += (convert_float16(FL14) - M1)*(convert_float16(SL14) - M2);
-	IL += (convert_float16(FL15) - M1)*(convert_float16(SL15) - M2);
-	C = (IL.s0 + IL.s1 + IL.s2 + IL.s3 + IL.s4 + IL.s5 + IL.s6 + IL.s7 + IL.s8 + IL.s9 + IL.sA + IL.sB + IL.sC + IL.sD + IL.sE + IL.sF)/256;
-
-	const float c1 = 0.01f*0.01f*255*255;
-	const float c2 = 0.03f*0.03f*255*255;
-	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
-		
-	// and now small workaround
-	// SSIM sometimes gives high structural similarity for block with largely different average value
-	// but similar structure: AC coeffs are close or variance is low
-	//example M1 == 60; M2 == 67 and D1 == D2 == C (only DC coeff differs)
-	// SSIM would be 0.993 while 7 points of luma difference would look like horrible unmatched square
-	
-	// so we lower SSIM (cheat) for each 1 point(over 4) by 0.02 
-	D1 = (M1 - M2);
-	D1 = select(D1,-D1,D1 < 0);
-	D2 = select(0.0f,0.02f*D1,D1 > 4);
-	C -= D2;
-	
-	metric[mb_num] = C;
-
-	return;
-}*/
 
 __kernel void count_SSIM_luma(__global uchar4 *const frame1, //0
 								__global uchar4 *const frame2, //1
@@ -2054,87 +2000,6 @@ __kernel void count_SSIM_luma(__global uchar4 *const frame1, //0
 
 	return;
 }							
-
-/*__kernel void count_SSIM_chroma
-						(__global uchar *const frame1, //0
-						__global uchar *const frame2, //1
-						__global macroblock *const MBs, //2
-						__global float *const metric, //3
-                        signed int cwidth, //4
-						const int segment_id)// 5
-{
-	const float c1 = 0.01f*0.01f*255*255;
-	const float c2 = 0.03f*0.03f*255*255;
-	__private int mb_num, i;
-	__private float M1, M2, D1, D2, C;
-	mb_num = get_global_id(0);
-	if (MBs[mb_num].segment_id != segment_id) return;
-	
-	__private uchar8 cFL0, cFL1, cFL2, cFL3, cFL4, cFL5, cFL6, cFL7;
-	__private uchar8 cSL0, cSL1, cSL2, cSL3, cSL4, cSL5, cSL6, cSL7;
-	__private float8 cIL, cIL1;
-	
-	i = ((mb_num / (cwidth/8))*8)*cwidth + ((mb_num % (cwidth/8))*8);
-
-	cFL0 = cFL1 = cFL2 = cFL3 = cFL4 = cFL5 = cFL6 = cFL7 = 0;
-	cSL0 = cSL1 = cSL2 = cSL3 = cSL4 = cSL5 = cSL6 = cSL7 = 0;
-	// U
-	cFL0 = vload8(0, frame1 + i); i += cwidth; cIL = convert_float8(cFL0); 
-	cFL1 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL1);
-	cFL2 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL2);
-	cFL3 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL3);
-	cFL4 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL4);
-	cFL5 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL5);
-	cFL6 = vload8(0, frame1 + i); i += cwidth; cIL += convert_float8(cFL6);
-	cFL7 = vload8(0, frame1 + i); i -= 7*cwidth; cIL += convert_float8(cFL7); 
-	M1 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
-	cIL = convert_float8(cFL0) - M1; cIL *= cIL;
-	cIL1 = convert_float8(cFL1) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL2) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL3) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL4) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL5) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL6) - M1; cIL = mad(cIL1,cIL1,cIL);
-	cIL1 = convert_float8(cFL7) - M1; cIL = mad(cIL1,cIL1,cIL);
-	D1 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
-	cSL0 = vload8(0, frame2 + i); i += cwidth; cIL = convert_float8(cSL0);
-	cSL1 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL1);
-	cSL2 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL2);
-	cSL3 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL3);
-	cSL4 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL4); 
-	cSL5 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL5);
-	cSL6 = vload8(0, frame2 + i); i += cwidth; cIL += convert_float8(cSL6);
-	cSL7 = vload8(0, frame2 + i); i -= 7*cwidth; cIL += convert_float8(cSL7); 
-	M2 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
-	cIL = convert_float8(cSL0) - M2; cIL *= cIL; 
-	cIL1 = convert_float8(cSL1) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL2) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL3) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL4) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL5) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL5) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL6) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	cIL1 = convert_float8(cSL7) - M2; cIL = mad(cIL1,cIL1,cIL); 
-	D2 = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
-	cIL = (convert_float8(cFL0) - M1)*(convert_float8(cSL0) - M2);
-	cIL += (convert_float8(cFL1) - M1)*(convert_float8(cSL1) - M2);
-	cIL += (convert_float8(cFL2) - M1)*(convert_float8(cSL2) - M2);
-	cIL += (convert_float8(cFL3) - M1)*(convert_float8(cSL3) - M2);
-	cIL += (convert_float8(cFL4) - M1)*(convert_float8(cSL4) - M2);
-	cIL += (convert_float8(cFL5) - M1)*(convert_float8(cSL5) - M2);
-	cIL += (convert_float8(cFL6) - M1)*(convert_float8(cSL6) - M2);
-	cIL += (convert_float8(cFL7) - M1)*(convert_float8(cSL7) - M2);
-	C = (cIL.s0 + cIL.s1 + cIL.s2 + cIL.s3 + cIL.s4 + cIL.s5 + cIL.s6 + cIL.s7)/64;
-	C = mad(M1,M2*2,c1)*mad(C,2,c2)/(mad(M1,M1,mad(M2,M2,c1))*(D1 + D2 + c2));
-	
-	D1 = (M1 - M2);
-	D1 = select(D1,-D1,D1 < 0);
-	D2 = select(0.0f,0.02f*D1,D1 > 4);
-	C -= D2;
-	
-	metric[mb_num] = C;
-	return;
-}*/
 
 __kernel void count_SSIM_chroma
 						(__global uchar4 *const frame1, //0
