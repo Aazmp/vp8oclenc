@@ -1,5 +1,5 @@
 // string to print when "-h" option is met
-char small_help[] = "\n"
+static char small_help[] = "\n"
 					"-i\t\t:  input file path\n"
 					"-o\t\t:  output file path\n"
 					"-qmin\t\t:  min quantizer index (also the only index for key frames)\n"
@@ -20,7 +20,7 @@ char small_help[] = "\n"
 					"\n\n"
 					;
 
-int cl_info()
+static int cl_info()
 {
 	int i, j;
 	char* value;
@@ -100,7 +100,7 @@ int cl_info()
     return 0;
 }
 
-int init_all()
+static int init_all()
 {
 	video.timestep = 1;
 	video.timescale = 1;
@@ -183,7 +183,7 @@ int init_all()
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		else {
-			const char gpu_options[] = "-cl-std=CL1.0 -x clc++";
+			const char gpu_options[] = "-cl-std=CL1.0";
 			device.state_gpu = clBuildProgram(device.program_gpu, 1, device.device_gpu, gpu_options, NULL, NULL);
 		}
 		if(device.state_gpu < 0)  //print log if there were mistakes during kernel building
@@ -347,6 +347,12 @@ int init_all()
 	} // later these buffers are being reassigned
 
 	if (video.GOP_size > 1) {
+		// downsampled sizes
+		const int sz16 = (video.wrk_width / 16)*(video.wrk_height / 16);
+		const int sz8 = (video.wrk_width / 8)*(video.wrk_height / 8);
+		const int sz4 = (video.wrk_width / 4)*(video.wrk_height / 4);
+		const int sz2 = (video.wrk_width / 2)*(video.wrk_height / 2);
+
 		device.predictors_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with predictors_Y\n", device.state_gpu); return -1; }
 		device.predictors_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
@@ -361,41 +367,41 @@ int init_all()
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with residual_V\n", device.state_gpu); return -1; }
 		device.current_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz2, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz4, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz8, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.current_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		device.current_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz16, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
 		device.current_frame_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_U\n", device.state_gpu); return -1; }
 		device.current_frame_V = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with current_frame_V\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz2, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz4, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz8, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.last_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		device.last_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz16, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with last_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.golden_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz2, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.golden_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz4, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.golden_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz8, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.golden_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		device.golden_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz16, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with golden_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/4, NULL , &device.state_gpu);
+		device.altref_frame_Y_downsampled_by2 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz2, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by2\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/16, NULL , &device.state_gpu);
+		device.altref_frame_Y_downsampled_by4 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz4, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by4\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/64, NULL , &device.state_gpu);
+		device.altref_frame_Y_downsampled_by8 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz8, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by8\n", device.state_gpu); return -1; }
-		device.altref_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma/256, NULL , &device.state_gpu);
+		device.altref_frame_Y_downsampled_by16 = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, sz16, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with altref_frame_Y_downsampled_by16\n", device.state_gpu); return -1; }
 		device.reconstructed_frame_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with reconstructed_frame_Y\n", device.state_gpu); return -1; }
@@ -755,7 +761,7 @@ int init_all()
 	return 1;
 }
 
-int string_to_value(char *str)
+static int string_to_value(char *str)
 {
 	int i = 0, new_digit, retval = 0;
 	while ((str[i] != '\n') && (str[i] != '\0'))
@@ -770,7 +776,7 @@ int string_to_value(char *str)
 	return retval;
 }
 
-int ParseArgs(int argc, char *argv[])
+static int ParseArgs(int argc, char *argv[])
 {
     char f_o = 0, f_i = 0, f_qmax = 0, f_qmin = 0, f_qintra = 0, f_g = 0, f_partitions = 0, f_threads = 0, f_gpupn = 0,f_SSIM_target=0,f_altref_range=0; 
 	int i,ii;
@@ -1076,7 +1082,7 @@ int ParseArgs(int argc, char *argv[])
     return 0;
 }
 
-int OpenYUV420FileAndParseHeader()
+static int OpenYUV420FileAndParseHeader()
 {
     // add framerate
 	char magic_word[] = "YUV4MPEG2 ";

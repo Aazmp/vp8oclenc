@@ -12,6 +12,7 @@
 
 #define QUANT_TO_FILTER_LEVEL 3
 #define DEFAULT_ALTREF_RANGE 5
+#define ALLWAYS_FLUSH
 
 static const cl_uchar vp8_dc_qlookup[128] =
 {

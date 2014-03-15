@@ -10,7 +10,7 @@ typedef enum
 	num_intra_bmodes
 } intra_bmode;
 
-void zigzag_block(cl_short *block)
+static void zigzag_block(cl_short *block)
 {
     //      zigzag[16] = { 0, 1, 4, 8, 5, 2, 3,  6, 9, 12, 13, 10, 7, 11, 14, 15 };
     //  inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
@@ -39,7 +39,7 @@ void zigzag_block(cl_short *block)
 static const int cospi8sqrt2minus1=20091;
 static const int sinpi8sqrt2 =35468;
 
-void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_int dc_q, cl_int ac_q)
+static void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_int dc_q, cl_int ac_q)
 {
     int i;
     int a1, b1, c1, d1;
@@ -313,7 +313,7 @@ static void quant4x4(cl_short *coeffs, cl_int dc_q, cl_int ac_q)
 	return;
 }
 
-cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_short *residual, cl_short *top_pred, cl_short *left_pred, cl_short top_left_pred)
+static cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_short *residual, cl_short *top_pred, cl_short *left_pred, cl_short top_left_pred)
 {
 	cl_short MinWeight, bmode, val, buf, i, j, W;
 	cl_uchar pr_tmp[16];
@@ -574,7 +574,7 @@ cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_short *re
 	return bmode;
 }
 
-void predict_and_transform_mb(cl_int mb_num)
+static void predict_and_transform_mb(cl_int mb_num)
 {
 	frames.transformed_blocks[mb_num].parts = are4x4;
     cl_int i, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
@@ -801,7 +801,7 @@ void predict_and_transform_mb(cl_int mb_num)
 }
 
 
-float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_uchar *const frame1V, const cl_int width1, 
+static float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_uchar *const frame1V, const cl_int width1, 
 					   cl_uchar *const frame2Y, cl_uchar *const frame2U, cl_uchar *const frame2V, const cl_int width2)
 {
 	int i,j,M1=0,M2=0,D1=0,D2=0,C=0,t1,t2;
@@ -906,7 +906,7 @@ float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_ucha
 }
 
 
-int test_inter_on_intra(cl_int mb_num, segment_ids id)
+static int test_inter_on_intra(cl_int mb_num, segment_ids id)
 {
 	macroblock test_mb;
 	static cl_uchar test_recon_Y[256];
@@ -1137,7 +1137,7 @@ int test_inter_on_intra(cl_int mb_num, segment_ids id)
     return 1;
 }
 
-void intra_transform()
+static void intra_transform()
 {
 	frames.frames_until_key = video.GOP_size;
 	frames.frames_until_altref = video.altref_range;

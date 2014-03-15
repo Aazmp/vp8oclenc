@@ -1,11 +1,11 @@
-void open_dump_file()
+static void open_dump_file()
 {
 	dump_file.path = DUMPPATH;
 	dump_file.handle = fopen(dump_file.path, "wb");
 	fwrite(frames.header, frames.header_sz, 1, dump_file.handle);
 }
 
-void dump()
+static void dump()
 {
 	if (frames.frame_number > 1500) return; //disk space guard
 

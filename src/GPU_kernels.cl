@@ -1,4 +1,5 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
+#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef enum {
 	are16x16 = 0,
@@ -139,20 +140,52 @@ void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __
 inline void weight_opt(int4 *const restrict XX, int16 *const restrict L) 
 {
 	*XX = (*L).s0123;
-	(*L).s0123 = (((*L).s0123 + (*L).sCDEF) << 3);	// a1 = ((ip[0] + ip[3])<<3);
-	(*L).sCDEF = ((*XX - (*L).sCDEF) << 3);	// d1 = ((ip[0] - ip[3])<<3);
+	//(*L).s0123 = (((*L).s0123 + (*L).sCDEF) << 3);	// a1 = ((ip[0] + ip[3])<<3);
+	(*L).s0 = (((*L).s0 + (*L).sC) << 3);
+	(*L).s1 = (((*L).s1 + (*L).sD) << 3);
+	(*L).s2 = (((*L).s2 + (*L).sE) << 3);
+	(*L).s3 = (((*L).s3 + (*L).sF) << 3);
+	//(*L).sCDEF = ((*XX - (*L).sCDEF) << 3);	// d1 = ((ip[0] - ip[3])<<3);
+	(*L).sC = (((*XX).s0 - (*L).sC) << 3);
+	(*L).sD = (((*XX).s1 - (*L).sD) << 3);
+	(*L).sE = (((*XX).s2 - (*L).sE) << 3);
+	(*L).sF = (((*XX).s3 - (*L).sF) << 3);	
 	*XX = (*L).s4567;
-	(*L).s4567 = (((*L).s4567 + (*L).s89AB) << 3);	// b1 = ((ip[1] + ip[2])<<3);
-	(*L).s89AB = ((*XX - (*L).s89AB) << 3);	// c1 = ((ip[1] - ip[2])<<3);
+	//(*L).s4567 = (((*L).s4567 + (*L).s89AB) << 3);	// b1 = ((ip[1] + ip[2])<<3);
+	(*L).s4 = (((*L).s4 + (*L).s8) << 3);
+	(*L).s5 = (((*L).s5 + (*L).s9) << 3);
+	(*L).s6 = (((*L).s6 + (*L).sA) << 3);
+	(*L).s7 = (((*L).s7 + (*L).sB) << 3);
+	//(*L).s89AB = ((*XX - (*L).s89AB) << 3);	// c1 = ((ip[1] - ip[2])<<3);
+	(*L).s4 = (((*XX).s0 - (*L).s8) << 3);
+	(*L).s5 = (((*XX).s1 - (*L).s9) << 3);
+	(*L).s6 = (((*XX).s2 - (*L).sA) << 3);
+	(*L).s7 = (((*XX).s3 - (*L).sB) << 3);
 
 	*XX = (*L).s89AB;
-	(*L).s89AB = (*L).s0123 - (*L).s4567;				// op[2] = (a1 - b1);
-	(*L).s0123 = (*L).s0123 + (*L).s4567;				// op[0] = (a1 + b1); 
+	//(*L).s89AB = (*L).s0123 - (*L).s4567;				// op[2] = (a1 - b1);
+	(*L).s8 = (*L).s0 - (*L).s4;
+	(*L).s9 = (*L).s1 - (*L).s5;
+	(*L).sA = (*L).s2 - (*L).s6;
+	(*L).sB = (*L).s3 - (*L).s7;
+	//(*L).s0123 = (*L).s0123 + (*L).s4567;				// op[0] = (a1 + b1); 
+	(*L).s0 = (*L).s0 + (*L).s4;
+	(*L).s1 = (*L).s1 + (*L).s5;
+	(*L).s2 = (*L).s2 + (*L).s6;
+	(*L).s3 = (*L).s3 + (*L).s7;
 	
-	(*L).s4567 = (((*XX * 2217) + ((*L).sCDEF * 5352) + 14500) >> 12);
+	//(*L).s4567 = (((*XX * 2217) + ((*L).sCDEF * 5352) + 14500) >> 12);
 														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
-	(*L).sCDEF = ((((*L).sCDEF * 2217) - (*XX * 5352) + 7500) >> 12);
+	(*L).s4 = ((((*XX).s0 * 2217) + ((*L).sC * 5352) + 14500) >> 12);
+	(*L).s5 = ((((*XX).s1 * 2217) + ((*L).sD * 5352) + 14500) >> 12);
+	(*L).s6 = ((((*XX).s2 * 2217) + ((*L).sE * 5352) + 14500) >> 12);
+	(*L).s7 = ((((*XX).s3 * 2217) + ((*L).sF * 5352) + 14500) >> 12);
+	//(*L).sCDEF = ((((*L).sCDEF * 2217) - (*XX * 5352) + 7500) >> 12);
 														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
+	(*L).sC = ((((*L).sC * 2217) - ((*XX).s0 * 5352) + 7500) >> 12);
+	(*L).sD = ((((*L).sD * 2217) - ((*XX).s1 * 5352) + 7500) >> 12);
+	(*L).sE = ((((*L).sE * 2217) - ((*XX).s2 * 5352) + 7500) >> 12);
+	(*L).sF = ((((*L).sF * 2217) - ((*XX).s3 * 5352) + 7500) >> 12);	
 
 	(*XX).x = (*L).s0; (*XX).y = (*L).s4; (*XX).z = (*L).s8; (*XX).w = (*L).sC;
 	// a1 = op[0] + op[3];
@@ -203,14 +236,13 @@ inline void weight_opt(int4 *const restrict XX, int16 *const restrict L)
 	
 	*L = convert_int16(abs(*L));
 	(*L).s0/=DC_UNSIGNIFICANCE;
-	(*XX).x = (*L).s0 + (*L).s1 + (*L).s2 + (*L).s3 +
-				(*L).s4 + (*L).s5 + (*L).s6 + (*L).s7 +
-				(*L).s8 + (*L).s9 + (*L).sA + (*L).sB +
-				(*L).sC + (*L).sD + (*L).sE + (*L).sF;
+	(*XX).x = (*L).s0 + (*L).s1 + (*L).s2 + (*L).s3
+			+ (*L).s4 + (*L).s5 + (*L).s6 + (*L).s7
+			+ (*L).s8 + (*L).s9 + (*L).sA + (*L).sB
+			+ (*L).sC + (*L).sD + (*L).sE + (*L).sF;
 	
 	return;
 }
-
 
 void DCT_and_quant(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q) 
 {
@@ -532,7 +564,7 @@ __kernel void downsample_x2(__global uchar *const src_frame, //0 // bilinear
 }
 
 __kernel void luma_search_1step //when looking into downsampled and original frames
-						( 	__global uchar4 *const current_frame, //0
+						( 	__global uchar *const current_frame, //0
 							__global uchar *const prev_frame, //1
 							__global vector_net *const src_net, //2
 							__global vector_net *const dst_net, //3
@@ -553,7 +585,7 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	__private int ci, pi;   
 	__private int b8x8_num; 
 	__private int cut_width;
-	
+		
 	cut_width = (width / 8) * 8;
 	
 	//first we determine parameters of current stage
@@ -578,17 +610,16 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	vector_y0 = vector_y;
 	
 	b8x8_num = (cy/8)*net_width + (cx/8);
+
 	ci = cy*width + cx;
-	
-	ci /= 4;
-	CL0.s0123 = current_frame[ci]; CL0.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL1.s0123 = current_frame[ci]; CL1.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL2.s0123 = current_frame[ci]; CL2.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL3.s0123 = current_frame[ci]; CL3.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL4.s0123 = current_frame[ci]; CL4.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL5.s0123 = current_frame[ci]; CL5.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL6.s0123 = current_frame[ci]; CL6.s4567 = current_frame[ci + 1]; ci+=width/4;
-	CL7.s0123 = current_frame[ci]; CL7.s4567 = current_frame[ci + 1];
+	CL0 = vload8(0, current_frame+ci); ci += width;
+	CL1 = vload8(0, current_frame+ci); ci += width;
+	CL2 = vload8(0, current_frame+ci); ci += width;
+	CL3 = vload8(0, current_frame+ci); ci += width;
+	CL4 = vload8(0, current_frame+ci); ci += width;
+	CL5 = vload8(0, current_frame+ci); ci += width;
+	CL6 = vload8(0, current_frame+ci); ci += width;
+	CL7 = vload8(0, current_frame+ci); ci += width;
 
 	MinDiff = 0xffff;
 
@@ -621,33 +652,38 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 			DL1 = convert_int4(CL1.s0123) - convert_int4(PL1.s0123);
 			DL2 = convert_int4(CL2.s0123) - convert_int4(PL2.s0123);
 			DL3 = convert_int4(CL3.s0123) - convert_int4(PL3.s0123);
+		
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff = DL0.x;
 			// block 10			
 			DL0 = convert_int4(CL4.s0123) - convert_int4(PL4.s0123);
 			DL1 = convert_int4(CL5.s0123) - convert_int4(PL5.s0123);
 			DL2 = convert_int4(CL6.s0123) - convert_int4(PL6.s0123);
 			DL3 = convert_int4(CL7.s0123) - convert_int4(PL7.s0123);
+				
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			// block 01
 			DL0 = convert_int4(CL0.s4567) - convert_int4(PL0.s4567);
 			DL1 = convert_int4(CL1.s4567) - convert_int4(PL1.s4567);
 			DL2 = convert_int4(CL2.s4567) - convert_int4(PL2.s4567);
 			DL3 = convert_int4(CL3.s4567) - convert_int4(PL3.s4567);
+			
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			// block 11
 			DL0 = convert_int4(CL4.s4567) - convert_int4(PL4.s4567);
 			DL1 = convert_int4(CL5.s4567) - convert_int4(PL5.s4567);
 			DL2 = convert_int4(CL6.s4567) - convert_int4(PL6.s4567);
 			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
+
 			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
 			
-			
 			// this helps keep neighbouring vectors close
-			Diff += (int)(abs((int)abs(px-cx)-vector_x0) + abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
-			
+			Diff += (int)(abs((int)abs(px-cx)-vector_x0)
+						+ abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
+				
 			vector_x = (Diff < MinDiff) ? px : vector_x;
 			vector_y = (Diff < MinDiff) ? py : vector_y;
-			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;			
+			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
+
     	} 
     } 
 	
@@ -657,7 +693,6 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	return;
 	
 }
-
 
 __constant sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
 __constant int f[8][6] = { /* indexed by displacement */
@@ -873,93 +908,187 @@ inline void construct(__read_only image2d_t ref_frame, const int2 coords, const 
 	return;
 }
 
-void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const short2 d, int16 *const restrict DL,
-					uchar16 *const restrict l, uchar16 *const restrict lap4p2, int4 *const restrict li, uint4 *const restrict buf4ui)
+void construct_opt1(__read_only image2d_t ref_frame, const short2 coords, const short2 d, int16 *const restrict DL,
+					uchar16 *const restrict l, uchar16 *const restrict lap4p2, int4 *const restrict li, uint4 *const restrict buf4ui,
+					__local uchar4 *const restrict prefetched, const int lid, const int lsz)
+{
+	__private int2 c;
+	*lap4p2 = 0; 
+	*l = 0;
+	
+	__private int i;
+	#pragma unroll 1
+	for (i = 0; i < 6; ++i)
+	{
+		c.x = coords.x - 2; 
+		c.y = coords.y - 2 + i;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
+		(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*l).sCDEF = convert_uchar4_sat((*li));
+		(*lap4p2).s0123 = (i==0)? convert_uchar4_sat((*li)) : (*lap4p2).s0123;
+		(*lap4p2).s4567 = (i==1)? convert_uchar4_sat((*li)) : (*lap4p2).s4567;
+		(*l).s0123 = (i==2) ? convert_uchar4_sat((*li)) : (*l).s0123;
+		(*l).s4567 = (i==3) ? convert_uchar4_sat((*li)) : (*l).s4567;
+		(*l).s89AB = (i==4) ? convert_uchar4_sat((*li)) : (*l).s89AB;
+		(*l).sCDEF = (i>=5) ? convert_uchar4_sat((*li)) : (*l).sCDEF;
+	}	
+
+	// now we interpolate in collumns
+	// row 0
+	(*lap4p2).s8=(*lap4p2).s0;(*lap4p2).s9=(*lap4p2).s4;(*lap4p2).sA=(*l).s0;(*lap4p2).sB=(*l).s4;(*lap4p2).sC=(*l).s8;(*lap4p2).sD=(*l).sC;
+	(*DL).s0 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s1;(*lap4p2).s9=(*lap4p2).s5;(*lap4p2).sA=(*l).s1;(*lap4p2).sB=(*l).s5;(*lap4p2).sC=(*l).s9;(*lap4p2).sD=(*l).sD;
+	(*DL).s1 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s2;(*lap4p2).s9=(*lap4p2).s6;(*lap4p2).sA=(*l).s2;(*lap4p2).sB=(*l).s6;(*lap4p2).sC=(*l).sA;(*lap4p2).sD=(*l).sE;
+	(*DL).s2 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s3;(*lap4p2).s9=(*lap4p2).s7;(*lap4p2).sA=(*l).s3;(*lap4p2).sB=(*l).s7;(*lap4p2).sC=(*l).sB;(*lap4p2).sD=(*l).sF;
+	(*DL).s3 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	
+	/*pragma unroll 1
+	for (i = 6; i < 9; ++i)
+	{
+		(*lap4p2).s0123 = (*lap4p2).s4567; (*lap4p2).s4567 = (*l).s0123; (*l).s0123 = (*l).s4567; (*l).s4567 = (*l).s89AB; (*l).s89AB = (*l).sCDEF;
+		c.x = coords.x - 2; c.y = coords.y - 2 + i; 
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
+		(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+		(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
+		(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+		(*l).sCDEF = convert_uchar4_sat((*li));
+		// and produce resulting row
+		(*lap4p2).s8=(*lap4p2).s0;(*lap4p2).s9=(*lap4p2).s4;(*lap4p2).sA=(*l).s0;(*lap4p2).sB=(*l).s4;(*lap4p2).sC=(*l).s8;(*lap4p2).sD=(*l).sC;
+		(*DL).sC = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s1;(*lap4p2).s9=(*lap4p2).s5;(*lap4p2).sA=(*l).s1;(*lap4p2).sB=(*l).s5;(*lap4p2).sC=(*l).s9;(*lap4p2).sD=(*l).sD;
+		(*DL).sD = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s2;(*lap4p2).s9=(*lap4p2).s6;(*lap4p2).sA=(*l).s2;(*lap4p2).sB=(*l).s6;(*lap4p2).sC=(*l).sA;(*lap4p2).sD=(*l).sE;
+		(*DL).sE = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+		(*lap4p2).s8=(*lap4p2).s3;(*lap4p2).s9=(*lap4p2).s7;(*lap4p2).sA=(*l).s3;(*lap4p2).sB=(*l).s7;(*lap4p2).sC=(*l).sB;(*lap4p2).sD=(*l).sF;
+		(*DL).sF = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+		(*DL).s4567 = (i==6)?(*DL).sCDEF:(*DL).s4567;
+		(*DL).s89AB = (i==7)?(*DL).sCDEF:(*DL).s89AB;
+	}*/
+
+	// row 1 
+	(*lap4p2).s0123 = (*lap4p2).s4567; (*lap4p2).s4567 = (*l).s0123; (*l).s0123 = (*l).s4567; (*l).s4567 = (*l).s89AB; (*l).s89AB = (*l).sCDEF;
+	// first produce line l3
+	c.x = coords.x - 2; c.y = coords.y + 4; 
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
+	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*l).sCDEF = convert_uchar4_sat((*li));
+	// and produce resulting row
+	(*lap4p2).s8=(*lap4p2).s0;(*lap4p2).s9=(*lap4p2).s4;(*lap4p2).sA=(*l).s0;(*lap4p2).sB=(*l).s4;(*lap4p2).sC=(*l).s8;(*lap4p2).sD=(*l).sC;
+	(*DL).s4 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s1;(*lap4p2).s9=(*lap4p2).s5;(*lap4p2).sA=(*l).s1;(*lap4p2).sB=(*l).s5;(*lap4p2).sC=(*l).s9;(*lap4p2).sD=(*l).sD;
+	(*DL).s5 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s2;(*lap4p2).s9=(*lap4p2).s6;(*lap4p2).sA=(*l).s2;(*lap4p2).sB=(*l).s6;(*lap4p2).sC=(*l).sA;(*lap4p2).sD=(*l).sE;
+	(*DL).s6 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s3;(*lap4p2).s9=(*lap4p2).s7;(*lap4p2).sA=(*l).s3;(*lap4p2).sB=(*l).s7;(*lap4p2).sC=(*l).sB;(*lap4p2).sD=(*l).sF;
+	(*DL).s7 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	// row 2
+	(*lap4p2).s0123 = (*lap4p2).s4567; (*lap4p2).s4567 = (*l).s0123; (*l).s0123 = (*l).s4567; (*l).s4567 = (*l).s89AB; (*l).s89AB = (*l).sCDEF;
+	c.x = coords.x - 2; c.y = coords.y + 5; 
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
+	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*l).sCDEF = convert_uchar4_sat((*li));
+	(*lap4p2).s8=(*lap4p2).s0;(*lap4p2).s9=(*lap4p2).s4;(*lap4p2).sA=(*l).s0;(*lap4p2).sB=(*l).s4;(*lap4p2).sC=(*l).s8;(*lap4p2).sD=(*l).sC;
+	(*DL).s8 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s1;(*lap4p2).s9=(*lap4p2).s5;(*lap4p2).sA=(*l).s1;(*lap4p2).sB=(*l).s5;(*lap4p2).sC=(*l).s9;(*lap4p2).sD=(*l).sD;
+	(*DL).s9 = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s2;(*lap4p2).s9=(*lap4p2).s6;(*lap4p2).sA=(*l).s2;(*lap4p2).sB=(*l).s6;(*lap4p2).sC=(*l).sA;(*lap4p2).sD=(*l).sE;
+	(*DL).sA = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s3;(*lap4p2).s9=(*lap4p2).s7;(*lap4p2).sA=(*l).s3;(*lap4p2).sB=(*l).s7;(*lap4p2).sC=(*l).sB;(*lap4p2).sD=(*l).sF;
+	(*DL).sB = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+
+	// row 3
+	(*lap4p2).s0123 = (*lap4p2).s4567; (*lap4p2).s4567 = (*l).s0123; (*l).s0123 = (*l).s4567; (*l).s4567 = (*l).s89AB; (*l).s89AB = (*l).sCDEF;
+	c.x = coords.x - 2; c.y = coords.y + 6;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
+	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
+	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
+	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
+	(*l).sCDEF = convert_uchar4_sat((*li));
+	(*lap4p2).s8=(*lap4p2).s0;(*lap4p2).s9=(*lap4p2).s4;(*lap4p2).sA=(*l).s0;(*lap4p2).sB=(*l).s4;(*lap4p2).sC=(*l).s8;(*lap4p2).sD=(*l).sC;
+	(*DL).sC = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s1;(*lap4p2).s9=(*lap4p2).s5;(*lap4p2).sA=(*l).s1;(*lap4p2).sB=(*l).s5;(*lap4p2).sC=(*l).s9;(*lap4p2).sD=(*l).sD;
+	(*DL).sD = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s2;(*lap4p2).s9=(*lap4p2).s6;(*lap4p2).sA=(*l).s2;(*lap4p2).sB=(*l).s6;(*lap4p2).sC=(*l).sA;(*lap4p2).sD=(*l).sE;
+	(*DL).sE = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+	(*lap4p2).s8=(*lap4p2).s3;(*lap4p2).s9=(*lap4p2).s7;(*lap4p2).sA=(*l).s3;(*lap4p2).sB=(*l).s7;(*lap4p2).sC=(*l).sB;(*lap4p2).sD=(*l).sF;
+	(*DL).sF = (mad24((int)(*lap4p2).s8,f[d.y][0],mad24((int)(*lap4p2).s9,f[d.y][1],mad24((int)(*lap4p2).sA,f[d.y][2],mad24((int)(*lap4p2).sB,f[d.y][3],mad24((int)(*lap4p2).sC,f[d.y][4],mad24((int)(*lap4p2).sD,f[d.y][5],64))))))/128);
+
+	*DL = convert_int16(convert_uchar16_sat(*DL));
+	
+	prefetched[(int)lid] = (*lap4p2).s4567;
+	prefetched[(int)(lsz+lid)] = (*l).s0123;
+	prefetched[(int)mad24(lsz,2,lid)] = (*l).s4567;
+	prefetched[(int)mad24(lsz,3,lid)] = (*l).s89AB;
+	prefetched[(int)mad24(lsz,4,lid)] = (*l).sCDEF;
+	
+	return;
+}
+
+void construct_opt2(__read_only image2d_t ref_frame, const short2 coords, const short2 d, int16 *const restrict DL,
+					uchar16 *const restrict l, uchar16 *const restrict lap4p2, int4 *const restrict li, uint4 *const restrict buf4ui,
+					const __local uchar4 *const restrict prefetched, const int lid, const int lsz)
 {
 	__private int2 c;
 	
-	// read line of 9 pixels and interpolate line of 4 pixels from it
-	// we need 9 of these 4-pixel lines
-	// line -2
-	c.x = coords.x - 2; c.y = coords.y - 2;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
-	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s0123 = convert_uchar4_sat((*li));
-	// line -1
-	c.x = coords.x - 2; c.y = coords.y - 1;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
-	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s4567 = convert_uchar4_sat((*li));
-	// line 0
-	c.x = coords.x - 2; c.y = coords.y;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
-	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*l).s0123 = convert_uchar4_sat((*li));
-	// line 1
-	c.x = coords.x - 2; c.y = coords.y + 1;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
-	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*l).s4567 = convert_uchar4_sat((*li));
-	// line 2
-	c.x = coords.x - 2; c.y = coords.y + 2;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s9 = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sA = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sB = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sC = (uchar)(*buf4ui).s0; ++c.x;
-	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s0 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s1 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0; ++c.x;
-	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
-	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*l).s89AB = convert_uchar4_sat((*li));
+	(*lap4p2).s0123 = prefetched[(int)lid];
+	(*lap4p2).s4567 = prefetched[(int)(lsz+lid)];
+	(*l).s0123 = prefetched[(int)mad24(lsz,2,lid)];
+	(*l).s4567 = prefetched[(int)mad24(lsz,3,lid)];
+	(*l).s89AB = prefetched[(int)mad24(lsz,4,lid)];
+	
 	// line 3
 	c.x = coords.x - 2; c.y = coords.y + 3; 
 	(*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).s8 = (uchar)(*buf4ui).s0; ++c.x;
@@ -975,7 +1104,7 @@ void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const s
 	(*li).s2 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
 	(*lap4p2).s8=(*lap4p2).s9;(*lap4p2).s9=(*lap4p2).sA;(*lap4p2).sA=(*lap4p2).sB;(*lap4p2).sB=(*lap4p2).sC;(*lap4p2).sC=(*lap4p2).sD; (*buf4ui) = read_imageui(ref_frame,sampler,c); (*lap4p2).sD = (uchar)(*buf4ui).s0;
 	(*li).s3 = (mad24((int)(*lap4p2).s8,f[d.x][0],mad24((int)(*lap4p2).s9,f[d.x][1],mad24((int)(*lap4p2).sA,f[d.x][2],mad24((int)(*lap4p2).sB,f[d.x][3],mad24((int)(*lap4p2).sC,f[d.x][4],mad24((int)(*lap4p2).sD,f[d.x][5],64))))))/128);
-	(*l).sCDEF = convert_uchar4_sat((*li));
+	(*l).sCDEF = convert_uchar4_sat((*li));	
 	
 	// now we interpolate in collumns
 	// row 0
@@ -1071,8 +1200,12 @@ void construct_opt(__read_only image2d_t ref_frame, const short2 coords, const s
 	return;
 }
 
+#define WRKGRSZ 256
+__constant int dx[4] = {0, 0, 16, 16};
+__constant int dy[4] = {0, 16, 0, 16};
+__constant int dl[4] = {0, 8, 1, 9};
 __kernel 
-__attribute__((reqd_work_group_size(256, 1, 1)))
+__attribute__((reqd_work_group_size(WRKGRSZ, 1, 1)))
 void luma_search_2step //searching in interpolated picture
 						( 	__global uchar4 *const current_frame, //0
 							__read_only image2d_t ref_frame, //1
@@ -1083,7 +1216,6 @@ void luma_search_2step //searching in interpolated picture
 							const int height) //6
 {
 	//this version of kernel uses almost all variables packed to vectors (AMD compiler then use less VGPR)
-	// code unreadable (use commented unpacked version of kernel)
 	__private int16 DL;
 	
 	__private short8 pdata1;
@@ -1099,14 +1231,16 @@ void luma_search_2step //searching in interpolated picture
 	__private const short lid = get_local_id(0);
 	__private const short lsz = get_local_size(0);
 	
-	__local uchar4 LDS[4*1024]; //16kb
+	__local uchar4 LDS[16*WRKGRSZ]; //16kb for WRKGRSZ == 256
+	__local uchar4 prefetched[6*WRKGRSZ];
 	
 	// the code has become unreadable, but it's better not to use defines (compiler probably go mad)
 		
 	// now b8x8_num represents absolute number of 8x8 block (net_index)
 	pdata1.s4 = net[b8x8_num].vector_x; //vector_x = ...
 	pdata1.s5 = net[b8x8_num].vector_y; //vector_y = ...
-	pdata1.s4 *= 4; pdata1.s5 *= 4;
+	pdata1.s4 *= 4; 
+	pdata1.s5 *= 4;
 	pdata1.s6 = pdata1.s4; // vector_x0 = vector_x
 	pdata1.s7 = pdata1.s5; // vector_y0 = vector_y
 	
@@ -1139,77 +1273,58 @@ void luma_search_2step //searching in interpolated picture
 	pdata2.s0 *= 4; 
 	pdata2.s1 *= 4;
 	
-	pdata1.s0 = pdata2.s0 + pdata1.s4 - 2; //startX
-	pdata1.s1 = pdata2.s0 + pdata1.s4 + 2; //endX
-	pdata1.s2 = pdata2.s1 + pdata1.s5 - 2; //startY
-	pdata1.s3 = pdata2.s1 + pdata1.s5 + 2; //endY
-	
 	pdata1.s4 = width*4 - 32; 
 	pdata1.s5 = height*4 - 32; 
 	
-	pdata1.s0 = (pdata1.s0 < 0) ? 0 : pdata1.s0;
-	pdata1.s1 = (pdata1.s1 > pdata1.s4) ? pdata1.s4 : pdata1.s1;
-	pdata1.s2 = (pdata1.s2 < 0) ? 0 : pdata1.s2;
-	pdata1.s3 = (pdata1.s3 > pdata1.s5) ? pdata1.s5 : pdata1.s3;
-	//pdata1.s0 = select(pdata1.s0,(short)0,(short)(pdata1.s0 < 0));
-	//pdata1.s1 = select(pdata1.s1,pdata1.s4,(short)(pdata1.s1 > pdata1.s4));
-	//pdata1.s2 = select(pdata1.s2,(short)0,(short)(pdata1.s2 < 0));
-	//pdata1.s3 = select(pdata1.s3,pdata1.s5,(short)(pdata1.s3 > pdata1.s5));
+	//pdata1.s1 = not free
+	//pdata1.s2 = free
+	//pdata1.s3 = free
 	
 	//#pragma unroll 1
-	for (pdata2.s2 = pdata1.s0; pdata2.s2 <= pdata1.s1; ++pdata2.s2)
+	for (pdata1.s0 = 0; pdata1.s0 < 25; ++pdata1.s0)
 	{
 		//#pragma unroll 1
-		for (pdata2.s3 = pdata1.s2; pdata2.s3 <= pdata1.s3; ++pdata2.s3)
-		{
+		//for (pdata2.s3 = pdata1.s2; pdata2.s3 <= pdata1.s3; ++pdata2.s3)
+			pdata2.s2 = pdata2.s0 + pdata1.s6 + ((pdata1.s0 % 5) - 2); //- x
+			pdata2.s3 = pdata2.s1 + pdata1.s7 + ((pdata1.s0 / 5) - 2);//- y
+		
 			pdata2.s6=pdata2.s2%4; //x qpel displacement
 			pdata2.s7=pdata2.s3%4; //y qpel displacement
 			pdata2.s6 *= 2; 
 			pdata2.s7 *= 2;
-			pdata2.s4 = pdata2.s2/4; pdata2.s5 = pdata2.s3/4;
-			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[(int)lid]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)lsz,2,(int)lid)]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)lsz,4,(int)lid)]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,6,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);
-			Diff = li.s0;
-			//pdata2.s4 = (pdata2.s2 + 16)/4; pdata2.s5 = pdata2.s3/4; 
-			pdata2.s4 += 4; //(0;4)
-			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[(int)lsz+(int)lid]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)lsz,3,(int)lid)]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)lsz,5,(int)lid)]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,7,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);
-			Diff += li.s0;
-			pdata2.s4 = pdata2.s2/4; pdata2.s5 = (pdata2.s3 + 16)/4; 
-			//pdata2.s4 -= 4; pdata2.s5 += 4;
-			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[mad24((int)lsz,8,(int)lid)]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)lsz,10,(int)lid)]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)lsz,12,(int)lid)]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,14,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);
-			Diff += li.s0;
-			pdata2.s4 = (pdata2.s2 + 16)/4; //pdata2.s5 = (pdata2.s3 + 16)/4;
-			construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-			DL.s0123 = convert_int4(LDS[mad24((int)lsz,9,(int)lid)]) - DL.s0123;
-			DL.s4567 = convert_int4(LDS[mad24((int)lsz,11,(int)lid)]) - DL.s4567;
-			DL.s89AB = convert_int4(LDS[mad24((int)lsz,13,(int)lid)]) - DL.s89AB;
-			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,15,(int)lid)]) - DL.sCDEF;
-			weight_opt(&li, &DL);
-			Diff += li.s0;
-		
-		
+			
+			Diff = 0;
+			#pragma unroll 1
+			for (pdata1.s1 = 0; pdata1.s1 < 4; pdata1.s1 += 1)
+			{
+				pdata2.s4 = (pdata2.s2 + dx[pdata1.s1])/4;
+				pdata2.s5 = (pdata2.s3 + dy[pdata1.s1])/4;
+				//construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
+				if (dy[pdata1.s1] == 0)
+					construct_opt1(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
+				else
+					construct_opt2(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
+				DL.s0123 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+0,(int)lid)]) - DL.s0123;
+				DL.s4567 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+2,(int)lid)]) - DL.s4567;
+				DL.s89AB = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+4,(int)lid)]) - DL.s89AB;
+				DL.sCDEF = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+6,(int)lid)]) - DL.sCDEF;
+				weight_opt(&li, &DL);
+				Diff += li.s0;
+			}
+
 			Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
+			
+			Diff |= select(0,0x7fff,(pdata2.s2 < 0));
+			Diff |= select(0,0x7fff,(pdata2.s2 > (width*4 - 32)));
+			Diff |= select(0,0x7fff,(pdata2.s3 < 0));
+			Diff |= select(0,0x7fff,(pdata2.s3 > (height*4 - 32)));
+			
 			pdata2.s6 = (Diff < MinDiff); 
 			
 			pdata1.s4 = pdata2.s6 ? pdata2.s2 : pdata1.s4;
 			pdata1.s5 = pdata2.s6 ? pdata2.s3 : pdata1.s5;
 			
 			MinDiff = pdata2.s6 ? Diff : MinDiff;
-    	} 
     } 
 
 	pdata1.s4 -= pdata2.s0;
@@ -1222,7 +1337,6 @@ void luma_search_2step //searching in interpolated picture
 	
 	return;
 }
-
 
 __kernel void select_reference(__global vector_net *const last_net, //0
 								__global vector_net *const golden_net, //1

@@ -1,4 +1,4 @@
-void gather_frame()
+static void gather_frame()
 {
 	// get info about partition sizes
 	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.partitions_sizes ,CL_TRUE, 0, 8*sizeof(cl_int), frames.partition_sizes, 0, NULL, NULL);
@@ -29,7 +29,7 @@ void gather_frame()
 	return;
 }
 
-void write_output_file()
+static void write_output_file()
 {
 	// clock start in gather frame
 	// write ivf frame header (12 bytes) LITTLE ENDIAN
@@ -68,7 +68,7 @@ void write_output_file()
 	return;
 }
 
-void write_output_header()
+static void write_output_header()
 {
 	fseek (output_file.handle, 0, SEEK_SET);
 	// header size 32bytes LITTLE ENDIAN
@@ -138,7 +138,7 @@ void write_output_header()
 	return; 
 }
 
-int copy_with_padding()
+static int copy_with_padding()
 {
     	int i, j;
     	cl_uchar *srcY, *srcU, *srcV, *dstY, *dstU, *dstV;
@@ -201,7 +201,7 @@ int copy_with_padding()
 }
 
 
-int get_yuv420_frame()
+static int get_yuv420_frame()
 {
 	// if there is padding, could be just pointer switch
 	if (frames.frame_number > 0) {

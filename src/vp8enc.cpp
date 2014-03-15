@@ -11,6 +11,28 @@ struct videoContext video; //properties of the video (sizes, indicies, vector li
 struct hostFrameBuffers frames; // host buffers, frame number, current/previous frame flags...
 struct encoderStatistics encStat;
 
+static cl_int ifFlush(cl_command_queue comm)
+{
+#ifdef ALLWAYS_FLUSH
+	const cl_int ret = clFlush(comm);
+	if (ret < 0)
+		printf("flush fail\n");
+	return ret;
+#endif //ALLWAYS_FLUSH
+	return 0;
+}
+
+static cl_int finalFlush(cl_command_queue comm)
+{
+#ifndef ALLWAYS_FLUSH
+	const cl_int ret = clFlush(comm);
+	if (ret < 0)
+		printf("flush fail\n");
+	return ret;
+#endif //ALLWAYS_FLUSH
+	return 0;
+}
+
 #include "encIO.h"
 #include "init.h"
 #include "intra_part.h"
@@ -22,9 +44,11 @@ struct encoderStatistics encStat;
 
 extern void encode_header(cl_uchar* partition);
 
-void entropy_encode()
+static void entropy_encode()
 {
 	if (frames.threads_free < video.number_of_partitions) {
+		device.state_gpu = finalFlush(device.loopfilterU_commandQueue_cpu);
+		device.state_gpu = finalFlush(device.loopfilterV_commandQueue_cpu);
 		device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
 		device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
 		device.state_cpu = clFinish(device.loopfilterV_commandQueue_cpu);
@@ -63,7 +87,7 @@ void entropy_encode()
 	clSetKernelArg(device.encode_coefficients, 9, sizeof(cl_int), &frames.current_is_key_frame);
 	device.state_cpu = clSetKernelArg(device.encode_coefficients, 11, sizeof(cl_int), &frames.skip_prob);
 	clEnqueueNDRangeKernel(device.boolcoder_commandQueue_cpu, device.encode_coefficients, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
-	clFlush(device.boolcoder_commandQueue_cpu); // we don't need result until gather_frame(), so no block now
+	ifFlush(device.boolcoder_commandQueue_cpu); // we don't need result until gather_frame(), so no block now
 
 	// encoding header is done as a part of HOST code placed in entropy_host.c[pp]|entropy_host.h
 	encode_header(frames.encoded_frame); 
@@ -71,7 +95,7 @@ void entropy_encode()
     return;
 }
 
-void get_loopfilter_strength(int *const red, cl_int *const sh)
+static void get_loopfilter_strength(int *const red, cl_int *const sh)
 {
 	int i,j, avg = 0, div = 0;
 	for(i = 0; i < video.wrk_frame_size_luma; ++i)
@@ -104,7 +128,7 @@ void get_loopfilter_strength(int *const red, cl_int *const sh)
 	return;
 }
 
-void prepare_segments_data(const int update_filter = 0, const int shrpnss = 0)
+static void prepare_segments_data(const int update_filter = 0, const int shrpnss = 0)
 {
 	int i,qi;
 	int *refqi;
@@ -206,7 +230,7 @@ void prepare_segments_data(const int update_filter = 0, const int shrpnss = 0)
 	return;
 }
 
-void check_SSIM()
+static void check_SSIM()
 {
 	device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
 	device.state_gpu = clEnqueueReadBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
@@ -239,7 +263,7 @@ void check_SSIM()
 	return;
 }
 
-int scene_change()
+static int scene_change()
 {
 	static int holdover = 0;
 	int detect;
@@ -287,7 +311,7 @@ int scene_change()
 	return 0; //no detection and no hold over from previous detections
 }
 
-void finalize();
+static void finalize();
 
 int main(int argc, char *argv[])
 {
@@ -303,8 +327,7 @@ int main(int argc, char *argv[])
     OpenYUV420FileAndParseHeader();
     
 	printf("initialization started;\n");
-    init_all();
-	if ((device.state_cpu != 0) || (device.state_gpu != 0)) 
+    if ((init_all() < 0) || (device.state_cpu != 0) || (device.state_gpu != 0)) 
 	{
 		return -1; 
 	}
@@ -397,8 +420,7 @@ int main(int argc, char *argv[])
 		gather_frame();
 		if (video.print_info) 
 			printf("br=%dk, frame~%dk\n", (int)(frames.video_size*video.framerate*8/(frames.frame_number+1)/1024), (frames.encoded_frame_size+512)/1024);
-		if ((frames.encoded_frame_size/1024 > frames.prev_frame_size*12/1024) 
-			&& (!frames.current_is_key_frame) && (!frames.current_is_altref_frame))
+		if (0)//((frames.encoded_frame_size/1024 > frames.prev_frame_size*12/1024) && (!frames.current_is_key_frame) && (!frames.current_is_altref_frame))
 		{
 			++encStat.scene_changes_by_bitrate;
 			if (video.print_info) 

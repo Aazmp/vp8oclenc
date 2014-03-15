@@ -79,7 +79,7 @@ static void do_loop_filter_on_gpu()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFlush(device.commandQueue1_gpu);
+		device.state_gpu = ifFlush(device.commandQueue1_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		device.gpu_work_items_per_dim[0] = video.mb_height*8;
 		mb_size = 8;
@@ -89,12 +89,12 @@ static void do_loop_filter_on_gpu()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFlush(device.commandQueue2_gpu);
+		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBH, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.normal_loop_filter_MBH, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFlush(device.commandQueue3_gpu);
+		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 
 		device.gpu_work_items_per_dim[0] = video.mb_height*4;
@@ -105,7 +105,7 @@ static void do_loop_filter_on_gpu()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFlush(device.commandQueue1_gpu);
+		device.state_gpu = ifFlush(device.commandQueue1_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		device.gpu_work_items_per_dim[0] = video.mb_height*2;
 		mb_size = 8;
@@ -115,13 +115,23 @@ static void do_loop_filter_on_gpu()
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_U);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFlush(device.commandQueue2_gpu);
+		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
 		device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 0, sizeof(cl_mem), &device.reconstructed_frame_V);
 		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.normal_loop_filter_MBV, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
-		device.state_gpu = clFinish(device.commandQueue3_gpu);
+		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 		if (device.state_gpu != 0)  printf(">error while deblocking : %d", device.state_gpu);
+
+		if (((stage + 1) % 16) == 0)
+		{
+			device.state_gpu = finalFlush(device.commandQueue1_gpu);
+			device.state_gpu = finalFlush(device.commandQueue2_gpu);
+			device.state_gpu = finalFlush(device.commandQueue3_gpu);
+			device.state_gpu = clFinish(device.commandQueue1_gpu);
+			device.state_gpu = clFinish(device.commandQueue2_gpu);
+			device.state_gpu = clFinish(device.commandQueue3_gpu);
+		}
 	}
 	
 	return;
@@ -137,10 +147,6 @@ static void do_loop_filter_on_cpu()
 	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
 	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
 	
-	//after check SSIM we already have reconstructed buffers on device
-	//device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
-	//device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
-	//device.state_cpu = clFinish(device.loopfilterV_commandQueue_cpu);
 	// Y
 	device.state_cpu = clSetKernelArg(device.loop_filter_frame, 0, sizeof(cl_mem), &device.cpu_frame_Y);
 	device.state_cpu = clSetKernelArg(device.loop_filter_frame, 4, sizeof(cl_int), &video.wrk_width);
@@ -150,7 +156,7 @@ static void do_loop_filter_on_cpu()
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterY_commandQueue_cpu, device.loop_filter_frame, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (frames.threads_free > 1) {
 		--frames.threads_free;
-		device.state_cpu = clFlush(device.loopfilterY_commandQueue_cpu);
+		device.state_cpu = ifFlush(device.loopfilterY_commandQueue_cpu);
 	}
 	else {
 		device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
@@ -166,9 +172,10 @@ static void do_loop_filter_on_cpu()
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterU_commandQueue_cpu, device.loop_filter_frame, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (frames.threads_free > 1) {
 		--frames.threads_free;
-		device.state_cpu = clFlush(device.loopfilterU_commandQueue_cpu);
+		device.state_cpu = ifFlush(device.loopfilterU_commandQueue_cpu);
 	}
 	else {
+		device.state_cpu = ifFlush(device.loopfilterY_commandQueue_cpu);
 		device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
 		frames.threads_free =video.thread_limit;
 	}
@@ -178,9 +185,11 @@ static void do_loop_filter_on_cpu()
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterV_commandQueue_cpu, device.loop_filter_frame, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (frames.threads_free > 1) {
 		--frames.threads_free;
-		device.state_cpu = clFlush(device.loopfilterV_commandQueue_cpu);
+		device.state_cpu = ifFlush(device.loopfilterV_commandQueue_cpu);
 	}
 	else {
+		device.state_cpu = ifFlush(device.loopfilterY_commandQueue_cpu);
+		device.state_cpu = ifFlush(device.loopfilterU_commandQueue_cpu);
 		device.state_cpu = clFinish(device.loopfilterV_commandQueue_cpu);
 		frames.threads_free =video.thread_limit;
 	}

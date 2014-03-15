@@ -212,7 +212,7 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
     return;
 }
 
-void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
+static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
 {
 	cl_int mb_row = mb_num / video.mb_width;
 	cl_int mb_col = mb_num % video.mb_width;
@@ -537,7 +537,7 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, cl_uint num[2][MVPcount]
     return;
 }
 
-void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num) 
+static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num) 
 {
 	// it looks similar to funtion where we encode vectors
 	// BUT
