@@ -78,65 +78,6 @@ __constant int vp8_ac_qlookup[128] =
 __constant int vector_diff_weight = 64;
 __constant int DC_UNSIGNIFICANCE = 4;
 
-void weight(int4 *const __L0, int4 *const __L1, int4 *const __L2, int4 *const __L3) 
-{
-	int4 L0 = *__L0;
-	int4 L1 = *__L1;
-	int4 L2 = *__L2;
-	int4 L3 = *__L3; // <========================================================================
-	
-	*__L0 = ((L0 + L3) << 3);	// a1 = ((ip[0] + ip[3])<<3);
-	*__L1 = ((L1 + L2) << 3);	// b1 = ((ip[1] + ip[2])<<3);
-	*__L2 = ((L1 - L2) << 3);	// c1 = ((ip[1] - ip[2])<<3);
-	*__L3 = ((L0 - L3) << 3);	// d1 = ((ip[0] - ip[3])<<3);
-	
-
-	L0 = *__L0 + *__L1;				// op[0] = (a1 + b1); 
-	L2 = *__L0 - *__L1;				// op[2] = (a1 - b1);
-	
-	L1 = (((*__L2 * 2217) + (*__L3 * 5352) + 14500) >> 12);
-														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
-	L3 = (((*__L3 * 2217) - (*__L2 * 5352) + 7500) >> 12);
-														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
-
-	*__L0 = (int4)(L0.x, L1.x, L2.x, L3.x);
-	*__L1 = (int4)(L0.y, L1.y, L2.y, L3.y);
-	*__L2 = (int4)(L0.z, L1.z, L2.z, L3.z);
-	*__L3 = (int4)(L0.w, L1.w, L2.w, L3.w);
-
-	L0 = *__L0 + *__L3;				// a1 = op[0] + op[3];	
-	L1 = *__L1 + *__L2;				// b1 = op[1] + op[2];
-	L2 = *__L1 - *__L2;				// c1 = op[1] - op[2];
-	L3 = *__L0 - *__L3;				// d1 = op[0] - op[3];
-	
-		
-	*__L0 = ((L0 + L1 + 7) >> 4);	// op[0] = (( a1 + b1 + 7)>>4);
-	*__L2 = ((L0 - L1 + 7) >> 4);	// op[2] = (( a1 - b1 + 7)>>4);
-	
-	*__L1 = ((L2 * 2217) + (L3 * 5352) + 12000) >> 16;
-	(*__L1).x += (L3.x != 0);
-	(*__L1).y += (L3.y != 0);
-	(*__L1).z += (L3.z != 0);
-	(*__L1).w += (L3.w != 0);				// op[1]  = (((c1 * 2217 + d1 * 5352 +  12000)>>16) + (d1!=0));
-	
-	*__L3 = (((L3 * 2217) - (L2 * 5352) + 51000) >>16 );
-														// op[3] = ((d1 * 2217 - c1 * 5352 +  51000)>>16);
-	
-	*__L0 = convert_int4(abs(*__L0));
-	*__L1 = convert_int4(abs(*__L1));
-	*__L2 = convert_int4(abs(*__L2));
-	*__L3 = convert_int4(abs(*__L3));
-	
-	(*__L0).x /= DC_UNSIGNIFICANCE;
-	// just a SATD
-	(*__L0).x +=(*__L0).y + (*__L0).z + (*__L0).w +
-	(*__L1).x + (*__L1).y + (*__L1).z + (*__L1).w +
-	(*__L2).x + (*__L2).y + (*__L2).z + (*__L2).w +
-	(*__L3).x + (*__L3).y + (*__L3).z + (*__L3).w;
-	
-	return;
-}
-
 inline void weight_opt(int4 *const restrict XX, int16 *const restrict L) 
 {
 	*XX = (*L).s0123;
@@ -244,60 +185,7 @@ inline void weight_opt(int4 *const restrict XX, int16 *const restrict L)
 	return;
 }
 
-void DCT_and_quant(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q) 
-{
-	__private int4 Line0, Line1, Line2, Line3;
-	Line0 = (int4)((*__Line0).x, (*__Line1).x, (*__Line2).x, (*__Line3).x);
-	Line1 = (int4)((*__Line0).y, (*__Line1).y, (*__Line2).y, (*__Line3).y);
-	Line2 = (int4)((*__Line0).z, (*__Line1).z, (*__Line2).z, (*__Line3).z);
-	Line3 = (int4)((*__Line0).w, (*__Line1).w, (*__Line2).w, (*__Line3).w);
-	
-	*__Line0 = ((Line0 + Line3) << 3);	// a1 = ((ip[0] + ip[3])<<3);
-	*__Line1 = ((Line1 + Line2) << 3);	// b1 = ((ip[1] + ip[2])<<3);
-	*__Line2 = ((Line1 - Line2) << 3);	// c1 = ((ip[1] - ip[2])<<3);
-	*__Line3 = ((Line0 - Line3) << 3);	// d1 = ((ip[0] - ip[3])<<3);
-	
-
-	Line0 = *__Line0 + *__Line1;				// op[0] = (a1 + b1); 
-	Line2 = *__Line0 - *__Line1;				// op[2] = (a1 - b1);
-	
-	Line1 = (((*__Line2 * 2217) + (*__Line3 * 5352) + 14500) >> 12);
-														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
-	Line3 = (((*__Line3 * 2217) - (*__Line2 * 5352) + 7500) >> 12);
-														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
-
-	*__Line0 = (int4)(Line0.x, Line1.x, Line2.x, Line3.x);
-	*__Line1 = (int4)(Line0.y, Line1.y, Line2.y, Line3.y);
-	*__Line2 = (int4)(Line0.z, Line1.z, Line2.z, Line3.z);
-	*__Line3 = (int4)(Line0.w, Line1.w, Line2.w, Line3.w);
-
-	Line0 = *__Line0 + *__Line3;				// a1 = op[0] + op[3];	
-	Line1 = *__Line1 + *__Line2;				// b1 = op[1] + op[2];
-	Line2 = *__Line1 - *__Line2;				// c1 = op[1] - op[2];
-	Line3 = *__Line0 - *__Line3;				// d1 = op[0] - op[3];
-	
-		
-	*__Line0 = ((Line0 + Line1 + 7) >> 4);	// op[0] = (( a1 + b1 + 7)>>4);
-	*__Line2 = ((Line0 - Line1 + 7) >> 4);	// op[2] = (( a1 - b1 + 7)>>4);
-	
-	*__Line1 = ((Line2 * 2217) + (Line3 * 5352) + 12000) >> 16;
-	(*__Line1).x += (Line3.x != 0);
-	(*__Line1).y += (Line3.y != 0);
-	(*__Line1).z += (Line3.z != 0);
-	(*__Line1).w += (Line3.w != 0);				// op[1]  = (((c1 * 2217 + d1 * 5352 +  12000)>>16) + (d1!=0));
-	
-	*__Line3 = (((Line3 * 2217) - (Line2 * 5352) + 51000) >>16 );
-														// op[3] = ((d1 * 2217 - c1 * 5352 +  51000)>>16);
-														
-	*__Line0 /= (int4)(dc_q, ac_q, ac_q, ac_q);
-	*__Line1 /= ac_q;
-	*__Line2 /= ac_q;
-	*__Line3 /= ac_q;
-	
-	return;
-}
-
-void dequant_and_iDCT(int4 *const __Line0, int4 *const __Line1, int4 *const __Line2, int4 *const __Line3, const int dc_q, const int ac_q) // <- input DCT lines
+void dequant_and_iDCT(int4 *const restrict __Line0, int4 *const restrict __Line1, int4 *const restrict __Line2, int4 *const restrict __Line3, const int dc_q, const int ac_q) // <- input DCT lines
 {
 	__private int4 Line0, Line1, Line2, Line3;
 	// dequant
@@ -509,15 +397,15 @@ void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Li
 }
 
 
-__kernel void reset_vectors ( __global vector_net *const last_net1, //0
-								__global vector_net *const last_net2, //1
-								__global vector_net *const golden_net1, //2
-								__global vector_net *const golden_net2, //3
-								__global vector_net *const altref_net1, //4
-								__global vector_net *const altref_net2, //5
-								__global int *const last_Bdiff, //6
-								__global int *const golden_Bdiff, //7
-								__global int *const altref_Bdiff) //8
+__kernel void reset_vectors ( __global vector_net *const restrict last_net1, //0
+								__global vector_net *const restrict last_net2, //1
+								__global vector_net *const restrict golden_net1, //2
+								__global vector_net *const restrict golden_net2, //3
+								__global vector_net *const restrict altref_net1, //4
+								__global vector_net *const restrict altref_net2, //5
+								__global int *const restrict last_Bdiff, //6
+								__global int *const restrict golden_Bdiff, //7
+								__global int *const restrict altref_Bdiff) //8
 {
 	int b8x8_num = get_global_id(0);
 	last_net1[b8x8_num].vector_x = 0; 
@@ -539,8 +427,8 @@ __kernel void reset_vectors ( __global vector_net *const last_net1, //0
 	return;
 }
 
-__kernel void downsample_x2(__global uchar *const src_frame, //0 // bilinear
-							__global uchar *const dst_frame, //1
+__kernel void downsample_x2(__global const uchar *const restrict src_frame, //0 // bilinear
+							__global uchar *const restrict dst_frame, //1
 							const signed int src_width, //2
 							const signed int src_height) //3
 {
@@ -563,26 +451,29 @@ __kernel void downsample_x2(__global uchar *const src_frame, //0 // bilinear
 	return;
 }
 
+#define WRKGRSZ 256
+__constant int dx4[4] = {0, 0, 16, 16};
+__constant int dy4[4] = {0, 16, 0, 16};
+__constant int dx1[4] = {0, 0, 4, 4};
+__constant int dy1[4] = {0, 4, 0, 4};
+__constant int dl[4] = {0, 8, 1, 9};
 __kernel void luma_search_1step //when looking into downsampled and original frames
-						( 	__global uchar *const current_frame, //0
-							__global uchar *const prev_frame, //1
-							__global vector_net *const src_net, //2
-							__global vector_net *const dst_net, //3
+						( 	__global const uchar *const restrict current_frame, //0
+							__global const uchar *const restrict prev_frame, //1
+							__global const vector_net *const restrict src_net, //2
+							__global vector_net *const restrict dst_net, //3
 							const signed int net_width, //4 //in 8x8 blocks
 							const signed int width, //5
 							const signed int height, //6
 							const signed int pixel_rate) //7
 {   
-	__private uchar8 CL0, CL1, CL2, CL3, CL4, CL5, CL6, CL7;
-	__private uchar8 PL0, PL1, PL2, PL3, PL4, PL5, PL6, PL7;
+	__private int16 DL;
+	__private int4 bufi4;
 	
-	__private int4 DL0, DL1, DL2, DL3;
-	
-	__private int start_x, end_x, start_y, end_y; 
-	__private unsigned int MinDiff, Diff; 
+	__private unsigned short MinDiff, Diff; 
 	__private int px, py, cx, cy;
 	__private int vector_x, vector_y, vector_x0, vector_y0;   
-	__private int ci, pi;   
+	__private int i;   
 	__private int b8x8_num; 
 	__private int cut_width;
 		
@@ -590,6 +481,13 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	
 	//first we determine parameters of current stage
 	b8x8_num = get_global_id(0);
+	
+	if (b8x8_num >= (width/8)*(height/8)) return;
+	__private const short lid = get_local_id(0);
+	__private const short lsz = get_local_size(0);
+	
+	__local uchar4 LDS[16*WRKGRSZ]; //16kb for WRKGRSZ == 256
+	
 	//b8x8_num == net_index
 	cx = (b8x8_num % (cut_width/8))*8;
 	cy = (b8x8_num / (cut_width/8))*8;
@@ -610,81 +508,57 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	vector_y0 = vector_y;
 	
 	b8x8_num = (cy/8)*net_width + (cx/8);
-
-	ci = cy*width + cx;
-	CL0 = vload8(0, current_frame+ci); ci += width;
-	CL1 = vload8(0, current_frame+ci); ci += width;
-	CL2 = vload8(0, current_frame+ci); ci += width;
-	CL3 = vload8(0, current_frame+ci); ci += width;
-	CL4 = vload8(0, current_frame+ci); ci += width;
-	CL5 = vload8(0, current_frame+ci); ci += width;
-	CL6 = vload8(0, current_frame+ci); ci += width;
-	CL7 = vload8(0, current_frame+ci); ci += width;
-
-	MinDiff = 0xffff;
-
-	start_x	= cx + vector_x - 2;	end_x = cx + vector_x + 2;
-	start_y = cy + vector_y - 2;	end_y = cy + vector_y + 2;
 	
-	start_x = (start_x < 0) ? 0 : start_x;
-	end_x = (end_x > (width - 8)) ? (width - 8) : end_x;
-	start_y = (start_y < 0) ? 0 : start_y;
-	end_y = (end_y > (height - 8)) ? (height - 8) : end_y;
 	
-	#pragma unroll 1
-	for (px = start_x; px <= end_x; ++px )
+	i = cy*width + cx;
+	LDS[(int)lid] = vload4(0, current_frame+i);				LDS[(int)lsz + (int)lid] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*2+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*3+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*4+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*5+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*6+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*7+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*8+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*9+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*10+lid)] = vload4(0, current_frame+i);	LDS[(int)(lsz*11+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*12+lid)] = vload4(0, current_frame+i);	LDS[(int)(lsz*13+lid)] = vload4(0, current_frame+i+4); i += width;
+	LDS[(int)(lsz*14+lid)] = vload4(0, current_frame+i);	LDS[(int)(lsz*15+lid)] = vload4(0, current_frame+i+4);
+
+	MinDiff = 0x7fff;
+
+	//#pragma unroll 1
+	for (__private int dxy = 0; dxy < 25; ++dxy)
+	//#pragma unroll 1
 	{
-		#pragma unroll 1
-		for (py = start_y; py <= end_y; ++py)
-		{ 
-			// 1 full pixel step (fpel)
-			pi = py*width + px;
-			PL0 = vload8(0, prev_frame + pi); pi += width; 
-			PL1 = vload8(0, prev_frame + pi); pi += width;
-			PL2 = vload8(0, prev_frame + pi); pi += width;
-			PL3 = vload8(0, prev_frame + pi); pi += width;
-			PL4 = vload8(0, prev_frame + pi); pi += width;
-			PL5 = vload8(0, prev_frame + pi); pi += width;
-			PL6 = vload8(0, prev_frame + pi); pi += width;
-			PL7 = vload8(0, prev_frame + pi); 
-			// block 00
-			DL0 = convert_int4(CL0.s0123) - convert_int4(PL0.s0123);
-			DL1 = convert_int4(CL1.s0123) - convert_int4(PL1.s0123);
-			DL2 = convert_int4(CL2.s0123) - convert_int4(PL2.s0123);
-			DL3 = convert_int4(CL3.s0123) - convert_int4(PL3.s0123);
+		px = cx + vector_x0 + ((dxy % 5) - 2); //- x
+		py = cy + vector_y0 + ((dxy / 5) - 2); //- y
 		
-			weight(&DL0, &DL1, &DL2, &DL3);	Diff = DL0.x;
-			// block 10			
-			DL0 = convert_int4(CL4.s0123) - convert_int4(PL4.s0123);
-			DL1 = convert_int4(CL5.s0123) - convert_int4(PL5.s0123);
-			DL2 = convert_int4(CL6.s0123) - convert_int4(PL6.s0123);
-			DL3 = convert_int4(CL7.s0123) - convert_int4(PL7.s0123);
-				
-			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
-			// block 01
-			DL0 = convert_int4(CL0.s4567) - convert_int4(PL0.s4567);
-			DL1 = convert_int4(CL1.s4567) - convert_int4(PL1.s4567);
-			DL2 = convert_int4(CL2.s4567) - convert_int4(PL2.s4567);
-			DL3 = convert_int4(CL3.s4567) - convert_int4(PL3.s4567);
+		// 1 full pixel step (fpel)
+		i = py*width + px;
+		
+		Diff = 0;
+		#pragma unroll 1
+		for (__private int j = 0; j < 4; j += 1)
+		{
+			i = (py + dy1[j])*width + (px + dx1[j]);
 			
-			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
-			// block 11
-			DL0 = convert_int4(CL4.s4567) - convert_int4(PL4.s4567);
-			DL1 = convert_int4(CL5.s4567) - convert_int4(PL5.s4567);
-			DL2 = convert_int4(CL6.s4567) - convert_int4(PL6.s4567);
-			DL3 = convert_int4(CL7.s4567) - convert_int4(PL7.s4567);
+			DL.s0123 = convert_int4(LDS[mad24((int)lsz,dl[j]+0,(int)lid)]) - convert_int4(vload4(0, prev_frame + i)); i += width;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,dl[j]+2,(int)lid)]) - convert_int4(vload4(0, prev_frame + i)); i += width;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,dl[j]+4,(int)lid)]) - convert_int4(vload4(0, prev_frame + i)); i += width;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,dl[j]+6,(int)lid)]) - convert_int4(vload4(0, prev_frame + i));
+			weight_opt(&bufi4, &DL);
+			Diff += bufi4.s0;
+		}		
 
-			weight(&DL0, &DL1, &DL2, &DL3);	Diff += DL0.x;
+		// this helps keep neighbouring vectors close
+		Diff += (int)(abs((int)abs(px-cx)-vector_x0)
+					+ abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
+						
+		// exclude vectors to beyond
+		Diff |= select(0,0x7fff,(px < 0));
+		Diff |= select(0,0x7fff,(px > (width - 8)));
+		Diff |= select(0,0x7fff,(py < 0));
+		Diff |= select(0,0x7fff,(py > (height - 8)));
 			
-			// this helps keep neighbouring vectors close
-			Diff += (int)(abs((int)abs(px-cx)-vector_x0)
-						+ abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
-				
-			vector_x = (Diff < MinDiff) ? px : vector_x;
-			vector_y = (Diff < MinDiff) ? py : vector_y;
-			MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
-
-    	} 
+		vector_x = (Diff < MinDiff) ? px : vector_x;
+		vector_y = (Diff < MinDiff) ? py : vector_y;
+		MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
     } 
 	
 	dst_net[b8x8_num].vector_x = (vector_x-cx)*pixel_rate;
@@ -706,7 +580,7 @@ __constant int f[8][6] = { /* indexed by displacement */
 	{ 0, -1, 12, 123, -6, 0 } /* 7/8 = reverse of 1/8 */
 };
 
-inline void construct(__read_only image2d_t ref_frame, const int2 coords, const int2 d, int4 *const DL0, int4 *const DL1, int4 *const DL2, int4 *const DL3)
+inline void construct(__read_only image2d_t ref_frame, const int2 coords, const int2 d, int4 *const restrict DL0, int4 *const restrict DL1, int4 *const restrict DL2, int4 *const restrict DL3)
 {
 	__private int2 c;
 	__private uint4 buf4ui;
@@ -1200,18 +1074,14 @@ void construct_opt2(__read_only image2d_t ref_frame, const short2 coords, const 
 	return;
 }
 
-#define WRKGRSZ 256
-__constant int dx[4] = {0, 0, 16, 16};
-__constant int dy[4] = {0, 16, 0, 16};
-__constant int dl[4] = {0, 8, 1, 9};
 __kernel 
 __attribute__((reqd_work_group_size(WRKGRSZ, 1, 1)))
 void luma_search_2step //searching in interpolated picture
-						( 	__global uchar4 *const current_frame, //0
+						( 	__global const uchar4 *const restrict current_frame, //0
 							__read_only image2d_t ref_frame, //1
-							__global vector_net *const net, //2
-							__global vector_net *const ref_net, //3
-							__global int *const ref_Bdiff, //4
+							__global const vector_net *const restrict net, //2
+							__global vector_net *const restrict ref_net, //3
+							__global int *const restrict ref_Bdiff, //4
 							const int width, //5
 							const int height) //6
 {
@@ -1283,48 +1153,46 @@ void luma_search_2step //searching in interpolated picture
 	//#pragma unroll 1
 	for (pdata1.s0 = 0; pdata1.s0 < 25; ++pdata1.s0)
 	{
-		//#pragma unroll 1
-		//for (pdata2.s3 = pdata1.s2; pdata2.s3 <= pdata1.s3; ++pdata2.s3)
-			pdata2.s2 = pdata2.s0 + pdata1.s6 + ((pdata1.s0 % 5) - 2); //- x
-			pdata2.s3 = pdata2.s1 + pdata1.s7 + ((pdata1.s0 / 5) - 2);//- y
+		pdata2.s2 = pdata2.s0 + pdata1.s6 + ((pdata1.s0 % 5) - 2); //- x
+		pdata2.s3 = pdata2.s1 + pdata1.s7 + ((pdata1.s0 / 5) - 2);//- y
 		
-			pdata2.s6=pdata2.s2%4; //x qpel displacement
-			pdata2.s7=pdata2.s3%4; //y qpel displacement
-			pdata2.s6 *= 2; 
-			pdata2.s7 *= 2;
+		pdata2.s6=pdata2.s2%4; //x qpel displacement
+		pdata2.s7=pdata2.s3%4; //y qpel displacement
+		pdata2.s6 *= 2; 
+		pdata2.s7 *= 2;
 			
-			Diff = 0;
-			#pragma unroll 1
-			for (pdata1.s1 = 0; pdata1.s1 < 4; pdata1.s1 += 1)
-			{
-				pdata2.s4 = (pdata2.s2 + dx[pdata1.s1])/4;
-				pdata2.s5 = (pdata2.s3 + dy[pdata1.s1])/4;
-				//construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
-				if (dy[pdata1.s1] == 0)
-					construct_opt1(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
-				else
-					construct_opt2(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
-				DL.s0123 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+0,(int)lid)]) - DL.s0123;
-				DL.s4567 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+2,(int)lid)]) - DL.s4567;
-				DL.s89AB = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+4,(int)lid)]) - DL.s89AB;
-				DL.sCDEF = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+6,(int)lid)]) - DL.sCDEF;
-				weight_opt(&li, &DL);
-				Diff += li.s0;
-			}
+		Diff = 0;
+		#pragma unroll 1
+		for (pdata1.s1 = 0; pdata1.s1 < 4; pdata1.s1 += 1)
+		{
+			pdata2.s4 = (pdata2.s2 + dx4[pdata1.s1])/4;
+			pdata2.s5 = (pdata2.s3 + dy4[pdata1.s1])/4;
+			//construct_opt(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui);
+			if (dy4[pdata1.s1] == 0)
+				construct_opt1(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
+			else
+				construct_opt2(ref_frame, pdata2.s45, pdata2.s67, &DL, &l, &lap4p2, &li, &buf4ui, prefetched, lid, lsz);
+			DL.s0123 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+0,(int)lid)]) - DL.s0123;
+			DL.s4567 = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+2,(int)lid)]) - DL.s4567;
+			DL.s89AB = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+4,(int)lid)]) - DL.s89AB;
+			DL.sCDEF = convert_int4(LDS[mad24((int)lsz,dl[pdata1.s1]+6,(int)lid)]) - DL.sCDEF;
+			weight_opt(&li, &DL);
+			Diff += li.s0;
+		}
 
-			Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
+		Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
 			
-			Diff |= select(0,0x7fff,(pdata2.s2 < 0));
-			Diff |= select(0,0x7fff,(pdata2.s2 > (width*4 - 32)));
-			Diff |= select(0,0x7fff,(pdata2.s3 < 0));
-			Diff |= select(0,0x7fff,(pdata2.s3 > (height*4 - 32)));
+		Diff |= select(0,0x7fff,(pdata2.s2 < 0));
+		Diff |= select(0,0x7fff,(pdata2.s2 > (width*4 - 32)));
+		Diff |= select(0,0x7fff,(pdata2.s3 < 0));
+		Diff |= select(0,0x7fff,(pdata2.s3 > (height*4 - 32)));
 			
-			pdata2.s6 = (Diff < MinDiff); 
+		pdata2.s6 = (Diff < MinDiff); 
 			
-			pdata1.s4 = pdata2.s6 ? pdata2.s2 : pdata1.s4;
-			pdata1.s5 = pdata2.s6 ? pdata2.s3 : pdata1.s5;
-			
-			MinDiff = pdata2.s6 ? Diff : MinDiff;
+		pdata1.s4 = pdata2.s6 ? pdata2.s2 : pdata1.s4;
+		pdata1.s5 = pdata2.s6 ? pdata2.s3 : pdata1.s5;
+		
+		MinDiff = pdata2.s6 ? Diff : MinDiff;
     } 
 
 	pdata1.s4 -= pdata2.s0;
@@ -1338,13 +1206,13 @@ void luma_search_2step //searching in interpolated picture
 	return;
 }
 
-__kernel void select_reference(__global vector_net *const last_net, //0
-								__global vector_net *const golden_net, //1
-								__global vector_net *const altref_net, //2
-								__global int *const last_Bdiff, //3
-								__global int *const golden_Bdiff, //4
-								__global int *const altref_Bdiff, //5
-								__global macroblock *const MBs, //6
+__kernel void select_reference(__global const vector_net *const restrict last_net, //0
+								__global const vector_net *const restrict golden_net, //1
+								__global const vector_net *const restrict altref_net, //2
+								__global const int *const restrict last_Bdiff, //3
+								__global const int *const restrict golden_Bdiff, //4
+								__global const int *const restrict altref_Bdiff, //5
+								__global macroblock *const restrict MBs, //6
 								const int width, //7
 								const int use_golden, //8
 								const int use_altref) //9
@@ -1432,11 +1300,11 @@ __kernel void select_reference(__global vector_net *const last_net, //0
 	return;
 }
 
-__kernel void prepare_predictors_and_residual(__global uchar *const current_frame, //0
+__kernel void prepare_predictors_and_residual(__global const uchar *const restrict current_frame, //0
 												__read_only image2d_t ref_frame, //1
-												__global uchar *const predictor, //2
-												__global short *const residual, //3
-												__global macroblock *const MBs, //4
+												__global uchar *const restrict predictor, //2
+												__global short *const restrict residual, //3
+												__global const macroblock *const restrict MBs, //4
 												const int width, //5
 												const int plane, //6
 												const int ref) //7
@@ -1513,10 +1381,10 @@ __kernel void pack_8x8_into_16x16(__global macroblock *const MBs) //0
 	return;
 }
 
-__kernel void dct4x4(__global short2 *const restrict residual, //0
+__kernel void dct4x4(__global const short2 *const restrict residual, //0
 					__global macroblock *const restrict MBs, //1
 					const int width, //2
-					__constant segment_data *const SD, //3
+					__constant segment_data *const restrict SD, //3
 					const segment_ids segment_id, //4
 					const float SSIM_target, //5
 					const int plane) //6
@@ -1559,8 +1427,6 @@ __kernel void dct4x4(__global short2 *const restrict residual, //0
 	L.s89 = convert_int2(residual[i]); L.sAB = convert_int2(residual[i+1]); /*L.s89AB = convert_int4(vload4(0, residual+i));*/ i+= width/2;	
 	L.sCD = convert_int2(residual[i]); L.sEF = convert_int2(residual[i+1]); /*L.sCDEF = convert_int4(vload4(0, residual+i));*/
 	
-	//DCT_and_quant(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
-	////	
 	XX = L.s0123;
 	L.s0123 = ((L.s0123 + L.sCDEF) << 3);	// a1 = ((ip[0] + ip[3])<<3);
 	L.sCDEF = ((XX - L.sCDEF) << 3);	// d1 = ((ip[0] - ip[3])<<3);
@@ -1572,10 +1438,8 @@ __kernel void dct4x4(__global short2 *const restrict residual, //0
 	L.s89AB = L.s0123 - L.s4567;				// op[2] = (a1 - b1);
 	L.s0123 = L.s0123 + L.s4567;				// op[0] = (a1 + b1); 
 	
-	L.s4567 = (((XX * 2217) + (L.sCDEF * 5352) + 14500) >> 12);
-														// op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
-	L.sCDEF = (((L.sCDEF * 2217) - (XX * 5352) + 7500) >> 12);
-														// op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
+	L.s4567 = (((XX * 2217) + (L.sCDEF * 5352) + 14500) >> 12); // op[1] = (c1 * 2217 + d1 * 5352 +  14500)>>12;
+	L.sCDEF = (((L.sCDEF * 2217) - (XX * 5352) + 7500) >> 12); // op[3] = (d1 * 2217 - c1 * 5352 +   7500)>>12;
 
 	(XX).x = L.s0; (XX).y = L.s4; (XX).z = L.s8; (XX).w = L.sC;
 	// a1 = op[0] + op[3];
@@ -1644,8 +1508,8 @@ __kernel void dct4x4(__global short2 *const restrict residual, //0
 	return;
 }
 
-__kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
-							__constant segment_data *const SD, //1
+__kernel void wht4x4_iwht4x4(__global macroblock *const restrict MBs, //0
+							__constant segment_data *const restrict SD, //1
 							const segment_ids segment_id, //2
 							const float SSIM_target) //3
 {
@@ -1690,10 +1554,10 @@ __kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
 }
 
 __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
-					__global uchar4 *const restrict predictor, //1
-					__global macroblock *const MBs, //2
+					__global const uchar4 *const restrict predictor, //1
+					__global macroblock *const restrict MBs, //2
 					const int width, //3
-					__constant segment_data *const SD, //4
+					__constant segment_data *const restrict SD, //4
 					const segment_ids segment_id, //5
 					const float SSIM_target, //6
 					const int plane) //7
@@ -1752,9 +1616,9 @@ __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
 	return;
 }
 
-__kernel void count_SSIM_luma(__global uchar4 *const frame1, //0
-								__global uchar4 *const frame2, //1
-								__global macroblock *const MBs, //2
+__kernel void count_SSIM_luma(__global const uchar4 *const restrict frame1, //0
+								__global const uchar4 *const restrict frame2, //1
+								__global const macroblock *const restrict MBs, //2
 								__global float *const metric, //3
 								const int width, //4
 								const int segment_id)//5
@@ -2116,10 +1980,10 @@ __kernel void count_SSIM_luma(__global uchar4 *const frame1, //0
 }							
 
 __kernel void count_SSIM_chroma
-						(__global uchar4 *const frame1, //0
-						__global uchar4 *const frame2, //1
-						__global macroblock *const MBs, //2
-						__global float *const metric, //3
+						(__global const uchar4 *const restrict frame1, //0
+						__global const uchar4 *const restrict frame2, //1
+						__global const macroblock *const restrict MBs, //2
+						__global float *const restrict metric, //3
                         const int cwidth, //4
 						const int segment_id)// 5
 {
@@ -2239,10 +2103,10 @@ __kernel void count_SSIM_chroma
 	return;
 }
 
-void __kernel gather_SSIM(__global float *const metric1, //0
-							__global float *const metric2, //1
-							__global float *const metric3, //2
-							__global macroblock *const MBs) //3
+void __kernel gather_SSIM(__global const float *const restrict metric1, //0
+							__global const float *const restrict metric2, //1
+							__global const float *const restrict metric3, //2
+							__global macroblock *const restrict MBs) //3
 {
 	__private int mb_num = get_global_id(0);
 	MBs[mb_num].SSIM = (metric1[mb_num] + metric2[mb_num] + metric3[mb_num])/3;
