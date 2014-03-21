@@ -1180,7 +1180,7 @@ void luma_search_2step //searching in interpolated picture
 			Diff += li.s0;
 		}
 
-		Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight;
+		Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight/2;
 			
 		Diff |= select(0,0x7fff,(pdata2.s2 < 0));
 		Diff |= select(0,0x7fff,(pdata2.s2 > (width*4 - 32)));

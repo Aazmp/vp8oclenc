@@ -10,7 +10,7 @@ typedef enum
 	num_intra_bmodes
 } intra_bmode;
 
-static void zigzag_block(cl_short *block)
+static void zigzag_block(cl_short *const block)
 {
     //      zigzag[16] = { 0, 1, 4, 8, 5, 2, 3,  6, 9, 12, 13, 10, 7, 11, 14, 15 };
     //  inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
@@ -39,13 +39,13 @@ static void zigzag_block(cl_short *block)
 static const int cospi8sqrt2minus1=20091;
 static const int sinpi8sqrt2 =35468;
 
-static void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_int dc_q, cl_int ac_q)
+static void iDCT4x4(const cl_short *const __restrict input, cl_uchar *const __restrict output, const cl_uchar *const __restrict predictor, const cl_int dc_q, const cl_int ac_q)
 {
     int i;
     int a1, b1, c1, d1;
 	int ip0, ip4, ip8, ip12, q;
     cl_short tmp_block[16];
-    short *ip=input;
+    const short *ip = input;
     short *tp=tmp_block;
     int temp1, temp2; 
 
@@ -79,6 +79,7 @@ static void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_i
     }
 
     cl_uchar *op = output;
+	const cl_uchar *pr = predictor;
     tp = tmp_block;
     for(i = 0; i < 4; ++i)
     {
@@ -92,31 +93,31 @@ static void iDCT4x4(cl_short *input, cl_uchar *output, cl_uchar* predictor, cl_i
         d1 = temp1 + temp2;
 
         /* after adding this results to predictors - clamping maybe needed */
-        tp[0] = ((a1 + d1 + 4) >> 3) + predictor[0];
+        tp[0] = ((a1 + d1 + 4) >> 3) + pr[0];
 		op[0] = (cl_uchar)((tp[0] > 255) ? 255 : ((tp[0] < 0) ? 0 : tp[0] ));
-		tp[3] = ((a1 - d1 + 4) >> 3) + predictor[3];
+		tp[3] = ((a1 - d1 + 4) >> 3) + pr[3];
         op[3] = (cl_uchar)((tp[3] > 255) ? 255 : ((tp[3] < 0) ? 0 : tp[3] ));
-        tp[1] = ((b1 + c1 + 4) >> 3) + predictor[1];
+        tp[1] = ((b1 + c1 + 4) >> 3) + pr[1];
         op[1] = (cl_uchar)((tp[1] > 255) ? 255 : ((tp[1] < 0) ? 0 : tp[1] ));
-        tp[2] = ((b1 - c1 + 4) >> 3) + predictor[2];
+        tp[2] = ((b1 - c1 + 4) >> 3) + pr[2];
         op[2] = (cl_uchar)((tp[2] > 255) ? 255 : ((tp[2] < 0) ? 0 : tp[2] ));
 
-        op+=4;
-		tp+=4;
-		predictor += 4;
+        op += 4;
+		tp += 4;
+		pr += 4;
     }
 
 	return;
 }
 
 
-static void DCT4x4(cl_short *input, cl_short *output)
+static void DCT4x4(const cl_short *const __restrict input, cl_short *const __restrict output)
 {
     // input - pointer to start of block in raw frame. I-line of the block will be input + I*width
     // output - pointer to encoded_macroblock.block[i] data.
     cl_int i;
     cl_int a1, b1, c1, d1;
-    cl_short *ip = input;
+    const cl_short *ip = input;
     cl_short *op = output;
 
     for (i = 0; i < 4; i++)
@@ -155,12 +156,12 @@ static void DCT4x4(cl_short *input, cl_short *output)
 	return;
 }
 
-static int weight_wht(cl_short * r) //r - 4x4 residual to be weighted through WHT
+static int weight_wht(const cl_short *const r) //r - 4x4 residual to be weighted through WHT
 {
     cl_int i;
     cl_int a1, b1, c1, d1;
     cl_int a2, b2, c2, d2;
-    cl_short *ip = r;
+    const cl_short *ip = r;
 	cl_short tmp[16];
 	cl_short *t = tmp;
 
@@ -221,14 +222,14 @@ static int weight_wht(cl_short * r) //r - 4x4 residual to be weighted through WH
 	return a1;
 }
 
-static int weight(cl_short * r) //r - 4x4 residual to be weighted through vp8 DCT
+static int weight(const cl_short *const r) //r - 4x4 residual to be weighted through vp8 DCT
 {
     // input - pointer to start of block in raw frame. I-line of the block will be input + I*width
     // output - pointer to encoded_macroblock.block[i] data.
 
 	int i;
     int a1, b1, c1, d1;
-	short *ip = r;
+	const short *ip = r;
 	short tmp[16];
     short *op = tmp;
 
@@ -274,7 +275,7 @@ static int weight(cl_short * r) //r - 4x4 residual to be weighted through vp8 DC
 	return a1;
 }
 
-static void quant4x4(cl_short *coeffs, cl_int dc_q, cl_int ac_q)
+static void quant4x4(cl_short *const coeffs, const cl_int dc_q, const cl_int ac_q)
 {
 	// possible opt: val + (val>>16)*(q/2)
 	coeffs[0] += (coeffs[0] < 0) ? (-dc_q/2) : (dc_q/2);
@@ -313,7 +314,12 @@ static void quant4x4(cl_short *coeffs, cl_int dc_q, cl_int ac_q)
 	return;
 }
 
-static cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_short *residual, cl_short *top_pred, cl_short *left_pred, cl_short top_left_pred)
+static cl_int pick_luma_predictor(const cl_uchar *const __restrict original, 
+								  cl_uchar *const __restrict predictor, 
+								  cl_short *const __restrict residual, 
+								  const cl_short *const __restrict top_pred, 
+								  const cl_short *const __restrict left_pred, 
+								  const cl_short top_left_pred)
 {
 	cl_short MinWeight, bmode, val, buf, i, j, W;
 	cl_uchar pr_tmp[16];
@@ -574,10 +580,10 @@ static cl_int pick_luma_predictor(cl_uchar *original, cl_uchar *predictor, cl_sh
 	return bmode;
 }
 
-static void predict_and_transform_mb(cl_int mb_num)
+static void predict_and_transform_mb(const cl_int mb_num)
 {
 	frames.transformed_blocks[mb_num].parts = are4x4;
-    cl_int i, mb_row, mb_col, b_num, b_col, b_row, Y_offset, UV_offset, pred_ind_Y, pred_ind_UV;
+    cl_int i, b_num, b_col, b_row, pred_ind_Y, pred_ind_UV;
 
     cl_short top_left_pred_Y, top_left_pred_U, top_left_pred_V;
     cl_short left_pred_Y[16], left_pred_U[8], left_pred_V[8], top_pred_Y[20], top_pred_U[8], top_pred_V[8];
@@ -585,16 +591,16 @@ static void predict_and_transform_mb(cl_int mb_num)
 	cl_uchar predictor[16], block_pixels[16];
 	cl_short residual[16];
 
-	cl_int y_dc_q,y_ac_q,uv_dc_q,uv_ac_q;
 	frames.transformed_blocks[mb_num].segment_id = intra_segment;
-	y_dc_q = frames.y_dc_q[intra_segment];
-	y_ac_q = frames.y_ac_q[intra_segment];
-	uv_dc_q = frames.uv_dc_q[intra_segment];
-	uv_ac_q = frames.uv_ac_q[intra_segment];
+	const cl_int y_dc_q = frames.y_dc_q[intra_segment];
+	const cl_int y_ac_q = frames.y_ac_q[intra_segment];
+	const cl_int uv_dc_q = frames.uv_dc_q[intra_segment];
+	const cl_int uv_ac_q = frames.uv_ac_q[intra_segment];
 
-    mb_row = mb_num / video.mb_width; mb_col = mb_num % video.mb_width;
-    Y_offset = ((mb_row * video.wrk_width) + mb_col) << 4;
-    UV_offset = ((mb_row *video.wrk_width) << 2) + (mb_col << 3);
+    const cl_int mb_row = mb_num / video.mb_width; 
+	const cl_int mb_col = mb_num % video.mb_width;
+    const cl_int Y_offset = ((mb_row * video.wrk_width) + mb_col) << 4;
+    const cl_int UV_offset = ((mb_row *video.wrk_width) << 2) + (mb_col << 3);
 
     // compute predictors
     if (mb_col == 0)
@@ -801,8 +807,14 @@ static void predict_and_transform_mb(cl_int mb_num)
 }
 
 
-static float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, cl_uchar *const frame1V, const cl_int width1, 
-					   cl_uchar *const frame2Y, cl_uchar *const frame2U, cl_uchar *const frame2V, const cl_int width2)
+static float count_SSIM_16x16(const cl_uchar *const __restrict frame1Y, 
+							  const cl_uchar *const __restrict frame1U, 
+							  const cl_uchar *const __restrict frame1V, 
+							  const cl_int width1, 
+							  const cl_uchar *const __restrict frame2Y, 
+							  const cl_uchar *const __restrict frame2U, 
+							  const cl_uchar *const __restrict frame2V, 
+							  const cl_int width2)
 {
 	int i,j,M1=0,M2=0,D1=0,D2=0,C=0,t1,t2;
 	const float c1 = 0.01f*0.01f*255*255;
@@ -906,7 +918,7 @@ static float count_SSIM_16x16(cl_uchar *const frame1Y, cl_uchar *const frame1U, 
 }
 
 
-static int test_inter_on_intra(cl_int mb_num, segment_ids id)
+static int test_inter_on_intra(const cl_int mb_num, const segment_ids id)
 {
 	macroblock test_mb;
 	static cl_uchar test_recon_Y[256];

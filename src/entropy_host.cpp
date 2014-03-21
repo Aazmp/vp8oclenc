@@ -17,7 +17,7 @@ typedef struct {
 } vp8_bool_encoder;
 
 
-static void init_bool_encoder(vp8_bool_encoder *e, cl_uchar *start_partition)
+static void init_bool_encoder(vp8_bool_encoder *const __restrict e, cl_uchar *const __restrict start_partition)
 {
     e->output = start_partition;
     e->range = 255;
@@ -33,7 +33,7 @@ static void add_one_to_output(cl_uchar *q)
     ++*q;
 }
 
-static void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
+static void write_bool(vp8_bool_encoder *const e, const int prob, const int bool_value)
 {
     /* split is approximately (range * prob) / 256 and, crucially,
     is strictly bigger than zero and strictly smaller than range */
@@ -58,12 +58,12 @@ static void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
     }
 }
 
-static void write_flag(vp8_bool_encoder *e, int b)
+static void write_flag(vp8_bool_encoder *const e, const int b)
 {
     write_bool(e, 128, (b)?1:0);
 }
 
-static void write_literal(vp8_bool_encoder *e, int i, int size)
+static void write_literal(vp8_bool_encoder *const e, const int i, const int size)
 {
     int mask = 1 << (size - 1);
     while (mask)
@@ -73,16 +73,10 @@ static void write_literal(vp8_bool_encoder *e, int i, int size)
     }
 }
 
-static void write_quantizer_delta(vp8_bool_encoder *e, int delta)
+static void write_quantizer_delta(vp8_bool_encoder *const e, int delta)
 {
-    int sign;
-    if (delta < 0)
-    {
-        delta *= -1;
-        sign = 1;
-    }
-    else
-        sign = 0;
+	const int qsign = (delta < 0) ? 1 : 0;
+	delta = (delta < 0) ? -delta : delta;
 
     if (!delta)
         write_flag(e, 0);
@@ -90,13 +84,13 @@ static void write_quantizer_delta(vp8_bool_encoder *e, int delta)
     {
         write_flag(e, 1);
         write_literal(e, delta, 4);
-        write_flag(e, sign);
+        write_flag(e, qsign);
     }
 }
 
 /* Call this function (exactly once) after encoding the last bool value
 for the partition being written */
-static void flush_bool_encoder(vp8_bool_encoder *e)
+static void flush_bool_encoder(vp8_bool_encoder *const e)
 {
     int c = e->bit_count;
     cl_uint v = e->bottom;
@@ -115,7 +109,7 @@ static void flush_bool_encoder(vp8_bool_encoder *e)
     }
 }
 
-static void write_symbol( vp8_bool_encoder *vbe, encoding_symbol symbol, const Prob *const p, Tree t)
+static void write_symbol( vp8_bool_encoder *const __restrict vbe, encoding_symbol symbol, const Prob *const __restrict p, const Tree t)
 {
     tree_index i = 0;
 
@@ -128,7 +122,7 @@ static void write_symbol( vp8_bool_encoder *vbe, encoding_symbol symbol, const P
     while (symbol.size);
 }
 
-static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcount])
+static void write_mv(vp8_bool_encoder *const __restrict vbe, const union mv v, const Prob mvc[2][MVPcount])
 {
 	cl_short abs_v;
 	// short values are 0..7
@@ -212,10 +206,10 @@ static void write_mv(vp8_bool_encoder *vbe, union mv v, const Prob mvc[2][MVPcou
     return;
 }
 
-static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
+static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *const vbe, const cl_int mb_num) // mostly copied from guide.pdf (converted to encoder)
 {
-	cl_int mb_row = mb_num / video.mb_width;
-	cl_int mb_col = mb_num % video.mb_width;
+	const cl_int mb_row = mb_num / video.mb_width;
+	const cl_int mb_col = mb_num % video.mb_width;
 	macroblock_extra_data *mb_edata, *above_edata, *left_edata, *above_left_edata;
 	macroblock_extra_data imaginary_edata;
 
@@ -254,63 +248,68 @@ static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_
 	// process above 
 	// if above is INTRA-like then no action is taken, else above is SPLITMV (all we have)
 	// the same for other 2 processes
-	if (above_edata->is_inter_mb == 1)
+	if (above_edata->is_inter_mb)
 	{
 		if (above_edata->base_mv.raw)
 		{
-			++mb_mv; mb_mv->raw = above_edata->base_mv.raw;
+			++mb_mv; 
+			mb_mv->raw = above_edata->base_mv.raw;
 			++cntx;
 		}
 		*cntx += 2;
 	}
 
 	// process left
-	if (left_edata->is_inter_mb == 1)
+	if (left_edata->is_inter_mb)
 	{
 		if (left_edata->base_mv.raw)
 		{
 		// not using golden or altref, no sign correction(?)
 			if (left_edata->base_mv.raw != mb_mv->raw)
 			{
-				++mb_mv; mb_mv->raw = left_edata->base_mv.raw;
+				++mb_mv; 
+				mb_mv->raw = left_edata->base_mv.raw;
 				++cntx;
 			}
 			*cntx += 2;
 		} 
-		else cnt[0] += 2;
+		else 
+			cnt[0] += 2;
 	}
 
 	// process above_left
-	if (above_left_edata->is_inter_mb == 1)
+	if (above_left_edata->is_inter_mb)
 	{
 		if (above_left_edata->base_mv.raw)
 		{
 			if (above_left_edata->base_mv.raw != mb_mv->raw)
 			{
-				++mb_mv; mb_mv->raw = above_left_edata->base_mv.raw;
+				++mb_mv; 
+				mb_mv->raw = above_left_edata->base_mv.raw;
 				++cntx;
 			}
 			*cntx += 1;
-		} else cnt[0] += 1;
+		} 
+		else 
+			cnt[0] += 1;
 	}
 
 	// if we have three distinct MVs
-	if (cnt[3]) /* See if above-left MV can be merged with NEAREST */	
-		if (mb_mv->raw == mb_mv_list[1].raw)
-			cnt[1] += 1;
+	/* See if above-left MV can be merged with NEAREST */	
+	cnt[1] += (cnt[3]&(mb_mv->raw == mb_mv_list[1].raw));
 	// cnt[CNT_SPLITMV] = ((above->base.y_mode == SPLITMV) + (left->base.y_mode == SPLITMV)) * 2 + (aboveleft->base.y_mode == SPLITMV);
 	cnt[3] = (
-		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
-		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		((above_edata->is_inter_mb)&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb)&(left_edata->parts!=are16x16))
 		)*2 + 
-		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
+		((above_left_edata->is_inter_mb)&(above_left_edata->parts != are16x16)); 
 	if (cnt[2] > cnt[1])
 	{
-		int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
+		cl_int tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
 		tmp = mb_mv_list[1].raw; mb_mv_list[1].raw = mb_mv_list[2].raw; mb_mv_list[2].raw = tmp;
 	}
 	// Use near_mvs[CNT_BEST] to store the "best" MV. Note that this storage shares the same address as near_mvs[CNT_ZEROZERO].
-	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
+	mb_mv_list[0].raw = (cnt[1] >= cnt[0]) ? mb_mv_list[1].raw : mb_mv_list[0].raw;
 	// since we never use NEARMV or NEARESTMV modes, we need only cnt[0] (BEST)
 	// this position equals end of dixie.c function find_near_mvs with best_mv in mb_mv_list[0];
 	//also we have cnt[] array as index-set for probabilities array
@@ -334,19 +333,18 @@ static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_
 		s_tmp.size = 2;
 		write_symbol(vbe, s_tmp, split_mv_probs, split_mv_tree);
 		
-		cl_int b_num;
-		for (b_num = 0; b_num < 4; ++b_num)
+		for (cl_int b_num = 0; b_num < 4; ++b_num)
 		{
 			// b_num being part number and block number
 			union mv left_mv, above_mv, this_mv;
-			cl_int b_col, b_row;
-			b_row = b_num / 2; b_col = b_num % 2;
+			const cl_int b_row = b_num / 2; 
+			const cl_int b_col = b_num % 2;
 			// read previous vectors (they are already updated, or zeros if it's border case)
 			if (b_col > 0) {
 				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
 				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
 			}
-			else if (left_edata->is_inter_mb == 1) {
+			else if (left_edata->is_inter_mb) {
 				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
 				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
 			} 
@@ -358,7 +356,7 @@ static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_
 				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
 				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
 			}
-			else if (above_edata->is_inter_mb == 1) {
+			else if (above_edata->is_inter_mb) {
 				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
 				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
 			} 
@@ -369,14 +367,18 @@ static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_
 			// here we take out computed vectors and update them to refence to previous
 			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
 			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
-			cl_int aez = !(above_mv.raw);
-			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			const cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			const cl_int aez = !(above_mv.raw);
+			const cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
 			cl_int ctx = 0;
-			if (lea&&lez) ctx = 4; 
-			else if (lea) ctx = 3;
-			else if (aez) ctx = 2; // it seems above ha higher priority here
-			else if (lez) ctx = 1;
+			//if (lea&lez) ctx = 4; 
+			//else if (lea) ctx = 3;
+			//else if (aez) ctx = 2; // it seems above ha higher priority here
+			//else if (lez) ctx = 1;
+			ctx = (lea&lez) ? 4 : ctx;
+			ctx = (lea&(!lez)) ? 3 : ctx;
+			ctx = ((!lea)&aez) ? 2 : ctx;
+			ctx = ((!lea)&(!aez)&lez) ? 1 : ctx;
 			if (this_mv.raw == left_mv.raw) {// LEFT = "0" 
 				s_tmp.bits = 0;
 				s_tmp.size = 1;
@@ -440,7 +442,7 @@ static void bool_encode_inter_mb_modes_and_mvs(vp8_bool_encoder *vbe, cl_int mb_
 	return;
 }
 
-static void count_mv(vp8_bool_encoder *vbe, union mv v, cl_uint num[2][MVPcount], cl_uint denom[2][MVPcount])
+static void count_mv(vp8_bool_encoder *const __restrict vbe, const union mv v, cl_uint num[2][MVPcount], cl_uint denom[2][MVPcount])
 {
 	cl_short abs_v;
 
@@ -537,7 +539,7 @@ static void count_mv(vp8_bool_encoder *vbe, union mv v, cl_uint num[2][MVPcount]
     return;
 }
 
-static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num) 
+static void count_mv_probs(vp8_bool_encoder *const vbe, const cl_int mb_num) 
 {
 	// it looks similar to funtion where we encode vectors
 	// BUT
@@ -568,7 +570,7 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 	mb_mv[0].raw = mb_mv[1].raw = mb_mv[2].raw = 0;
 	cl_int *cntx  = cnt;
 	cntx[0] = cntx[1] = cntx[2] = cntx[3] = 0;
-	if (above_edata->is_inter_mb == 1)
+	if (above_edata->is_inter_mb)
 	{
 		if (above_edata->base_mv.raw)
 		{
@@ -577,7 +579,7 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 		}
 		*cntx += 2;
 	}
-	if (left_edata->is_inter_mb == 1)
+	if (left_edata->is_inter_mb)
 	{
 		if (left_edata->base_mv.raw)
 		{
@@ -590,7 +592,7 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 		} 
 		else cnt[0] += 2;
 	}
-	if (above_left_edata->is_inter_mb == 1)
+	if (above_left_edata->is_inter_mb)
 	{
 		if (above_left_edata->base_mv.raw)
 		{
@@ -603,20 +605,18 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 		} else cnt[0] += 1;
 	}
 
-	if (cnt[3]) 
-		if (mb_mv->raw == mb_mv_list[1].raw)
-			cnt[1] += 1;
+	cnt[1] += (cnt[3]&(mb_mv->raw == mb_mv_list[1].raw));
 	cnt[3] = (
-		((above_edata->is_inter_mb == 1)&&(above_edata->parts!=are16x16)) + 
-		((left_edata->is_inter_mb == 1)&&(left_edata->parts!=are16x16))
+		((above_edata->is_inter_mb)&(above_edata->parts!=are16x16)) + 
+		((left_edata->is_inter_mb)&(left_edata->parts!=are16x16))
 		)*2 + 
-		((above_left_edata->is_inter_mb == 1)&&(above_left_edata->parts != are16x16)); 
+		((above_left_edata->is_inter_mb)&(above_left_edata->parts != are16x16)); 
 	if (cnt[2] > cnt[1])
 	{
-		cl_int tmp; tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
+		cl_int tmp = cnt[1]; cnt[1] = cnt[2]; cnt[2] = tmp;
 		tmp = mb_mv_list[1].raw; mb_mv_list[1].raw = mb_mv_list[2].raw; mb_mv_list[2].raw = tmp;
 	}
-	if (cnt[1] >= cnt[0])	mb_mv_list[0].raw = mb_mv_list[1].raw;
+	mb_mv_list[0].raw = (cnt[1] >= cnt[0]) ? mb_mv_list[1].raw : mb_mv_list[0].raw;
 	Prob mv_ref_p[4];
 	mv_ref_p[0] = vp8_mode_contexts[cnt[0]][0]; 
 	mv_ref_p[1] = vp8_mode_contexts[cnt[1]][1]; 
@@ -629,20 +629,19 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 	// -
 	if (frames.transformed_blocks[mb_num].parts == are8x8)
 	{
-		cl_int b_num;
-		for (b_num = 0; b_num < 4; ++b_num)
+		for (cl_int b_num = 0; b_num < 4; ++b_num)
 		{
 			// on block level imaginary blocks above and to the left of frame are blocks with ZERO MV 0,0
 			// b_num being part number and block number
 			union mv left_mv, above_mv, this_mv;
-			cl_int b_col, b_row;
-			b_row = b_num / 2; b_col = b_num % 2;
+			const cl_int b_row = b_num / 2; 
+			const cl_int b_col = b_num % 2;
 			// read previous vectors (they are already updated, or zeros if it's border case)
 			if (b_col > 0) {
 				left_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 1];
 				left_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 1];
 			}
-			else if (left_edata->is_inter_mb == 1) {
+			else if (left_edata->is_inter_mb) {
 				left_mv.d.x = frames.transformed_blocks[mb_num - 1].vector_x[b_num + 1];
 				left_mv.d.y = frames.transformed_blocks[mb_num - 1].vector_y[b_num + 1];
 			} 
@@ -654,7 +653,7 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 				above_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num - 2];
 				above_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num - 2];
 			}
-			else if (above_edata->is_inter_mb == 1) {
+			else if (above_edata->is_inter_mb) {
 				above_mv.d.x = frames.transformed_blocks[mb_num - video.mb_width].vector_x[b_num + 2];
 				above_mv.d.y = frames.transformed_blocks[mb_num - video.mb_width].vector_y[b_num + 2];
 			} 
@@ -665,14 +664,18 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 			// here we take out computed vectors and update them to refence to previous
 			this_mv.d.x = frames.transformed_blocks[mb_num].vector_x[b_num];
 			this_mv.d.y = frames.transformed_blocks[mb_num].vector_y[b_num];
-			cl_int lez = !(left_mv.raw); // flags for context for decoding submv
-			cl_int aez = !(above_mv.raw);
-			cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
+			const cl_int lez = !(left_mv.raw); // flags for context for decoding submv
+			const cl_int aez = !(above_mv.raw);
+			const cl_int lea = (left_mv.raw == above_mv.raw); //l = left, a = above, z = zero, e = equals
 			cl_int ctx = 0;
-			if (lea&&lez) ctx = 4; 
-			else if (lea) ctx = 3;
-			else if (aez) ctx = 2;
-			else if (lez) ctx = 1;
+			//if (lea&&lez) ctx = 4; 
+			//else if (lea) ctx = 3;
+			//else if (aez) ctx = 2;
+			//else if (lez) ctx = 1;
+			ctx = (lea&lez) ? 4 : ctx;
+			ctx = (lea&(!lez)) ? 3 : ctx;
+			ctx = ((!lea)&aez) ? 2 : ctx;
+			ctx = ((!lea)&(!aez)&lez) ? 1 : ctx;
 			if ((this_mv.raw != left_mv.raw) &&
 				(this_mv.raw != above_mv.raw) &&
 				(this_mv.raw != 0)) 
@@ -685,8 +688,8 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 	}
 	else if (frames.transformed_blocks[mb_num].parts == are16x16)
 	{
-		if ((mb_edata->base_mv.raw != 0) && 
-			(mb_edata->base_mv.raw != mb_mv_list[1].raw) &&
+		if ((mb_edata->base_mv.raw != 0) & 
+			(mb_edata->base_mv.raw != mb_mv_list[1].raw) &
 			(mb_edata->base_mv.raw != mb_mv_list[2].raw)) {
 			union mv mv_delta;
 			mv_delta.d.x = mb_edata->base_mv.d.x - mb_mv_list[0].d.x;
@@ -703,7 +706,7 @@ static void count_mv_probs(vp8_bool_encoder *vbe, cl_int mb_num)
 }
 
 
-void encode_header(cl_uchar* partition) // return  size of encoded header
+void encode_header(cl_uchar *const partition) // return  size of encoded header
 {
 	// TODO: move all functions used to count probabilities from root to additional function
 
@@ -727,11 +730,8 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 	vp8_bool_encoder *vbe = (vp8_bool_encoder*)malloc(sizeof(vp8_bool_encoder));
 	// start of encoding header
 	// at the start of every partition - init
-	cl_int bool_offset;
-	if (!frames.current_is_key_frame) 
-		bool_offset = 3;
-	else 
-		bool_offset = 10;
+	const cl_int bool_offset = (frames.current_is_key_frame) ? 10 : 3;
+
 	init_bool_encoder(vbe, partition+bool_offset); // 10(3) bytes for uncompressed data chunk
 
 	/*------------------------------------------------- | ----- |
@@ -780,22 +780,20 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
     write_flag(vbe, segmentation_enabled);     // segmentation test
 	if (segmentation_enabled) 
 	{
-		cl_int update_mb_segmentation_map, update_segment_feature_data;
-		update_mb_segmentation_map = 1;
-		update_segment_feature_data = 1;
+		const cl_int update_mb_segmentation_map = 1;
+		const cl_int update_segment_feature_data = 1;
 		write_flag(vbe, update_mb_segmentation_map);
 		write_flag(vbe, update_segment_feature_data);
 		if (update_segment_feature_data) 
 		{
 			write_flag(vbe, 1); // 1 - absolute; 0 - delta
-			int i;
-			for (i = 0; i < 4; ++i)
+			for (int i = 0; i < 4; ++i)
 			{ 
 				write_flag(vbe, 1);//always update
 				write_literal(vbe, frames.segments_data[i].y_ac_i, 7);
 				write_flag(vbe, 0); // sign for absolute values is 0
 			}
-			for (i = 0; i < 4; ++i)
+			for (int i = 0; i < 4; ++i)
 			{ 
 				write_flag(vbe, 1);//always update
 				write_literal(vbe, frames.segments_data[i].loop_filter_level, 6);
@@ -840,16 +838,7 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
     /*  end of mb_lf_adjustments() block */
 
 	/*  log2_nbr_of_dct_partitions                      | L(2)  | */
-    if (video.number_of_partitions == 1)
-		write_literal(vbe, 0, 2); // only 1 partition (2 bits)
-	else 
-		if (video.number_of_partitions == 2)
-			write_literal(vbe, 1, 2);
-		else 
-			if (video.number_of_partitions == 4)
-				write_literal(vbe, 2, 2);
-			else 
-				write_literal(vbe, 3, 2);
+	write_literal(vbe, video.number_of_partitions_ind, 2); //already transformed to 00..11
 
 	/*  start of quant_indices() block */
     /*  y_ac_qi                                         | L(7)  |
@@ -1048,7 +1037,8 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 				denom_mv_context[i][j] = 1;
 			}
 		for (mb_num = 0; mb_num < video.mb_count; ++mb_num) {
-			if (frames.e_data[mb_num].is_inter_mb) count_mv_probs(vbe, mb_num);
+			if (frames.e_data[mb_num].is_inter_mb) 
+				count_mv_probs(vbe, mb_num);
 		}
 		for (i = 0; i < 2; ++i)
 			for (j = 0; j < 19; ++j) {
@@ -1108,7 +1098,7 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 					zero-probability prob_intra is set by field J of the frame header.*/
 		if (frames.current_is_key_frame == 0) 
 			write_bool(vbe, prob_intra, (frames.e_data[mb_num].is_inter_mb == 1));
-		if ((frames.current_is_key_frame == 0) && (frames.e_data[mb_num].is_inter_mb == 1))
+		if ((frames.current_is_key_frame == 0)&(frames.e_data[mb_num].is_inter_mb == 1))
 		{
 		/*  if (is_inter_mb) {                          |       |
         |       mb_ref_frame_sel1                       | B(p)  |*/
@@ -1118,10 +1108,10 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 
 		/*      if (mb_ref_frame_sel1)                  |       |
         |           mb_ref_frame_sel2                   | B(p)  |*/
-			if (ref == 1) {
+			if (ref == 1) 
+			{
 				ref = (frames.transformed_blocks[mb_num].reference_frame == ALTREF);
 				write_bool(vbe, prob_gf, ref);
-
 			}
 
         /*      mv_mode                                 |   T   |// determines the macroblock motion vectormode
@@ -1161,30 +1151,22 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 			for(b_num = 0; b_num < 16; ++b_num)
 			{
 				// imaginary blocks outside frame - B_DC_PRED
-				if ( (mb_num < video.mb_width) && (b_num < 4) )
+				if ( (mb_num < video.mb_width)&(b_num < 4) )
 					ctx1 = B_DC_PRED;
 				else {
-					if (b_num < 4) {
-						mbp = mb_num - video.mb_width;
-						bp = b_num + 12;
-					} 
-					else {
-						mbp = mb_num;
-						bp = b_num - 4;
-					}
+					mbp = mb_num;
+					bp = b_num;
+					mbp -= (b_num < 4) ? video.mb_width : 0;
+					bp += (b_num < 4) ? 12 : -4;
 					ctx1 = frames.e_data[mbp].mode[bp];
 				}
-				if ( ((mb_num % video.mb_width) == 0) && ((b_num & 0x3) == 0) )
+				if ( ((mb_num % video.mb_width) == 0)&((b_num & 0x3) == 0) )
 					ctx2 = B_DC_PRED;
 				else {
-					if ((b_num & 0x3) == 0) {
-						mbp = mb_num - 1;
-						bp = b_num + 3;
-					} 
-					else {
-						mbp = mb_num;
-						bp = b_num - 1;
-					}
+					mbp = mb_num;
+					bp = b_num;
+					mbp -= (b_num & 0x3) ? 0 : 1;
+					bp += (b_num & 0x3) ? -1 : 3;
 					ctx2 = frames.e_data[mbp].mode[bp];
 				}
 
@@ -1214,10 +1196,9 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 			s_tmp.bits = 7; // B_PRED = "111" for P-frames
 			s_tmp.size = 3; 
 			write_symbol(vbe, s_tmp, new_ymode_prob, ymode_tree);
-			cl_int b_num;
 			const int bmode_bits[num_intra_bmodes] = {0, 2, 6, 28, 30, 58, 59, 62, 126, 127};
 			const int bmode_size[num_intra_bmodes] = {1, 2, 3,  5,  5,  6,  6,  6,   7,   7};
-			for(b_num = 0; b_num < 16; ++b_num)
+			for(cl_int b_num = 0; b_num < 16; ++b_num)
 			{
 				s_tmp.bits = bmode_bits[frames.e_data[mb_num].mode[b_num]];
 				s_tmp.size = bmode_size[frames.e_data[mb_num].mode[b_num]];
@@ -1246,8 +1227,7 @@ void encode_header(cl_uchar* partition) // return  size of encoded header
 	// The start_code is a constant 3-byte pattern having value 0x9d012a. (byte0->2)
 
 	// 0(1) - (not)key | 010 - version2 | 1 - show frame : 0x5 = 0101
-	cl_uint buf;
-	buf = (frames.current_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
+	cl_uint buf = (frames.current_is_key_frame) ? 0 : 1; /* indicate keyframe via the lowest bit */
 	buf |= (0 << 1); /* version 0 in bits 3-1 */
 	// version 0 - bicubic interpolation
 	// version 1-2 - bilinear

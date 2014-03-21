@@ -42,7 +42,7 @@ static cl_int finalFlush(cl_command_queue comm)
 
 ////////////////// transforms are taken from multimedia mike's encoder version
 
-extern void encode_header(cl_uchar* partition);
+extern void encode_header(cl_uchar *const partition);
 
 static void entropy_encode()
 {
@@ -63,7 +63,6 @@ static void entropy_encode()
 	// denom[i][j][k][l] - amount of bits(both 0 and 1) in i,j,k,l context to be coded
 	device.cpu_work_items_per_dim[0] = video.number_of_partitions;
 	device.cpu_work_group_size_per_dim[0] = 1;
-	clSetKernelArg(device.count_probs, 7, sizeof(cl_int), &frames.current_is_key_frame);	
 	clEnqueueNDRangeKernel(device.boolcoder_commandQueue_cpu, device.count_probs, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
 	frames.threads_free -= video.number_of_partitions;
 
@@ -84,8 +83,6 @@ static void entropy_encode()
 	device.state_gpu = clEnqueueWriteBuffer(device.boolcoder_commandQueue_cpu, device.coeff_probs, CL_FALSE, 0, 11*3*8*4*sizeof(cl_uint), frames.new_probs, 0, NULL, NULL);
 
 	// start of encoding coefficients 
-	clSetKernelArg(device.encode_coefficients, 9, sizeof(cl_int), &frames.current_is_key_frame);
-	device.state_cpu = clSetKernelArg(device.encode_coefficients, 11, sizeof(cl_int), &frames.skip_prob);
 	clEnqueueNDRangeKernel(device.boolcoder_commandQueue_cpu, device.encode_coefficients, 1, NULL, device.cpu_work_items_per_dim, device.cpu_work_group_size_per_dim, 0, NULL, NULL);
 	ifFlush(device.boolcoder_commandQueue_cpu); // we don't need result until gather_frame(), so no block now
 
@@ -95,7 +92,7 @@ static void entropy_encode()
     return;
 }
 
-static void get_loopfilter_strength(int *const red, cl_int *const sh)
+static void get_loopfilter_strength(int *const __restrict red, cl_int *const __restrict sh)
 {
 	int i,j, avg = 0, div = 0;
 	for(i = 0; i < video.wrk_frame_size_luma; ++i)
@@ -521,8 +518,24 @@ void finalize()
 		clReleaseMemObject(device.metrics3);
 		clReleaseKernel(device.reset_vectors);
 		clReleaseKernel(device.downsample);
-		clReleaseKernel(device.luma_search_1step);
-		clReleaseKernel(device.luma_search_2step);
+		clReleaseKernel(device.luma_search_last_16x);
+		clReleaseKernel(device.luma_search_golden_16x);
+		clReleaseKernel(device.luma_search_altref_16x);
+		clReleaseKernel(device.luma_search_last_8x);
+		clReleaseKernel(device.luma_search_golden_8x);
+		clReleaseKernel(device.luma_search_altref_8x);
+		clReleaseKernel(device.luma_search_last_4x);
+		clReleaseKernel(device.luma_search_golden_4x);
+		clReleaseKernel(device.luma_search_altref_4x);
+		clReleaseKernel(device.luma_search_last_2x);
+		clReleaseKernel(device.luma_search_golden_2x);
+		clReleaseKernel(device.luma_search_altref_2x);
+		clReleaseKernel(device.luma_search_last_1x);
+		clReleaseKernel(device.luma_search_golden_1x);
+		clReleaseKernel(device.luma_search_altref_1x);
+		clReleaseKernel(device.luma_search_last_d4x);
+		clReleaseKernel(device.luma_search_golden_d4x);
+		clReleaseKernel(device.luma_search_altref_d4x);
 		clReleaseKernel(device.select_reference);
 		clReleaseKernel(device.prepare_predictors_and_residual);
 		clReleaseKernel(device.pack_8x8_into_16x16);

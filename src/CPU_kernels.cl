@@ -64,7 +64,7 @@ typedef struct {
 	uint32_t count;
 } vp8_bool_encoder;
 
-void init_bool_encoder(vp8_bool_encoder *e, __global uint8_t *start_partition)
+void init_bool_encoder(vp8_bool_encoder *const restrict e, __global uint8_t *const restrict start_partition)
 {
     e->output = start_partition;
     e->range = 255;
@@ -80,7 +80,7 @@ void add_one_to_output(__global uint8_t *q)
     ++*q;
 }
 
-void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
+void write_bool(vp8_bool_encoder *const restrict e, const int prob, const int bool_value)
 {
     /* split is approximately (range * prob) / 256 and, crucially,
     is strictly bigger than zero and strictly smaller than range */
@@ -106,12 +106,12 @@ void write_bool(vp8_bool_encoder *e, int prob, int bool_value)
     }
 }
 
-void write_flag(vp8_bool_encoder *e, int b)
+void write_flag(vp8_bool_encoder *const restrict e, const int b)
 {
     write_bool(e, 128, (b)?1:0);
 }
 
-void write_literal(vp8_bool_encoder *e, int i, int size)
+void write_literal(vp8_bool_encoder *const restrict e, const int i, const int size)
 {
     int mask = 1 << (size - 1);
     while (mask)
@@ -121,7 +121,7 @@ void write_literal(vp8_bool_encoder *e, int i, int size)
     }
 }
 
-void flush_bool_encoder(vp8_bool_encoder *e)
+void flush_bool_encoder(vp8_bool_encoder *const restrict e)
 {
     int c = e->bit_count;
     uint32_t v = e->bottom;
@@ -184,7 +184,7 @@ __constant Prob Pcat5[] = { 180, 157, 141, 134, 130, 0};
 __constant Prob Pcat6[] = { 254, 254, 243, 230, 196, 177, 153, 140, 133, 130, 129, 0};
 __constant int coeff_bands[16] = { 0, 1, 2, 3, 6, 4, 5, 6, 6, 6, 6, 6, 6, 6, 6, 7};
 
-void encode_block(vp8_bool_encoder *vbe, __global uint *coeff_probs, int mb_num, int b_num, token *tokens, int ctx1, uchar ctx3)
+void encode_block(vp8_bool_encoder *const restrict vbe, __global const uint *const restrict coeff_probs, token *const restrict tokens, const int ctx1, uchar ctx3)
 {
 	// ctx1 = 0 for Y beggining at coefficient 1 (when y2 exists)
 	//		= 1 for Y2
@@ -254,7 +254,7 @@ void encode_block(vp8_bool_encoder *vbe, __global uint *coeff_probs, int mb_num,
 	return;
 }
 														 
-void tokenize_block(__global macroblock *MBs, int mb_num, int b_num, token tokens[16]) //IF-ELSE
+void tokenize_block(__global const macroblock *const restrict MBs, const int mb_num, const int b_num, token tokens[16]) //IF-ELSE
 {
 	int next = 0; // imaginary 17th element
 	int i;
@@ -338,18 +338,15 @@ void tokenize_block(__global macroblock *MBs, int mb_num, int b_num, token token
 	return;
 }
 
-__kernel void encode_coefficients(	__global macroblock *MBs, 
-									__global uchar *output, 
-									__global int *partition_sizes,
-									__global uchar *third_context,
-									__global uint *coeff_probs,
-									__global uint *coeff_probs_denom,
-									int mb_height, 
-									int mb_width, 
-									int num_partitions,
-									int key_frame,
-									int partition_step,
-									int skip_prob)
+__kernel void encode_coefficients(	__global const macroblock *const restrict MBs, 
+									__global uchar *const restrict output, 
+									__global int *const restrict partition_sizes,
+									__global const uchar *const restrict third_context,
+									__global const uint *const restrict coeff_probs,
+									const int mb_height, 
+									const int mb_width, 
+									const int num_partitions,
+									const int partition_step)
 {
 	int part_num = get_global_id(0);
 	int mb_row, mb_num, mb_col, b_num;
@@ -371,7 +368,7 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 			{
 				first_context = 1; // for Y2
 				tokenize_block(MBs, mb_num, 24, tokens); 
-				encode_block(vbe, coeff_probs, mb_num, 24, tokens, first_context, *(third_context + mb_num*25 + 24));
+				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + 24));
 				first_context = 0; //for Y, when Y2 exists
 			} else {
 				first_context = 3; //for Y, when Y2 is absent
@@ -381,20 +378,20 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 			for (b_num = 0; b_num < 16; ++b_num)
 			{
 				tokenize_block(MBs, mb_num, b_num, tokens);
-				encode_block(vbe, coeff_probs, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
+				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 U-blocks
 			first_context = 2; // for all chromas
 			for (b_num = 16; b_num < 20; ++b_num)
 			{
 				tokenize_block(MBs, mb_num, b_num, tokens);
-				encode_block(vbe, coeff_probs, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
+				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 V-blocks
 			for (b_num = 20; b_num < 24; ++b_num)
 			{
 				tokenize_block(MBs, mb_num, b_num, tokens);
-				encode_block(vbe, coeff_probs, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
+				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 		}
 	}
@@ -407,7 +404,7 @@ __kernel void encode_coefficients(	__global macroblock *MBs,
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void tokenize_block_cut(__global macroblock *MBs, int mb_num, int b_num, token tokens[16])
+void tokenize_block_cut(__global const macroblock *const restrict MBs, const int mb_num, const int b_num, token tokens[16])
 {
 	int next = 0; // imaginary 17th element
 	int i;
@@ -470,12 +467,14 @@ void tokenize_block_cut(__global macroblock *MBs, int mb_num, int b_num, token t
 }
 
 
-void count_probs_in_block(	__global uint *const coeff_probs,
-							__global uint *const coeff_probs_denom,
+void count_probs_in_block(	__global uint *const restrict  coeff_probs,
+							__global uint *const restrict  coeff_probs_denom,
 							const int part_num,
-							const int mb_num, const int b_num, 
-							token *tokens, 
-							const int ctx1,const int in_ctx3)
+							const int mb_num, 
+							const int b_num, 
+							token *const restrict tokens, 
+							const int ctx1,
+							const int in_ctx3)
 {
 	// ctx1 = 0 for Y beggining at coefficient 1 (when y2 exists)
 	//		= 1 for Y2
@@ -531,15 +530,14 @@ void count_probs_in_block(	__global uint *const coeff_probs,
 	return;
 }
 
-__kernel void count_probs(	__global macroblock *MBs, 
-							__global uint *coeff_probs, 
-							__global uint *coeff_probs_denom,
-							__global uchar *third_context,
-							int mb_height, 
-							int mb_width, 
-							int num_partitions,
-							int key_frame,
-							int partition_step)
+__kernel void count_probs(	__global const macroblock *const restrict MBs, 
+							__global uint *const restrict coeff_probs, 
+							__global uint *const restrict coeff_probs_denom,
+							__global uchar *const restrict third_context,
+							const int mb_height, 
+							const int mb_width, 
+							const int num_partitions,
+							const int partition_step)
 {
 	int part_num = get_global_id(0);
 	int mb_row, mb_num, mb_col, b_num;
@@ -746,9 +744,9 @@ __kernel void count_probs(	__global macroblock *MBs,
 	return;
 }
 
-__kernel void num_div_denom(__global uint *coeff_probs, 
-							__global uint *coeff_probs_denom,
-							int num_partitions)
+__kernel void num_div_denom(__global uint *const restrict coeff_probs, 
+							__global const uint *const restrict coeff_probs_denom,
+							const int num_partitions)
 {
 	int part_num = get_global_id(0);
 	int ctx1, ctx2, ctx3, ctx4, p;
@@ -771,8 +769,8 @@ __kernel void num_div_denom(__global uint *coeff_probs,
 
 
 #ifdef LOOP_FILTER
-__kernel void prepare_filter_mask(__global macroblock *const MBs, //0
-								__global int *const mb_mask, //1
+__kernel void prepare_filter_mask(__global macroblock *const restrict  MBs, //0
+								__global int *const restrict  mb_mask, //1
 								const int width, //2
 								const int height, //3
 								const int parts) //4
@@ -817,9 +815,9 @@ __kernel void prepare_filter_mask(__global macroblock *const MBs, //0
 	return;
 }
 
-void filter_mb_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8 *const p0,
-					short8 *const q0, short8 *const q1, short8 *const q2, short8 *const q3,
-					ushort mb_lim, ushort int_lim, ushort hev_thr)
+void filter_mb_edge(const short8 *const restrict  p3, short8 *const restrict  p2, short8 *const restrict  p1, short8 *const restrict  p0,
+					short8 *const restrict  q0, short8 *const restrict  q1, short8 *const restrict  q2, const short8 *const restrict  q3,
+					const ushort mb_lim, const ushort int_lim, const ushort hev_thr)
 {
 	short8 mask, hev, a, b, w;
 	
@@ -873,9 +871,9 @@ void filter_mb_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8
 	return;
 }
 
-void filter_b_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8 *const p0,
-					short8 *const q0, short8 *const q1, short8 *const q2, short8 *const q3,
-					ushort b_lim, ushort int_lim, ushort hev_thr)
+void filter_b_edge(const short8 *const restrict p3, const short8 *const restrict p2, short8 *const restrict p1, short8 *const restrict p0,
+					short8 *const restrict q0, short8 *const restrict q1, const short8 *const restrict q2, const short8 *const restrict q3,
+					const ushort b_lim, const ushort int_lim, const ushort hev_thr)
 {
 	short8 mask, hev, a, b;
 	
@@ -916,7 +914,7 @@ void filter_b_edge(short8 *const p3, short8 *const p2, short8 *const p1, short8 
 	return;
 }
 
-void read8p(__global uchar *const frame, const int pos, const int step, short8 *const V)
+void read8p(__global const uchar *const restrict frame, const int pos, const int step, short8 *const restrict V)
 {
 	int i = pos;
 	(*V).s0 = (short)frame[i] - 128; i += step;
@@ -930,7 +928,7 @@ void read8p(__global uchar *const frame, const int pos, const int step, short8 *
 	return;
 }
 
-void write8p(__global uchar *const frame, const int pos, const int step, short8 *const V)
+void write8p(__global uchar *const restrict frame, const int pos, const int step, short8 *const restrict V)
 {
 	int i = pos;
 	uchar8 buf;
@@ -946,10 +944,10 @@ void write8p(__global uchar *const frame, const int pos, const int step, short8 
 	return;
 }
 
-__kernel void loop_filter_frame(__global uchar *const frame, //0
-								__global macroblock *const MBs, //1
-								__global int *const mb_mask, //2
-								__constant const segment_data *const SD, //3
+__kernel void loop_filter_frame(__global uchar *const restrict frame, //0
+								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict mb_mask, //2
+								__constant const segment_data *const restrict SD, //3
 								const int width, //4
 								const int height, //5
 								const int mb_size) //6

@@ -46,8 +46,8 @@ static const cl_short vp8_ac_qlookup[128] =
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-#define CPUPATH "CPU_kernels.cl"
-#define GPUPATH "GPU_kernels.cl"
+#define CPUPATH "..\\Release\\CPU_kernels.cl"
+#define GPUPATH "..\\Release\\GPU_kernels.cl"
 
 union mv {
 	cl_uint raw;
@@ -133,8 +133,24 @@ struct deviceContext
     cl_int state_cpu;
     cl_int state_gpu;
 	cl_kernel reset_vectors;
-	cl_kernel luma_search_1step;
-	cl_kernel luma_search_2step;
+	cl_kernel luma_search_last_16x;
+	cl_kernel luma_search_last_8x;
+	cl_kernel luma_search_last_4x;
+	cl_kernel luma_search_last_2x;
+	cl_kernel luma_search_last_1x;
+	cl_kernel luma_search_altref_16x;
+	cl_kernel luma_search_altref_8x;
+	cl_kernel luma_search_altref_4x;
+	cl_kernel luma_search_altref_2x;
+	cl_kernel luma_search_altref_1x;
+	cl_kernel luma_search_golden_16x;
+	cl_kernel luma_search_golden_8x;
+	cl_kernel luma_search_golden_4x;
+	cl_kernel luma_search_golden_2x;
+	cl_kernel luma_search_golden_1x;
+	cl_kernel luma_search_last_d4x;
+	cl_kernel luma_search_golden_d4x;
+	cl_kernel luma_search_altref_d4x;
 	cl_kernel downsample;
 	cl_kernel select_reference;
 	cl_kernel prepare_predictors_and_residual;
@@ -264,6 +280,7 @@ struct videoContext
 	cl_int loop_filter_sharpness;
 
 	cl_int number_of_partitions;
+	cl_int number_of_partitions_ind;
 	cl_int partition_step;
 
 	cl_uint timestep;

@@ -137,11 +137,10 @@ static void inter_transform()
 	clFinish(device.commandQueue2_gpu);
 	clFinish(device.commandQueue3_gpu);
 
-	cl_int val;
 	// if golden and altref buffers represent different from last buffer frame
 	// and altref is not the same as altref
-	cl_int use_golden = !frames.prev_is_golden_frame; 
-	cl_int use_altref = (!frames.prev_is_altref_frame) && (frames.altref_frame_number != frames.golden_frame_number);
+	const cl_int use_golden = !frames.prev_is_golden_frame; 
+	const cl_int use_altref = (!frames.prev_is_altref_frame) && (frames.altref_frame_number != frames.golden_frame_number);
 	//prepare downsampled frames and image objects
 	prepare_GPU_buffers();
 
@@ -151,17 +150,7 @@ static void inter_transform()
 	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
 										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
 										0;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by16);
-	val = video.wrk_width/16;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 5, sizeof(cl_int), &val);
-	val = video.wrk_height/16;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 6, sizeof(cl_int), &val);
-	val = 16;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 7, sizeof(cl_int), &val);
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by16);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.last_vnet1);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.last_vnet2);
 	// we use local memory in kernel, so we have to explicitly set work group size
 	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
 	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
@@ -169,24 +158,18 @@ static void inter_transform()
 	else 
 		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
 		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_16x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.golden_frame_Y_downsampled_by16);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_16x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.altref_frame_Y_downsampled_by16);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_16x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}
 
@@ -195,42 +178,19 @@ static void inter_transform()
 	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
 										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
 										0;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by8);
-	val = video.wrk_width/8;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 5, sizeof(cl_int), &val);
-	val = video.wrk_height/8;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 6, sizeof(cl_int), &val);
-	val = 8;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 7, sizeof(cl_int), &val);
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by8);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.last_vnet2);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.last_vnet1);
-	// we use local memory in kernel, so we have to explicitly set work group size
-	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
-	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
-		device.gpu_work_group_size_per_dim[0] = 256;
-	else 
-		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
-		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_8x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.golden_frame_Y_downsampled_by8);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_8x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.altref_frame_Y_downsampled_by8);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_8x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}	
 
@@ -239,42 +199,19 @@ static void inter_transform()
 	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
 										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
 										0;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by4);
-	val = video.wrk_width/4;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 5, sizeof(cl_int), &val);
-	val = video.wrk_height/4;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 6, sizeof(cl_int), &val);
-	val = 4;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 7, sizeof(cl_int), &val);
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by4);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.last_vnet1);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.last_vnet2);
-	// we use local memory in kernel, so we have to explicitly set work group size
-	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
-	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
-		device.gpu_work_group_size_per_dim[0] = 256;
-	else 
-		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
-		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.golden_frame_Y_downsampled_by4);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.altref_frame_Y_downsampled_by4);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}
 
@@ -283,42 +220,19 @@ static void inter_transform()
 	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
 										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
 										0;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by2);
-	val = video.wrk_width/2;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 5, sizeof(cl_int), &val);
-	val = video.wrk_height/2;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 6, sizeof(cl_int), &val);
-	val = 2;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 7, sizeof(cl_int), &val);
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by2);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.last_vnet2);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.last_vnet1);
-	// we use local memory in kernel, so we have to explicitly set work group size
-	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
-	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
-		device.gpu_work_group_size_per_dim[0] = 256;
-	else 
-		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
-		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_2x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.golden_frame_Y_downsampled_by2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_2x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.altref_frame_Y_downsampled_by2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_2x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}
 
@@ -327,82 +241,36 @@ static void inter_transform()
 	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
 										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
 										0;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 0, sizeof(cl_mem), &device.current_frame_Y);
-	val = video.wrk_width;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 5, sizeof(cl_int), &val);
-	val = video.wrk_height;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 6, sizeof(cl_int), &val);
-	val = 1;
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 7, sizeof(cl_int), &val);
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.last_vnet1);
-	device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.last_vnet2);
-	// we use local memory in kernel, so we have to explicitly set work group size
-	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
-	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
-		device.gpu_work_group_size_per_dim[0] = 256;
-	else 
-		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
-		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_1x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.golden_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_1x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 1, sizeof(cl_mem), &device.altref_frame_Y);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 2, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_1step, 3, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_1step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_1x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}
 
 	// search in image with interpolation on the run
-	device.gpu_work_items_per_dim[0] = video.mb_count*4;
-	device.gpu_work_items_per_dim[0] += (device.gpu_work_items_per_dim[0] % 256) > 0 ? 
-										(256 - (device.gpu_work_items_per_dim[0]%256)) : 
-										0;
 	// LAST
-	device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.last_frame_Y_image);
-	device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.last_vnet2);
-	device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.last_vnet1);
-	device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics1);
-	// we use local memory in kernel, so we have to explicitly set work group size
-	//max work group size for this kernel is 256! (each work-group use 16kb (defined in kernel code) and each kernel-thread needs 64b => 16kb/64b == 256
-	if (device.gpu_device_type == CL_DEVICE_TYPE_GPU)
-		device.gpu_work_group_size_per_dim[0] = 256;
-	else 
-		// just for tests on cpu (useful to control memory). Some CPU won't work with 256 kernels in one hardware thread
-		device.gpu_work_group_size_per_dim[0] = 8; 
-	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.luma_search_last_d4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// GOLDEN
 	if (use_golden)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.golden_frame_Y_image);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.golden_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.golden_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics2);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue2_gpu, device.luma_search_golden_d4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue2_gpu);
 	}
 	// ALTREF
 	if (use_altref)
 	{
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 1, sizeof(cl_mem), &device.altref_frame_Y_image);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 2, sizeof(cl_mem), &device.altref_vnet2);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 3, sizeof(cl_mem), &device.altref_vnet1);
-		device.state_gpu = clSetKernelArg(device.luma_search_2step, 4, sizeof(cl_mem), &device.metrics3);
-		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_2step, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
+		device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue3_gpu, device.luma_search_altref_d4x, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 		device.state_gpu = ifFlush(device.commandQueue3_gpu);
 	}
 
