@@ -22,7 +22,6 @@ static char small_help[] = "\n"
 
 static int cl_info()
 {
-	int i, j;
 	char* value;
 	size_t valueSize;
     cl_uint platformCount;
@@ -36,7 +35,7 @@ static int cl_info()
     platforms = (cl_platform_id*) malloc(sizeof(cl_platform_id) * platformCount);
     clGetPlatformIDs(platformCount, platforms, NULL);
  
-    for (i = 0; i < platformCount; i++) 
+    for (cl_uint i = 0; i < platformCount; i++) 
 	{
 		clGetPlatformInfo(platforms[i], CL_PLATFORM_NAME, 0, NULL, &valueSize);
 		value = (char*) malloc(valueSize);
@@ -50,7 +49,7 @@ static int cl_info()
         clGetDeviceIDs(platforms[i], CL_DEVICE_TYPE_ALL, deviceCount, devices, NULL);
  
         // for each device print critical attributes
-        for (j = 0; j < deviceCount; j++) 
+        for (cl_uint j = 0; j < deviceCount; j++) 
 		{
             // print device name
             clGetDeviceInfo(devices[j], CL_DEVICE_NAME, 0, NULL, &valueSize);
@@ -174,7 +173,7 @@ static int init_all()
 		char** device_program_source_gpu = (char**)malloc(sizeof(char*));
 		*device_program_source_gpu = (char*)malloc(program_size+1);
 		(*device_program_source_gpu)[program_size] = '\0';
-		int deb = fread(*device_program_source_gpu, sizeof(char), program_size, program_handle);
+		size_t deb = fread(*device_program_source_gpu, sizeof(char), program_size, program_handle);
 		fclose(program_handle);
 		device.program_gpu = clCreateProgramWithSource(device.context_gpu, 1, (const char**)device_program_source_gpu, NULL, &device.state_gpu);
 		printf("building GPU program...\n");
@@ -225,19 +224,64 @@ static int init_all()
 			device.luma_search_altref_d4x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
 		}
 		{ char kernel_name[] = "downsample_x2";
-		device.downsample = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.downsample_current_1x_to_2x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_current_2x_to_4x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_current_4x_to_8x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_current_8x_to_16x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_last_1x_to_2x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_last_2x_to_4x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_last_4x_to_8x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.downsample_last_8x_to_16x = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+		}
 		{ char kernel_name[] = "select_reference";
 		device.select_reference = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "prepare_predictors_and_residual";
-		device.prepare_predictors_and_residual = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.prepare_predictors_and_residual_last_Y = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_last_U = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_last_V = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_golden_Y = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_golden_U = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_golden_V = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_altref_Y = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_altref_U = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.prepare_predictors_and_residual_altref_V = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+		}
 		{ char kernel_name[] = "pack_8x8_into_16x16";
 		device.pack_8x8_into_16x16 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		{ char kernel_name[] = "dct4x4";
-		device.dct4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.dct4x4_Y[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_U[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_V[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_Y[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_U[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_V[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_Y[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_U[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_V[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_Y[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_U[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.dct4x4_V[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+		}
 		{ char kernel_name[] = "wht4x4_iwht4x4";
-		device.wht4x4_iwht4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.wht4x4_iwht4x4[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.wht4x4_iwht4x4[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.wht4x4_iwht4x4[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.wht4x4_iwht4x4[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+		}
 		{ char kernel_name[] = "idct4x4";
-		device.idct4x4 = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.idct4x4_Y[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_U[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_V[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_Y[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_U[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_V[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_Y[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_U[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_V[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_Y[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_U[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+			device.idct4x4_V[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); 
+		}
 		if (video.do_loop_filter_on_gpu)
 		{
 			{ char kernel_name[] = "prepare_filter_mask"; //and non zero coeffs count
@@ -248,9 +292,21 @@ static int init_all()
 			device.normal_loop_filter_MBV = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 		}
 		{ char kernel_name[] = "count_SSIM_luma";
-		device.count_SSIM_luma = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.count_SSIM_luma[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_luma[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_luma[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_luma[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+		}
 		{ char kernel_name[] = "count_SSIM_chroma";
-		device.count_SSIM_chroma = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
+			device.count_SSIM_chroma_U[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_U[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_U[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_U[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_V[UQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_V[HQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_V[AQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+			device.count_SSIM_chroma_V[LQ_segment] = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu);
+		}
 		{ char kernel_name[] = "gather_SSIM";
 		device.gather_SSIM = clCreateKernel(device.program_gpu, kernel_name, &device.state_gpu); }
 	}
@@ -309,8 +365,12 @@ static int init_all()
 	{
 		{ char kernel_name[] = "prepare_filter_mask"; //and non zero coeffs count
 		device.prepare_filter_mask = clCreateKernel(device.program_cpu, kernel_name, &device.state_gpu); }
-		{ char kernel_name[] = "loop_filter_frame";
-		device.loop_filter_frame = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
+		{ char kernel_name[] = "loop_filter_frame_luma";
+		device.loop_filter_frame_luma = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); }
+		{ char kernel_name[] = "loop_filter_frame_chroma";
+			device.loop_filter_frame_chroma_U = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); 
+			device.loop_filter_frame_chroma_V = clCreateKernel(device.program_cpu, kernel_name, &device.state_cpu); 
+		}
 	}
 
 
@@ -506,7 +566,12 @@ static int init_all()
 	device.coeff_probs = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(cl_uint), NULL , &device.state_cpu);
 	device.coeff_probs_denom = clCreateBuffer(device.context_cpu, CL_MEM_READ_WRITE, 8*4*8*3*11*sizeof(cl_uint), NULL , &device.state_cpu);
 
+	const cl_int cwidth = video.wrk_width/2;
+	const cl_int cheight = video.wrk_height/2;
 	if (video.GOP_size > 1) {
+		cl_int w, h, pixval, plane, ref, seg_id;
+		const cl_int net_width = video.mb_width*2;
+
 		/*__kernel void reset_vectors ( __global vector_net *const last_net1, //0
 								__global vector_net *const last_net2, //1
 								__global vector_net *const golden_net1, //2
@@ -530,7 +595,44 @@ static int init_all()
 									__global uchar *const dst_frame, //1
 									const signed int src_width, //2
 									const signed int src_height) //3*/
-		// all parameters variable
+		device.state_gpu = clSetKernelArg(device.downsample_current_1x_to_2x, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.downsample_current_1x_to_2x, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by2);
+		device.state_gpu = clSetKernelArg(device.downsample_current_1x_to_2x, 2, sizeof(cl_int), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.downsample_current_1x_to_2x, 3, sizeof(cl_int), &video.wrk_height);
+		device.state_gpu = clSetKernelArg(device.downsample_last_1x_to_2x, 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+		device.state_gpu = clSetKernelArg(device.downsample_last_1x_to_2x, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by2);
+		device.state_gpu = clSetKernelArg(device.downsample_last_1x_to_2x, 2, sizeof(cl_int), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.downsample_last_1x_to_2x, 3, sizeof(cl_int), &video.wrk_height);
+		w = video.wrk_width/2;
+		h = video.wrk_height/2;
+		device.state_gpu = clSetKernelArg(device.downsample_current_2x_to_4x, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by2);
+		device.state_gpu = clSetKernelArg(device.downsample_current_2x_to_4x, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by4);
+		device.state_gpu = clSetKernelArg(device.downsample_current_2x_to_4x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_current_2x_to_4x, 3, sizeof(cl_int), &h);
+		device.state_gpu = clSetKernelArg(device.downsample_last_2x_to_4x, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by2);
+		device.state_gpu = clSetKernelArg(device.downsample_last_2x_to_4x, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by4);
+		device.state_gpu = clSetKernelArg(device.downsample_last_2x_to_4x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_last_2x_to_4x, 3, sizeof(cl_int), &h);
+		w = video.wrk_width/4;
+		h = video.wrk_height/4;
+		device.state_gpu = clSetKernelArg(device.downsample_current_4x_to_8x, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by4);
+		device.state_gpu = clSetKernelArg(device.downsample_current_4x_to_8x, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by8);
+		device.state_gpu = clSetKernelArg(device.downsample_current_4x_to_8x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_current_4x_to_8x, 3, sizeof(cl_int), &h);
+		device.state_gpu = clSetKernelArg(device.downsample_last_4x_to_8x, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by4);
+		device.state_gpu = clSetKernelArg(device.downsample_last_4x_to_8x, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by8);
+		device.state_gpu = clSetKernelArg(device.downsample_last_4x_to_8x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_last_4x_to_8x, 3, sizeof(cl_int), &h);
+		w = video.wrk_width/8;
+		h = video.wrk_height/8;
+		device.state_gpu = clSetKernelArg(device.downsample_current_8x_to_16x, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by8);
+		device.state_gpu = clSetKernelArg(device.downsample_current_8x_to_16x, 1, sizeof(cl_mem), &device.current_frame_Y_downsampled_by16);
+		device.state_gpu = clSetKernelArg(device.downsample_current_8x_to_16x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_current_8x_to_16x, 3, sizeof(cl_int), &h);
+		device.state_gpu = clSetKernelArg(device.downsample_last_8x_to_16x, 0, sizeof(cl_mem), &device.last_frame_Y_downsampled_by8);
+		device.state_gpu = clSetKernelArg(device.downsample_last_8x_to_16x, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by16);
+		device.state_gpu = clSetKernelArg(device.downsample_last_8x_to_16x, 2, sizeof(cl_int), &w);
+		device.state_gpu = clSetKernelArg(device.downsample_last_8x_to_16x, 3, sizeof(cl_int), &h);
 
 		/*__kernel void luma_search_1step //when looking into downsampled and original frames
 									( 	__global uchar *const current_frame, //0
@@ -541,12 +643,10 @@ static int init_all()
 										const signed int width, //5
 										const signed int height, //6
 										const signed int pixel_rate) //7 */
-		cl_int net_width = video.mb_width*2;
-
 		//last_16x
-		cl_int w = video.wrk_width/16;
-		cl_int h = video.wrk_height/16;
-		cl_int pixval = 16;
+		w = video.wrk_width/16;
+		h = video.wrk_height/16;
+		pixval = 16;
 		device.state_gpu = clSetKernelArg(device.luma_search_last_16x, 0, sizeof(cl_mem), &device.current_frame_Y_downsampled_by16);
 		device.state_gpu = clSetKernelArg(device.luma_search_last_16x, 1, sizeof(cl_mem), &device.last_frame_Y_downsampled_by16);
 		device.state_gpu = clSetKernelArg(device.luma_search_last_16x, 2, sizeof(cl_mem), &device.last_vnet1);
@@ -693,8 +793,6 @@ static int init_all()
 		device.state_gpu = clSetKernelArg(device.luma_search_altref_1x, 5, sizeof(cl_int), &w);
 		device.state_gpu = clSetKernelArg(device.luma_search_altref_1x, 6, sizeof(cl_int), &h);
 		device.state_gpu = clSetKernelArg(device.luma_search_altref_1x, 7, sizeof(cl_int), &pixval);
-		
-		
 
 		/*__kernel void luma_search_2step //searching in interpolated picture
 									( 	__global uchar *const current_frame, //0
@@ -729,13 +827,6 @@ static int init_all()
 		device.state_gpu = clSetKernelArg(device.luma_search_altref_d4x, 5, sizeof(cl_int), &video.wrk_width);
 		device.state_gpu = clSetKernelArg(device.luma_search_altref_d4x, 6, sizeof(cl_int), &video.wrk_height);
 
-		
-
-
-
-
-
-
 		/*__kernel void select_reference(__global vector_net *const last_net, //0
 										__global vector_net *const golden_net, //1
 										__global vector_net *const altref_net, //2
@@ -766,44 +857,205 @@ static int init_all()
 														const int width, //5
 														const int plane, //6
 														const int ref) //7*/
-		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		// all other options are set just before execution
+		plane = 0; // Y
+		ref = LAST;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 1, sizeof(cl_mem), &device.last_frame_Y_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 2, sizeof(cl_mem), &device.predictors_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 3, sizeof(cl_mem), &device.residual_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 5, sizeof(cl_int), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_Y, 7, sizeof(cl_int), &ref);
+		ref = GOLDEN;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 1, sizeof(cl_mem), &device.golden_frame_Y_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 2, sizeof(cl_mem), &device.predictors_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 3, sizeof(cl_mem), &device.residual_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 5, sizeof(cl_int), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_Y, 7, sizeof(cl_int), &ref);
+		ref = ALTREF;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 0, sizeof(cl_mem), &device.current_frame_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 1, sizeof(cl_mem), &device.altref_frame_Y_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 2, sizeof(cl_mem), &device.predictors_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 3, sizeof(cl_mem), &device.residual_Y);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 5, sizeof(cl_int), &video.wrk_width);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_Y, 7, sizeof(cl_int), &ref);
+		plane = 1; // U
+		ref = LAST;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 0, sizeof(cl_mem), &device.current_frame_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 1, sizeof(cl_mem), &device.last_frame_U_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 2, sizeof(cl_mem), &device.predictors_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 3, sizeof(cl_mem), &device.residual_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_U, 7, sizeof(cl_int), &ref);
+		ref = GOLDEN;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 0, sizeof(cl_mem), &device.current_frame_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 1, sizeof(cl_mem), &device.golden_frame_U_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 2, sizeof(cl_mem), &device.predictors_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 3, sizeof(cl_mem), &device.residual_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_U, 7, sizeof(cl_int), &ref);
+		ref = ALTREF;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 0, sizeof(cl_mem), &device.current_frame_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 1, sizeof(cl_mem), &device.altref_frame_U_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 2, sizeof(cl_mem), &device.predictors_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 3, sizeof(cl_mem), &device.residual_U);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_U, 7, sizeof(cl_int), &ref);
+		plane = 2; // V
+		ref = LAST;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 0, sizeof(cl_mem), &device.current_frame_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 1, sizeof(cl_mem), &device.last_frame_V_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 2, sizeof(cl_mem), &device.predictors_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 3, sizeof(cl_mem), &device.residual_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_last_V, 7, sizeof(cl_int), &ref);
+		ref = GOLDEN;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 0, sizeof(cl_mem), &device.current_frame_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 1, sizeof(cl_mem), &device.golden_frame_V_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 2, sizeof(cl_mem), &device.predictors_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 3, sizeof(cl_mem), &device.residual_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_golden_V, 7, sizeof(cl_int), &ref);
+		ref = ALTREF;
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 0, sizeof(cl_mem), &device.current_frame_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 1, sizeof(cl_mem), &device.altref_frame_V_image);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 2, sizeof(cl_mem), &device.predictors_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 3, sizeof(cl_mem), &device.residual_V);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 4, sizeof(cl_mem), &device.transformed_blocks_gpu);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 5, sizeof(cl_int), &cwidth);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 6, sizeof(cl_int), &plane);
+		device.state_gpu = clSetKernelArg(device.prepare_predictors_and_residual_altref_V, 7, sizeof(cl_int), &ref);
 
+		for (seg_id = UQ_segment; seg_id <= LQ_segment; ++seg_id)
+		{
+			/*__kernel void dct4x4(__global short *const residual, //0
+									__global macroblock *const MBs, //1
+									const int width, //2
+									__constant segment_data *const SD, //3
+									const int segment_id, //4
+									const float SSIM_target, //5
+									const int plane) //6*/
 
-		/*__kernel void dct4x4(__global short *const residual, //0
-					__global macroblock *const MBs, //1
-					const int width, //2
-					__constant segment_data *const SD, //3
-					const int segment_id, //4
-					const float SSIM_target, //5
-					const int plane) //6*/
-		device.state_gpu = clSetKernelArg(device.dct4x4, 1, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.dct4x4, 3, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.dct4x4, 5, sizeof(cl_int), &video.SSIM_target);
-		// frames, width, segments data, id, and plane are set before launch
+			plane = 0;
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 0, sizeof(cl_mem), &device.residual_Y);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 1, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 2, sizeof(cl_int), &video.wrk_width);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 3, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 4, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 5, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.dct4x4_Y[seg_id], 6, sizeof(cl_int), &plane);
+			plane = 1;
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 0, sizeof(cl_mem), &device.residual_U);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 1, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 2, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 3, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 4, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 5, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.dct4x4_U[seg_id], 6, sizeof(cl_int), &plane);
+			plane = 2;
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 0, sizeof(cl_mem), &device.residual_V);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 1, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 2, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 3, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 4, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 5, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.dct4x4_V[seg_id], 6, sizeof(cl_int), &plane);
 
-		/*__kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
-										__constant segment_data *const SD, //1
-										const int segment_id, //2
-										const float SSIM_target) //3*/
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 1, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4, 3, sizeof(cl_int), &video.SSIM_target);
-		//segment_id is set before launch
+			/*__kernel void wht4x4_iwht4x4(__global macroblock *const MBs, //0
+											__constant segment_data *const SD, //1
+											const int segment_id, //2
+											const float SSIM_target) //3*/
 
-		/*__kernel void idct4x4(__global uchar *const recon_frame, //0
-					__global uchar *const predictor, //1
-					__global macroblock *const MBs, //2
-					const int width, //3
-					__constant segment_data *const SD, //4
-					const int segment_id, //5
-					const float SSIM_target, //6
-					const int plane) //7*/
-		device.state_gpu = clSetKernelArg(device.idct4x4, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.idct4x4, 4, sizeof(cl_mem), &device.segments_data_gpu);
-		device.state_gpu = clSetKernelArg(device.idct4x4, 6, sizeof(cl_int), &video.SSIM_target);
-		// frames, width, segments data, id and plane are set before launch
+			device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4[seg_id], 0, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4[seg_id], 1, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4[seg_id], 2, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.wht4x4_iwht4x4[seg_id], 3, sizeof(cl_int), &video.SSIM_target);
+		
+			/*__kernel void idct4x4(__global uchar *const recon_frame, //0
+									__global uchar *const predictor, //1
+									__global macroblock *const MBs, //2
+									const int width, //3
+									__constant segment_data *const SD, //4
+									const int segment_id, //5
+									const float SSIM_target, //6
+									const int plane) //7*/
+			plane = 0;
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 0, sizeof(cl_mem), &device.reconstructed_frame_Y);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 1, sizeof(cl_mem), &device.predictors_Y);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 3, sizeof(cl_int), &video.wrk_width);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 4, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 5, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 6, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.idct4x4_Y[seg_id], 7, sizeof(cl_int), &plane);
+			plane = 1;
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 0, sizeof(cl_mem), &device.reconstructed_frame_U);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 1, sizeof(cl_mem), &device.predictors_U);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 3, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 4, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 5, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 6, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.idct4x4_U[seg_id], 7, sizeof(cl_int), &plane);
+			plane = 2;
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 0, sizeof(cl_mem), &device.reconstructed_frame_V);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 1, sizeof(cl_mem), &device.predictors_V);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 3, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 4, sizeof(cl_mem), &device.segments_data_gpu);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 5, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 6, sizeof(cl_int), &video.SSIM_target);
+			device.state_gpu = clSetKernelArg(device.idct4x4_V[seg_id], 7, sizeof(cl_int), &plane);
 
+			/*__kernel void count_SSIM_luma(__global uchar *const frame1, //0
+										__global uchar *const frame2, //1
+										__global macroblock *const MBs, //2
+										__global float *const metric, //3
+										signed int width, //4
+										const int segment_id)//5*/
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 0, sizeof(cl_mem), &device.current_frame_Y);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 3, sizeof(cl_mem), &device.metrics1);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 4, sizeof(cl_int), &video.wrk_width);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_luma[seg_id], 5, sizeof(cl_int), &seg_id);
+
+			/*__kernel void count_SSIM_chroma(__global uchar *const frame1, //0
+												__global uchar *const frame2, //1
+												__global macroblock *const MBs, //2
+												__global float *const metric, //3
+												signed int cwidth, //4
+												const int segment_id)// 5*/
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 0, sizeof(cl_mem), &device.current_frame_U);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 1, sizeof(cl_mem), &device.reconstructed_frame_U);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 3, sizeof(cl_mem), &device.metrics2);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 4, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_U[seg_id], 5, sizeof(cl_int), &seg_id);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 0, sizeof(cl_mem), &device.current_frame_V);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 1, sizeof(cl_mem), &device.reconstructed_frame_V);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 3, sizeof(cl_mem), &device.metrics3);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 4, sizeof(cl_int), &cwidth);
+			device.state_gpu = clSetKernelArg(device.count_SSIM_chroma_V[seg_id], 5, sizeof(cl_int), &seg_id);
+		}
+		
 		if (video.do_loop_filter_on_gpu)
 		{
 			/*__kernel prepare_filter_mask(__global macroblock *const MBs,
@@ -833,28 +1085,7 @@ static int init_all()
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 3, sizeof(cl_mem), &device.transformed_blocks_gpu);
 			device.state_gpu = clSetKernelArg(device.normal_loop_filter_MBV, 6, sizeof(cl_mem), &device.mb_mask);
 		}
-		/*__kernel void count_SSIM_luma(__global uchar *const frame1, //0
-										__global uchar *const frame2, //1
-										__global macroblock *const MBs, //2
-										__global float *const metric, //3
-										signed int width, //4
-										const int segment_id)//5*/
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 0, sizeof(cl_mem), &device.current_frame_Y);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 1, sizeof(cl_mem), &device.reconstructed_frame_Y);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 3, sizeof(cl_mem), &device.metrics1);
-		device.state_gpu = clSetKernelArg(device.count_SSIM_luma, 4, sizeof(cl_int), &video.wrk_width);
-
-		/*__kernel void count_SSIM_chroma(__global uchar *const frame1, //0
-										__global uchar *const frame2, //1
-										__global macroblock *const MBs, //2
-										__global float *const metric, //3
-										signed int cwidth, //4
-										const int segment_id)// 5*/
-		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 2, sizeof(cl_mem), &device.transformed_blocks_gpu);
-		cl_int cwidth = video.wrk_width/2;
-		device.state_gpu = clSetKernelArg(device.count_SSIM_chroma, 4, sizeof(cl_int), &cwidth);
-
+		
 		/*void __kernel gather_SSIM(__global float *const metric1, //0
 							__global float *const metric2, //1
 							__global float *const metric3, //2
@@ -929,17 +1160,37 @@ static int init_all()
 		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 3, sizeof(cl_int), &video.wrk_width);
 		device.state_cpu = clSetKernelArg(device.prepare_filter_mask, 4, sizeof(cl_int), &parts);
 
+		/*__kernel void loop_filter_frame_luma(__global uchar *const frame, //0
+												__global macroblock *const MBs, //1
+												__global int *const mb_mask, //2
+												__constant const segment_data *const SD, //3
+												const int width, //4
+												const int height) //5*/
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_luma, 0, sizeof(cl_mem), &device.cpu_frame_Y);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_luma, 1, sizeof(cl_mem), &device.transformed_blocks_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_luma, 2, sizeof(cl_mem), &device.mb_mask);
+		device.state_gpu = clSetKernelArg(device.loop_filter_frame_luma, 3, sizeof(cl_mem), &device.segments_data_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_luma, 4, sizeof(cl_int), &video.wrk_width);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_luma, 5, sizeof(cl_int), &video.wrk_height);
 
-		/*__kernel void loop_filter_frame(__global uchar *const frame, //0
-											__global macroblock *const MBs, //1
-											__global int *const mb_mask, //2
-											__constant const segment_data *const SD, //3
-											const int width, //4
-											const int height, //5
-											const int mb_size) //6*/
-		device.state_cpu = clSetKernelArg(device.loop_filter_frame, 1, sizeof(cl_mem), &device.transformed_blocks_cpu);
-		device.state_cpu = clSetKernelArg(device.loop_filter_frame, 2, sizeof(cl_mem), &device.mb_mask);
-		device.state_gpu = clSetKernelArg(device.loop_filter_frame, 3, sizeof(cl_mem), &device.segments_data_cpu);
+		/*__kernel void loop_filter_frame_chroma(__global uchar *const frame, //0
+												__global macroblock *const MBs, //1
+												__global int *const mb_mask, //2
+												__constant const segment_data *const SD, //3
+												const int width, //4
+												const int height) //5*/
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 0, sizeof(cl_mem), &device.cpu_frame_U);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 1, sizeof(cl_mem), &device.transformed_blocks_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 2, sizeof(cl_mem), &device.mb_mask);
+		device.state_gpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 3, sizeof(cl_mem), &device.segments_data_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 4, sizeof(cl_int), &cwidth);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_U, 5, sizeof(cl_int), &cheight);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 0, sizeof(cl_mem), &device.cpu_frame_V);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 1, sizeof(cl_mem), &device.transformed_blocks_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 2, sizeof(cl_mem), &device.mb_mask);
+		device.state_gpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 3, sizeof(cl_mem), &device.segments_data_cpu);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 4, sizeof(cl_int), &cwidth);
+		device.state_cpu = clSetKernelArg(device.loop_filter_frame_chroma_V, 5, sizeof(cl_int), &cheight);
 	}
 
 	device.loopfilterY_commandQueue_cpu = clCreateCommandQueue(device.context_cpu, device.device_cpu[0], 0, &device.state_cpu);

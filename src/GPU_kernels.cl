@@ -1,5 +1,5 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-#pragma OPENCL EXTENSION cl_amd_printf : enable
+//#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef enum {
 	are16x16 = 0,

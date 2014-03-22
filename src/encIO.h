@@ -210,7 +210,7 @@ static int get_yuv420_frame()
 	}
 
 	int src_frame_size_full = video.src_frame_size_luma + (video.src_frame_size_chroma << 1);
-	int i, j, fragment_size = src_frame_size_full;
+	size_t i, j, fragment_size = src_frame_size_full;
 
 	i = fread(frames.input_pack, sizeof(cl_uchar), (src_frame_size_full % fragment_size), input_file.handle);
 	while (i < src_frame_size_full)

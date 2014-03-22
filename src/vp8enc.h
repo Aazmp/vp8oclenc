@@ -12,7 +12,7 @@
 
 #define QUANT_TO_FILTER_LEVEL 3
 #define DEFAULT_ALTREF_RANGE 5
-#define ALLWAYS_FLUSH
+//#define ALLWAYS_FLUSH
 
 static const cl_uchar vp8_dc_qlookup[128] =
 {
@@ -46,8 +46,8 @@ static const cl_short vp8_ac_qlookup[128] =
 
 #define ERRORPATH "clErrors.txt"
 #define DUMPPATH "dump.y4m"
-#define CPUPATH "..\\Release\\CPU_kernels.cl"
-#define GPUPATH "..\\Release\\GPU_kernels.cl"
+#define CPUPATH "CPU_kernels.cl"
+#define GPUPATH "GPU_kernels.cl"
 
 union mv {
 	cl_uint raw;
@@ -73,7 +73,8 @@ typedef enum {
 	UQ_segment = 0,
 	HQ_segment = 1,
 	AQ_segment = 2,
-	LQ_segment = 3
+	LQ_segment = 3,
+	SEGMENT_COUNT = 4
 } segment_ids;
 
 typedef struct {
@@ -151,22 +152,44 @@ struct deviceContext
 	cl_kernel luma_search_last_d4x;
 	cl_kernel luma_search_golden_d4x;
 	cl_kernel luma_search_altref_d4x;
-	cl_kernel downsample;
+	cl_kernel downsample_current_1x_to_2x;
+	cl_kernel downsample_current_2x_to_4x;
+	cl_kernel downsample_current_4x_to_8x;
+	cl_kernel downsample_current_8x_to_16x;
+	cl_kernel downsample_last_1x_to_2x;
+	cl_kernel downsample_last_2x_to_4x;
+	cl_kernel downsample_last_4x_to_8x;
+	cl_kernel downsample_last_8x_to_16x;
 	cl_kernel select_reference;
-	cl_kernel prepare_predictors_and_residual;
+	cl_kernel prepare_predictors_and_residual_last_Y;
+	cl_kernel prepare_predictors_and_residual_last_U;
+	cl_kernel prepare_predictors_and_residual_last_V;
+	cl_kernel prepare_predictors_and_residual_golden_Y;
+	cl_kernel prepare_predictors_and_residual_golden_U;
+	cl_kernel prepare_predictors_and_residual_golden_V;
+	cl_kernel prepare_predictors_and_residual_altref_Y;
+	cl_kernel prepare_predictors_and_residual_altref_U;
+	cl_kernel prepare_predictors_and_residual_altref_V;
 	cl_kernel pack_8x8_into_16x16;
-	cl_kernel dct4x4;
-	cl_kernel wht4x4_iwht4x4;
-	cl_kernel idct4x4;
+	cl_kernel dct4x4_Y[4];
+	cl_kernel dct4x4_U[4];
+	cl_kernel dct4x4_V[4];
+	cl_kernel wht4x4_iwht4x4[4];
+	cl_kernel idct4x4_Y[4];
+	cl_kernel idct4x4_U[4];
+	cl_kernel idct4x4_V[4];
 	cl_kernel chroma_transform;
 	cl_kernel encode_coefficients;
 	cl_kernel count_probs;
 	cl_kernel num_div_denom;
 	cl_kernel normal_loop_filter_MBH;
 	cl_kernel normal_loop_filter_MBV;
-	cl_kernel loop_filter_frame;
-	cl_kernel count_SSIM_luma;
-	cl_kernel count_SSIM_chroma;
+	cl_kernel loop_filter_frame_luma;
+	cl_kernel loop_filter_frame_chroma_U;
+	cl_kernel loop_filter_frame_chroma_V;
+	cl_kernel count_SSIM_luma[4];
+	cl_kernel count_SSIM_chroma_U[4];
+	cl_kernel count_SSIM_chroma_V[4];
 	cl_kernel gather_SSIM;
 	cl_kernel prepare_filter_mask;
     /* add kernels */
@@ -243,7 +266,7 @@ struct deviceContext
 	size_t cpu_work_items_per_dim[1];
 	size_t cpu_work_group_size_per_dim[1];
 
-	cl_int gpu_preferred_platform_number;
+	cl_uint gpu_preferred_platform_number;
 
 };
 

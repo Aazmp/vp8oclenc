@@ -815,7 +815,7 @@ __kernel void prepare_filter_mask(__global macroblock *const restrict  MBs, //0
 	return;
 }
 
-void filter_mb_edge(const short8 *const restrict  p3, short8 *const restrict  p2, short8 *const restrict  p1, short8 *const restrict  p0,
+void filter_mb_edge8(const short8 *const restrict  p3, short8 *const restrict  p2, short8 *const restrict  p1, short8 *const restrict  p0,
 					short8 *const restrict  q0, short8 *const restrict  q1, short8 *const restrict  q2, const short8 *const restrict  q3,
 					const ushort mb_lim, const ushort int_lim, const ushort hev_thr)
 {
@@ -871,7 +871,7 @@ void filter_mb_edge(const short8 *const restrict  p3, short8 *const restrict  p2
 	return;
 }
 
-void filter_b_edge(const short8 *const restrict p3, const short8 *const restrict p2, short8 *const restrict p1, short8 *const restrict p0,
+void filter_b_edge8(const short8 *const restrict p3, const short8 *const restrict p2, short8 *const restrict p1, short8 *const restrict p0,
 					short8 *const restrict q0, short8 *const restrict q1, const short8 *const restrict q2, const short8 *const restrict q3,
 					const ushort b_lim, const ushort int_lim, const ushort hev_thr)
 {
@@ -944,13 +944,24 @@ void write8p(__global uchar *const restrict frame, const int pos, const int step
 	return;
 }
 
-__kernel void loop_filter_frame(__global uchar *const restrict frame, //0
+// this is luma filtering with vectors of 8 elements
+// although there 16 pixels along macroblock edge that are trated identically
+// AMD compiler generates much slower code (2-3 times slower according to CodeXL)
+// tested on Piledriver
+// could be the reason, but not: guides at http://agner.org/optimize/ mention that 
+// 256bit storing is very slow on piledriver (not bulldozer however)
+// but no YMM registers in generated ASM found....
+// more possible:
+// compiler works with 128bit registers (16 of them are available)
+// and not able to store and process 16 segments at one time without storing
+// and restoring intermediate data to memory => 8 segments at a time leads to less memory operations
+// conclusion: stick to vector8 version unless CPU has 256bit and they're fast
+__kernel void loop_filter_frame_luma(__global uchar *const restrict frame, //0
 								__global const macroblock *const restrict MBs, //1
 								__global const int *const restrict mb_mask, //2
 								__constant const segment_data *const restrict SD, //3
 								const int width, //4
-								const int height, //5
-								const int mb_size) //6
+								const int height) //5
 {
 	__private int mb_num, mb_width, mb_count;
 	__private int x0,y0,x,y,i;
@@ -959,8 +970,8 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 	
 	if (get_global_id(0) != 0) return; //there can be only one
 	
-	mb_width = width/mb_size;
-	mb_count = mb_width*(height/mb_size);
+	mb_width = width/16;
+	mb_count = mb_width*(height/16);
 	
 	for (mb_num = 0; mb_num < mb_count; ++mb_num)
 	{
@@ -971,11 +982,11 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 		b_lim = (short)SD[i].sub_bedge_limit;
 		hev_thr = (short)SD[i].hev_threshold;
 	
-		x0 = (mb_num%mb_width)*mb_size;
-		y0 = (mb_num/mb_width)*mb_size;
+		x0 = (mb_num%mb_width)*16;
+		y0 = (mb_num/mb_width)*16;
 
 		// horizontal
-		for (y = y0; (y-y0) < mb_size; y += 8)
+		for (y = y0; (y-y0) < 16; y += 8)
 		{
 			x = x0;
 			i = y * width + x; read8p(frame,i,width,&q0);
@@ -988,7 +999,7 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 				++i; read8p(frame,i,width,&p2);
 				++i; read8p(frame,i,width,&p1);
 				++i; read8p(frame,i,width,&p0);
-				filter_mb_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+				filter_mb_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
 				i = y * width + x-3; write8p(frame,i,width,&p2);
 				++i; write8p(frame,i,width,&p1);
 				++i; write8p(frame,i,width,&p0);
@@ -997,14 +1008,14 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 				++i; write8p(frame,i,width,&q2);
 			}
 
-			for (x = x0 + 4; ((x-x0) < mb_size) && (mb_mask[mb_num]); x += 4)
+			for (x = x0 + 4; ((x-x0) < 16) && (mb_mask[mb_num]); x += 4)
 			{
 				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
 				i = y * width + x; read8p(frame,i,width,&q0);
 				++i; read8p(frame,i,width,&q1);
 				++i; read8p(frame,i,width,&q2);
 				++i; read8p(frame,i,width,&q3);			
-				filter_b_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				filter_b_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
 				i = y * width + x-2; write8p(frame,i,width,&p1);
 				++i; write8p(frame,i,width,&p0);
 				++i; write8p(frame,i,width,&q0);
@@ -1013,8 +1024,7 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 		}
 				
 		// vertically
-		
-		for (x = x0; (x-x0) < mb_size; x += 8)
+		for (x = x0; (x-x0) < 16; x += 8)
 		{
 			y = y0;
 			i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
@@ -1027,7 +1037,7 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 				i += width; p2 = convert_short8(vload8(0, frame + i)) - 128;
 				i += width; p1 = convert_short8(vload8(0, frame + i)) - 128;
 				i += width; p0 = convert_short8(vload8(0, frame + i)) - 128;
-				filter_mb_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+				filter_mb_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
 				i = (y-3) * width + x; vstore8(convert_uchar8_sat(p2 + 128),0,frame + i);
 				i += width; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
 				i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
@@ -1036,22 +1046,388 @@ __kernel void loop_filter_frame(__global uchar *const restrict frame, //0
 				i += width; vstore8(convert_uchar8_sat(q2 + 128), 0, frame + i);
 			}
 			
-			for (y = y0 + 4; ((y - y0) < mb_size) && (mb_mask[mb_num]); y += 4)
+			for (y = y0 + 4; ((y - y0) < 16) && (mb_mask[mb_num]); y += 4)
 			{
 				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
 				i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
 				i += width; q1 = convert_short8(vload8(0, frame + i)) - 128;
 				i += width; q2 = convert_short8(vload8(0, frame + i)) - 128;
 				i += width; q3 = convert_short8(vload8(0, frame + i)) - 128;
-				filter_b_edge(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				filter_b_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
 				i = (y-2) * width + x; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
 				i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
 				i += width; vstore8(convert_uchar8_sat(q0 + 128), 0, frame + i);
 				i += width; vstore8(convert_uchar8_sat(q1 + 128), 0, frame + i);
 			}
+		}	
+	}
+}
+
+// and this is vector16 version
+//  need to be tested for speed on a system with preferred/native vectors of 256bit
+// those that prefer AVX and newer sets
+// (AMD Piledriver is not among them, but Bulldozer or Intel Bridges or newer AMD/Intel could be)
+/*
+void write16p(__global uchar *const restrict frame, const int pos, const int step, short16 *const restrict V)
+{
+	int i = pos;
+	uchar16 buf;
+	buf = convert_uchar16_sat(*V + 128);
+	frame[i] = buf.s0; i += step;
+	frame[i] = buf.s1; i += step;
+	frame[i] = buf.s2; i += step;
+	frame[i] = buf.s3; i += step;
+	frame[i] = buf.s4; i += step;
+	frame[i] = buf.s5; i += step;
+	frame[i] = buf.s6; i += step;
+	frame[i] = buf.s7; i += step;
+	frame[i] = buf.s8; i += step;
+	frame[i] = buf.s9; i += step;
+	frame[i] = buf.sA; i += step;
+	frame[i] = buf.sB; i += step;
+	frame[i] = buf.sC; i += step;
+	frame[i] = buf.sD; i += step;
+	frame[i] = buf.sE; i += step;
+	frame[i] = buf.sF;
+	return;
+}
+
+void read16p(__global const uchar *const restrict frame, const int pos, const int step, short16 *const restrict V)
+{
+	int i = pos;
+	(*V).s0 = (short)frame[i] - 128; i += step;
+	(*V).s1 = (short)frame[i] - 128; i += step;
+	(*V).s2 = (short)frame[i] - 128; i += step;
+	(*V).s3 = (short)frame[i] - 128; i += step;
+	(*V).s4 = (short)frame[i] - 128; i += step;
+	(*V).s5 = (short)frame[i] - 128; i += step;
+	(*V).s6 = (short)frame[i] - 128; i += step;
+	(*V).s7 = (short)frame[i] - 128; i += step;
+	(*V).s8 = (short)frame[i] - 128; i += step;
+	(*V).s9 = (short)frame[i] - 128; i += step;
+	(*V).sA = (short)frame[i] - 128; i += step;
+	(*V).sB = (short)frame[i] - 128; i += step;
+	(*V).sC = (short)frame[i] - 128; i += step;
+	(*V).sD = (short)frame[i] - 128; i += step;
+	(*V).sE = (short)frame[i] - 128; i += step;
+	(*V).sF = (short)frame[i] - 128;
+	return;
+}
+
+void filter_b_edge16(const short16 *const restrict p3, const short16 *const restrict p2, short16 *const restrict p1, short16 *const restrict p0,
+					short16 *const restrict q0, short16 *const restrict q1, const short16 *const restrict q2, const short16 *const restrict q3,
+					const ushort b_lim, const ushort int_lim, const ushort hev_thr)
+{
+	short16 mask, hev, a, b;
+	
+	mask = (abs(*p3 - *p2) > int_lim);
+	mask |= (abs(*p2 - *p1) > int_lim);
+	mask |= (abs(*p1 - *p0) > int_lim);
+	mask |= (abs(*q1 - *q0) > int_lim);
+	mask |= (abs(*q2 - *q1) > int_lim);
+	mask |= (abs(*q3 - *q2) > int_lim);
+	mask |= ((abs(*p0 - *q0) * 2 + abs(*p1 - *q1) / 2)  > b_lim);
+	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
+	hev = (abs(*p1 - *p0) > hev_thr);
+	hev |= (abs(*q1 - *q0) > hev_thr);
+	//a = clamp128((use_outer_taps? clamp128(p1 - q1) : 0) + 3*(q0 - p0));
+	a = *p1 - *q1;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a &= hev;
+	a += (*q0 - *p0) * (short)3;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a &= mask;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	*q0 -= a; *p0 += b;
+	a = (a + 1) >> 1;
+	a &= ~hev;
+	*q1 -= a; *p1 += a;
+	
+	return;
+}
+
+void filter_mb_edge16(const short16 *const restrict p3, short16 *const restrict  p2, short16 *const restrict p1, short16 *const restrict p0,
+					short16 *const restrict q0, short16 *const restrict q1, short16 *const restrict q2, const short16 *const restrict q3,
+					const ushort mb_lim, const ushort int_lim, const ushort hev_thr)
+{
+	short16 mask, hev, a, b, w;
+	
+	mask = (abs(*p3 - *p2) > int_lim);
+	mask |= (abs(*p2 - *p1) > int_lim);
+	mask |= (abs(*p1 - *p0) > int_lim);
+	mask |= (abs(*q1 - *q0) > int_lim);
+	mask |= (abs(*q2 - *q1) > int_lim);
+	mask |= (abs(*q3 - *q2) > int_lim);
+	mask |= ((abs(*p0 - *q0) * 2 + abs(*p1 - *q1) / 2)  > mb_lim);
+	mask = ~mask; // for vectors in OpenCL TRUE means -1 (all bits set)
+	hev = (abs(*p1 - *p0) > hev_thr);
+	hev |= (abs(*q1 - *q0) > hev_thr);
+	//w = clamp128(clamp128(p1 - q1) + 3*(q0 - p0));
+	w = *p1 - *q1;
+	w = select(w,-128,w<-128);
+	w = select(w,127,w>127);
+	w += (*q0 - *p0) * (short)3;
+	w = select(w,-128,w<-128);
+	w = select(w,127,w>127);
+	w &= mask;
+	a = w & hev;
+	// b = clamp128(a+3) >> 3
+	b = a + 3;
+	b = select(b,-128,b<-128);
+	b = select(b,127,b>127);
+	b >>= 3;
+	// a = clamp128(a+4) >> 3
+	a = a + 4;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	a >>= 3;
+	*q0 -= a; *p0 += b;
+	w &= ~hev;		
+	//a = clamp128((27*w + 63) >> 7);
+	a = (w * (short)27 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q0 -= a; *p0 += a;
+	//a = clamp128((18*w + 63) >> 7);
+	a = (w * (short)18 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q1 -= a; *p1 += a;
+	//a = clamp128((9*w + 63) >> 7);
+	a = (w * (short)9 + (short)63) >> 7;
+	a = select(a,-128,a<-128);
+	a = select(a,127,a>127);
+	*q2 -= a; *p2 += a;
+	
+	return;
+}
+
+__kernel void loop_filter_frame_luma16(__global uchar *const restrict frame, //0
+								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict mb_mask, //2
+								__constant const segment_data *const restrict SD, //3
+								const int width, //4
+								const int height) //5
+{
+	__private int mb_num, mb_width, mb_count;
+	__private int x0,y0,x,y,i;
+	__private short int_lim, mb_lim, b_lim, hev_thr;
+	__private short16 p3,p2,p1,p0,q0,q1,q2,q3;
+	
+	if (get_global_id(0) != 0) return; //there can be only one
+	
+	mb_width = width/16;
+	mb_count = mb_width*(height/16);
+	
+	for (mb_num = 0; mb_num < mb_count; ++mb_num)
+	{
+		i = MBs[mb_num].segment_id;
+		if (SD[i].loop_filter_level == 0) return;
+		int_lim = (short)SD[i].interior_limit;
+		mb_lim = (short)SD[i].mbedge_limit;
+		b_lim = (short)SD[i].sub_bedge_limit;
+		hev_thr = (short)SD[i].hev_threshold;
+	
+		x0 = (mb_num%mb_width)*16;
+		y0 = (mb_num/mb_width)*16;
+
+		// horizontal
+
+		x = x0;
+		y = y0;
+		i = y * width + x; read16p(frame,i,width,&q0);
+		++i; read16p(frame,i,width,&q1);
+		++i; read16p(frame,i,width,&q2);
+		++i; read16p(frame,i,width,&q3);	
+		if (x0>0) 
+		{
+			i = y * width + x-4; read16p(frame,i,width,&p3);
+			++i; read16p(frame,i,width,&p2);
+			++i; read16p(frame,i,width,&p1);
+			++i; read16p(frame,i,width,&p0);
+			filter_mb_edge16(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+			i = y * width + x-3; write16p(frame,i,width,&p2);
+			++i; write16p(frame,i,width,&p1);
+			++i; write16p(frame,i,width,&p0);
+			++i; write16p(frame,i,width,&q0);
+			++i; write16p(frame,i,width,&q1);
+			++i; write16p(frame,i,width,&q2);
 		}
+		if (mb_mask[mb_num])
+			for (x = x0 + 4; (x - x0) < 16; x += 4)
+			{
+				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+				i = y * width + x; read16p(frame,i,width,&q0);
+				++i; read16p(frame,i,width,&q1);
+				++i; read16p(frame,i,width,&q2);
+				++i; read16p(frame,i,width,&q3);			
+				filter_b_edge16(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				i = y * width + x-2; write16p(frame,i,width,&p1);
+				++i; write16p(frame,i,width,&p0);
+				++i; write16p(frame,i,width,&q0);
+				++i; write16p(frame,i,width,&q1);
+			}
+
+		// vertically	
+		y = y0;
+		x = x0;
+		i = y * width + x; q0 = convert_short16(vload16(0, frame + i)) - 128;
+		i += width; q1 = convert_short16(vload16(0, frame + i)) - 128;
+		i += width; q2 = convert_short16(vload16(0, frame + i)) - 128;
+		i += width; q3 = convert_short16(vload16(0, frame + i)) - 128;
+		if (y0 > 0) 
+		{
+			i = (y-4) * width + x; p3 = convert_short16(vload16(0, frame + i)) - 128;
+			i += width; p2 = convert_short16(vload16(0, frame + i)) - 128;
+			i += width; p1 = convert_short16(vload16(0, frame + i)) - 128;
+			i += width; p0 = convert_short16(vload16(0, frame + i)) - 128;
+			filter_mb_edge16(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+			i = (y-3) * width + x; vstore16(convert_uchar16_sat(p2 + 128),0,frame + i);
+			i += width; vstore16(convert_uchar16_sat(p1 + 128), 0, frame + i);
+			i += width; vstore16(convert_uchar16_sat(p0 + 128), 0, frame + i);
+			i += width; vstore16(convert_uchar16_sat(q0 + 128), 0, frame + i);
+			i += width; vstore16(convert_uchar16_sat(q1 + 128), 0, frame + i);
+			i += width; vstore16(convert_uchar16_sat(q2 + 128), 0, frame + i);
+		}
+
+		if (mb_mask[mb_num])
+			for (y = y0 + 4; (y - y0) < 16; y += 4)
+			{
+				p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+				i = y * width + x; q0 = convert_short16(vload16(0, frame + i)) - 128;
+				i += width; q1 = convert_short16(vload16(0, frame + i)) - 128;
+				i += width; q2 = convert_short16(vload16(0, frame + i)) - 128;
+				i += width; q3 = convert_short16(vload16(0, frame + i)) - 128;
+				filter_b_edge16(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+				i = (y-2) * width + x; vstore16(convert_uchar16_sat(p1 + 128), 0, frame + i);
+				i += width; vstore16(convert_uchar16_sat(p0 + 128), 0, frame + i);
+				i += width; vstore16(convert_uchar16_sat(q0 + 128), 0, frame + i);
+				i += width; vstore16(convert_uchar16_sat(q1 + 128), 0, frame + i);
+			}
+	}
+}
+*/
+
+__kernel void loop_filter_frame_chroma(__global uchar *const restrict frame, //0
+								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict mb_mask, //2
+								__constant const segment_data *const restrict SD, //3
+								const int width, //4
+								const int height) //5
+{
+	__private int mb_num, mb_width, mb_count;
+	__private int x0,y0,x,y,i;
+	__private short int_lim, mb_lim, b_lim, hev_thr;
+	__private short8 p3,p2,p1,p0,q0,q1,q2,q3;
+	
+	if (get_global_id(0) != 0) return; //there can be only one
+	
+	mb_width = width/8;
+	mb_count = mb_width*(height/8);
+	
+	for (mb_num = 0; mb_num < mb_count; ++mb_num)
+	{
+		i = MBs[mb_num].segment_id;
+		if (SD[i].loop_filter_level == 0) return;
+		int_lim = (short)SD[i].interior_limit;
+		mb_lim = (short)SD[i].mbedge_limit;
+		b_lim = (short)SD[i].sub_bedge_limit;
+		hev_thr = (short)SD[i].hev_threshold;
+	
+		x0 = (mb_num%mb_width)*8;
+		y0 = (mb_num/mb_width)*8;
+
+		// horizontal
+		y = y0;
+		x = x0;
+		i = y * width + x; read8p(frame,i,width,&q0);
+		++i; read8p(frame,i,width,&q1);
+		++i; read8p(frame,i,width,&q2);
+		++i; read8p(frame,i,width,&q3);	
+		if (x0>0) 
+		{
+			i = y * width + x-4; read8p(frame,i,width,&p3);
+			++i; read8p(frame,i,width,&p2);
+			++i; read8p(frame,i,width,&p1);
+			++i; read8p(frame,i,width,&p0);
+			filter_mb_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+			i = y * width + x-3; write8p(frame,i,width,&p2);
+			++i; write8p(frame,i,width,&p1);
+			++i; write8p(frame,i,width,&p0);
+			++i; write8p(frame,i,width,&q0);
+			++i; write8p(frame,i,width,&q1);
+			++i; write8p(frame,i,width,&q2);
+		}
+
+		if (mb_mask[mb_num])
+		{
+			x = x0 + 4;
+			p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+			i = y * width + x; read8p(frame,i,width,&q0);
+			++i; read8p(frame,i,width,&q1);
+			++i; read8p(frame,i,width,&q2);
+			++i; read8p(frame,i,width,&q3);			
+			filter_b_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+			i = y * width + x-2; write8p(frame,i,width,&p1);
+			++i; write8p(frame,i,width,&p0);
+			++i; write8p(frame,i,width,&q0);
+			++i; write8p(frame,i,width,&q1);
+		}
+				
+		// vertically
+		x = x0;
+		y = y0;
+		i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
+		i += width; q1 = convert_short8(vload8(0, frame + i)) - 128;
+		i += width; q2 = convert_short8(vload8(0, frame + i)) - 128;
+		i += width; q3 = convert_short8(vload8(0, frame + i)) - 128;
+		if (y0 > 0) 
+		{
+			i = (y-4) * width + x; p3 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; p2 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; p1 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; p0 = convert_short8(vload8(0, frame + i)) - 128;
+			filter_mb_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,mb_lim,int_lim,hev_thr);
+			i = (y-3) * width + x; vstore8(convert_uchar8_sat(p2 + 128),0,frame + i);
+			i += width; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(q0 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(q1 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(q2 + 128), 0, frame + i);
+		}
+			
+		if (mb_mask[mb_num])
+		{
+			y = y0 + 4;
+			p3 = q0; p2 = q1; p1 = q2; p0 = q3;
+			i = y * width + x; q0 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q1 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q2 = convert_short8(vload8(0, frame + i)) - 128;
+			i += width; q3 = convert_short8(vload8(0, frame + i)) - 128;
+			filter_b_edge8(&p3,&p2,&p1,&p0,&q0,&q1,&q2,&q3,b_lim,int_lim,hev_thr);
+			i = (y-2) * width + x; vstore8(convert_uchar8_sat(p1 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(p0 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(q0 + 128), 0, frame + i);
+			i += width; vstore8(convert_uchar8_sat(q1 + 128), 0, frame + i);
+		}
+
 		
 	}
 	
 }
+
+
+
+
 #endif
