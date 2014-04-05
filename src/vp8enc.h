@@ -66,7 +66,7 @@ typedef enum {
 	LAST = 0,
 	GOLDEN = 1,
 	ALTREF = 2
-} ref_frame;
+} reference_frame_t;
 
 typedef enum {
 	intra_segment = 0,
@@ -75,7 +75,7 @@ typedef enum {
 	AQ_segment = 2,
 	LQ_segment = 3,
 	SEGMENT_COUNT = 4
-} segment_ids;
+} segment_id_t;
 
 typedef struct {
 	cl_int y_ac_i; 
@@ -91,7 +91,7 @@ typedef struct {
 	cl_int hev_threshold;
 } segment_data;
 
-typedef struct { //in future resize to short or chars!!!
+/*typedef struct { //in future resize to short or chars!!!
     cl_short coeffs[25][16];
     cl_int vector_x[4];
     cl_int vector_y[4];
@@ -99,8 +99,25 @@ typedef struct { //in future resize to short or chars!!!
 	cl_int non_zero_coeffs;
 	cl_int parts; //16x16 == 0; 8x8 == 1;
 	cl_int reference_frame;
-	segment_ids segment_id;
-} macroblock;
+	cl_int segment_id;
+} macroblock;*/
+
+typedef struct {
+	cl_short coeff[16];
+} block_t;
+
+typedef struct {
+	block_t block[25];
+} macroblock_coeffs_t;
+
+typedef struct {
+	cl_short x;
+	cl_short y;
+} vector_t;
+
+typedef struct {
+	vector_t vector[4];
+} macroblock_vectors_t;
 
 typedef struct {
 	cl_int vector_x;
@@ -131,6 +148,7 @@ struct deviceContext
     cl_command_queue commandQueue1_gpu;
 	cl_command_queue commandQueue2_gpu;
 	cl_command_queue commandQueue3_gpu;
+	cl_command_queue dataCopy_gpu;
     cl_int state_cpu;
     cl_int state_gpu;
 	cl_kernel reset_vectors;
@@ -256,6 +274,20 @@ struct deviceContext
 	cl_mem coeff_probs;
 	cl_mem coeff_probs_denom;
 
+	cl_mem macroblock_coeffs_gpu;
+	cl_mem macroblock_coeffs_cpu;
+	cl_mem macroblock_vectors_gpu;
+	cl_mem macroblock_vectors_cpu;
+	cl_mem macroblock_reference_frame_gpu;
+	//cl_mem macroblock_reference_frame_cpu;
+	cl_mem macroblock_parts_gpu;
+	cl_mem macroblock_parts_cpu;
+	cl_mem macroblock_SSIM_gpu;
+	cl_mem macroblock_segment_id_gpu;
+	cl_mem macroblock_segment_id_cpu;
+	cl_mem macroblock_non_zero_coeffs_gpu;
+	cl_mem macroblock_non_zero_coeffs_cpu;
+
     cl_mem transformed_blocks_cpu;
 	cl_mem transformed_blocks_gpu;
     cl_mem partitions;
@@ -340,8 +372,15 @@ struct hostFrameBuffers
     cl_uchar *reconstructed_V;
     cl_uchar *last_U;
     cl_uchar *last_V;
-    macroblock *transformed_blocks;
 	macroblock_extra_data *e_data;
+	macroblock_coeffs_t *MB;
+	macroblock_vectors_t *MB_vectors;
+	float *MB_SSIM;
+	cl_int *MB_segment_id;
+	cl_int *MB_parts;
+	cl_int *MB_non_zero_coeffs;
+	cl_int *MB_reference_frame;
+
 	segment_data segments_data[4];
     cl_uchar *encoded_frame;
 	cl_uint encoded_frame_size;

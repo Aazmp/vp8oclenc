@@ -1,5 +1,5 @@
 #pragma OPENCL EXTENSION cl_khr_byte_addressable_store : enable
-//#pragma OPENCL EXTENSION cl_amd_printf : enable
+#pragma OPENCL EXTENSION cl_amd_printf : enable
 
 typedef enum {
 	are16x16 = 0,
@@ -36,20 +36,24 @@ typedef struct {
 } segment_data;
 
 typedef struct {
-    short coeffs[25][16];
-    int vector_x[4];
-    int vector_y[4];
-	float SSIM;
-	int non_zero_coeffs;
-	int parts;
-	int reference_frame;
-	segment_ids segment_id;
-} macroblock;
-
-typedef struct {
 	int vector_x;
 	int vector_y;
 } vector_net;
+
+typedef struct {
+	short coeff[16];
+} block_t;
+
+typedef struct {
+	block_t block[25];
+} macroblock_coeffs_t;
+
+//typedef struct { short x; short y; } vector_t;
+typedef short2 vector_t;
+
+typedef struct {
+	vector_t vector[4];
+} macroblock_vectors_t;
 
 __constant int vp8_dc_qlookup[128] =
 {
@@ -1115,8 +1119,8 @@ void luma_search_2step //searching in interpolated picture
 	pdata1.s7 = pdata1.s5; // vector_y0 = vector_y
 	
 	Diff = width/8;
-	pdata2.s0 = (b8x8_num % (Diff))*8; // x = ...
-	pdata2.s1 = (b8x8_num / (Diff))*8; // y = ...
+	pdata2.s0 = (b8x8_num % (Diff))*8; // current x = ...
+	pdata2.s1 = (b8x8_num / (Diff))*8; // current y = ...
 	
 	Diff = (pdata2.s1*width + pdata2.s0)/4;
 	MinDiff = width/4;
@@ -1151,10 +1155,13 @@ void luma_search_2step //searching in interpolated picture
 	//pdata1.s3 = free
 	
 	//#pragma unroll 1
-	for (pdata1.s0 = 0; pdata1.s0 < 25; ++pdata1.s0)
+	for (pdata1.s0 = 0; pdata1.s0 < 26; ++pdata1.s0)
 	{
 		pdata2.s2 = pdata2.s0 + pdata1.s6 + ((pdata1.s0 % 5) - 2); //- x
 		pdata2.s3 = pdata2.s1 + pdata1.s7 + ((pdata1.s0 / 5) - 2);//- y
+		
+		pdata2.s2 = select(pdata2.s2,pdata2.s0,(short)(pdata1.s0 == 25));
+		pdata2.s3 = select(pdata2.s3,pdata2.s1,(short)(pdata1.s0 == 25));
 		
 		pdata2.s6=pdata2.s2%4; //x qpel displacement
 		pdata2.s7=pdata2.s3%4; //y qpel displacement
@@ -1180,7 +1187,9 @@ void luma_search_2step //searching in interpolated picture
 			Diff += li.s0;
 		}
 
-		Diff += (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight/2;
+		Diff += (pdata1.s0 != 25) 
+				? (int)(abs(pdata2.s2-pdata2.s0-pdata1.s6) + abs(pdata2.s3-pdata2.s1-pdata1.s7))*vector_diff_weight/2 
+				: 0;
 			
 		Diff |= select(0,0x7fff,(pdata2.s2 < 0));
 		Diff |= select(0,0x7fff,(pdata2.s2 > (width*4 - 32)));
@@ -1197,7 +1206,9 @@ void luma_search_2step //searching in interpolated picture
 
 	pdata1.s4 -= pdata2.s0;
 	pdata1.s5 -= pdata2.s1;
-	MinDiff -= ((int)abs(pdata1.s4 - pdata1.s6) + (int)abs(pdata1.s5 - pdata1.s7))*vector_diff_weight;
+	MinDiff -= (pdata1.s4 != 0)|(pdata1.s5 != 0)
+				? ((int)abs(pdata1.s4 - pdata1.s6) + (int)abs(pdata1.s5 - pdata1.s7))*vector_diff_weight/2
+				: 0;
 	
 	ref_net[b8x8_num].vector_x = pdata1.s4;
 	ref_net[b8x8_num].vector_y = pdata1.s5;
@@ -1212,12 +1223,14 @@ __kernel void select_reference(__global const vector_net *const restrict last_ne
 								__global const int *const restrict last_Bdiff, //3
 								__global const int *const restrict golden_Bdiff, //4
 								__global const int *const restrict altref_Bdiff, //5
-								__global macroblock *const restrict MBs, //6
-								const int width, //7
-								const int use_golden, //8
-								const int use_altref) //9
+								__global int *const restrict MB_reference_frame, //6
+								__global macroblock_vectors_t *const restrict MB_vectors, //7
+								const int width, //8
+								const int use_golden, //9
+								const int use_altref) //10
 {
-	__private int diff1, diff2, mb_num, b8x8_num, mb_width, b8x8_width, ref, vx0, vy0, vx1, vy1, vx2, vy2, vx3, vy3;
+	__private int diff1, diff2, mb_num, b8x8_num, mb_width, b8x8_width, ref;
+	__private short2 v0, v1, v2, v3;
 	mb_num = get_global_id(0);
 	mb_width = width/16;
 	b8x8_width = mb_width*2;
@@ -1255,48 +1268,44 @@ __kernel void select_reference(__global const vector_net *const restrict last_ne
 	
 	if (ref == LAST)
 	{
-		vx0 = last_net[b8x8_num].vector_x;
-		vy0 = last_net[b8x8_num].vector_y;
-		vx1 = last_net[b8x8_num + 1].vector_x;
-		vy1 = last_net[b8x8_num + 1].vector_y;
-		vx2 = last_net[b8x8_num + b8x8_width].vector_x;
-		vy2 = last_net[b8x8_num + b8x8_width].vector_y;
-		vx3 = last_net[b8x8_num + b8x8_width + 1].vector_x;
-		vy3 = last_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0.x = last_net[b8x8_num].vector_x;
+		v0.y = last_net[b8x8_num].vector_y;
+		v1.x = last_net[b8x8_num + 1].vector_x;
+		v1.y = last_net[b8x8_num + 1].vector_y;
+		v2.x = last_net[b8x8_num + b8x8_width].vector_x;
+		v2.y = last_net[b8x8_num + b8x8_width].vector_y;
+		v3.x = last_net[b8x8_num + b8x8_width + 1].vector_x;
+		v3.y = last_net[b8x8_num + b8x8_width + 1].vector_y;
 	}
 	if (ref == GOLDEN)
 	{
-		vx0 = golden_net[b8x8_num].vector_x;
-		vy0 = golden_net[b8x8_num].vector_y;
-		vx1 = golden_net[b8x8_num + 1].vector_x;
-		vy1 = golden_net[b8x8_num + 1].vector_y;
-		vx2 = golden_net[b8x8_num + b8x8_width].vector_x;
-		vy2 = golden_net[b8x8_num + b8x8_width].vector_y;
-		vx3 = golden_net[b8x8_num + b8x8_width + 1].vector_x;
-		vy3 = golden_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0.x = golden_net[b8x8_num].vector_x;
+		v0.y = golden_net[b8x8_num].vector_y;
+		v1.x = golden_net[b8x8_num + 1].vector_x;
+		v1.y = golden_net[b8x8_num + 1].vector_y;
+		v2.x = golden_net[b8x8_num + b8x8_width].vector_x;
+		v2.y = golden_net[b8x8_num + b8x8_width].vector_y;
+		v3.x = golden_net[b8x8_num + b8x8_width + 1].vector_x;
+		v3.y = golden_net[b8x8_num + b8x8_width + 1].vector_y;
 	}
 	if (ref == ALTREF)
 	{
-		vx0 = altref_net[b8x8_num].vector_x;
-		vy0 = altref_net[b8x8_num].vector_y;
-		vx1 = altref_net[b8x8_num + 1].vector_x;
-		vy1 = altref_net[b8x8_num + 1].vector_y;
-		vx2 = altref_net[b8x8_num + b8x8_width].vector_x;
-		vy2 = altref_net[b8x8_num + b8x8_width].vector_y;
-		vx3 = altref_net[b8x8_num + b8x8_width + 1].vector_x;
-		vy3 = altref_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0.x = altref_net[b8x8_num].vector_x;
+		v0.y = altref_net[b8x8_num].vector_y;
+		v1.x = altref_net[b8x8_num + 1].vector_x;
+		v1.y = altref_net[b8x8_num + 1].vector_y;
+		v2.x = altref_net[b8x8_num + b8x8_width].vector_x;
+		v2.y = altref_net[b8x8_num + b8x8_width].vector_y;
+		v3.x = altref_net[b8x8_num + b8x8_width + 1].vector_x;
+		v3.y = altref_net[b8x8_num + b8x8_width + 1].vector_y;
 	}
 	
-	MBs[mb_num].reference_frame = ref;
-	MBs[mb_num].vector_x[0] = vx0;
-	MBs[mb_num].vector_y[0] = vy0;
-	MBs[mb_num].vector_x[1] = vx1;
-	MBs[mb_num].vector_y[1] = vy1;
-	MBs[mb_num].vector_x[2] = vx2;
-	MBs[mb_num].vector_y[2] = vy2;
-	MBs[mb_num].vector_x[3] = vx3;
-	MBs[mb_num].vector_y[3] = vy3;
-	
+	MB_reference_frame[mb_num] = ref;
+	MB_vectors[mb_num].vector[0] = v0;
+	MB_vectors[mb_num].vector[1] = v1;
+	MB_vectors[mb_num].vector[2] = v2;
+	MB_vectors[mb_num].vector[3] = v3;
+		
 	return;
 }
 
@@ -1304,10 +1313,11 @@ __kernel void prepare_predictors_and_residual(__global const uchar *const restri
 												__read_only image2d_t ref_frame, //1
 												__global uchar *const restrict predictor, //2
 												__global short *const restrict residual, //3
-												__global const macroblock *const restrict MBs, //4
-												const int width, //5
-												const int plane, //6
-												const int ref) //7
+												__global const int *const restrict MB_reference_frame, //4
+												__global const macroblock_vectors_t *const restrict MB_vectors, //5
+												const int width, //6
+												const int plane, //7
+												const int ref) //8
 {
 	__private int b_num, mb_num, g;
 	__private int i;
@@ -1321,14 +1331,13 @@ __kernel void prepare_predictors_and_residual(__global const uchar *const restri
 	pos.y = (b_num / (width/4))*4;
 	mb_num = (pos.y/mb_size)*(width/mb_size) + (pos.x/mb_size);
 	
-	if (MBs[mb_num].reference_frame != ref) return;
+	if (MB_reference_frame[mb_num] != ref) return;
 	
 	v = (pos%mb_size)/(mb_size/2);
 	i = mad24(v.y,2,v.x);
-	v.x = MBs[mb_num].vector_x[i];
-	v.y = MBs[mb_num].vector_y[i];
+	v = convert_int2(MB_vectors[mb_num].vector[i]);
 	
-	//diplacement fractional part
+	//displacement fractional part
 	g = (plane == 0) ? 4 : 8;
 	d = mad24(pos,g,v)%g;
 	//^ d is displacement in 1/g pixels
@@ -1361,33 +1370,38 @@ __kernel void prepare_predictors_and_residual(__global const uchar *const restri
 	return;	
 }
 
-__kernel void pack_8x8_into_16x16(__global macroblock *const MBs) //0
+__kernel void pack_8x8_into_16x16(__global const macroblock_vectors_t *const restrict MB_vectors, //0
+									__global int *const restrict MB_parts, //1
+									__global float *const restrict MB_SSIM) //2
 {
 	__private int mb_num, vector_x,vector_y,x,y,condition;
 	mb_num = get_global_id(0);
-	MBs[mb_num].SSIM = -2.0f;
-	MBs[mb_num].parts = are8x8; 
-	vector_x = MBs[mb_num].vector_x[0];	vector_y = MBs[mb_num].vector_y[0];
-	x = MBs[mb_num].vector_x[1];		y = MBs[mb_num].vector_y[1];
+	MB_SSIM[mb_num] = -2.0f;
+	MB_parts[mb_num] = are8x8; 
+	vector_x = MB_vectors[mb_num].vector[0].x;	vector_y = MB_vectors[mb_num].vector[0].y;
+	x = MB_vectors[mb_num].vector[1].x;		y = MB_vectors[mb_num].vector[1].y;
 	condition = ((vector_x != x) || (vector_y != y)); //XOr optimization possible
 	if (condition) return;
-	x = MBs[mb_num].vector_x[2];		y = MBs[mb_num].vector_y[2];
+	x = MB_vectors[mb_num].vector[2].x;		y = MB_vectors[mb_num].vector[2].y;
 	condition = ((vector_x != x) || (vector_y != y)); 
 	if (condition) return;
-	x = MBs[mb_num].vector_x[3];		y = MBs[mb_num].vector_y[3];
+	x = MB_vectors[mb_num].vector[3].x;		y = MB_vectors[mb_num].vector[3].y;
 	condition = ((vector_x != x) || (vector_y != y)); 
 	if (condition) return; 
-	MBs[mb_num].parts = are16x16;
+	MB_parts[mb_num] = are16x16;
 	return;
 }
 
 __kernel void dct4x4(__global const short2 *const restrict residual, //0
-					__global macroblock *const restrict MBs, //1
-					const int width, //2
-					__constant segment_data *const restrict SD, //3
-					const segment_ids segment_id, //4
-					const float SSIM_target, //5
-					const int plane) //6
+					__global macroblock_coeffs_t *const restrict MB, //1
+					__global int *const restrict MB_segment_id, //2
+					__global const int *const restrict MB_parts, //3
+					__global const float *const restrict MB_SSIM, //4
+					const int width, //5
+					__constant segment_data *const restrict SD, //6
+					const segment_ids segment_id, //7
+					const float SSIM_target, //8
+					const int plane) //9
 {	
 	__private int b_num, mb_num, ac_q,dc_q,uv_dc_q,uv_ac_q;
 	__private int i;
@@ -1401,15 +1415,15 @@ __kernel void dct4x4(__global const short2 *const restrict residual, //0
 	pos.y = (b_num / (width/4))*4;
 	mb_num = (pos.y/mb_size)*(width/mb_size) + (pos.x/mb_size);
 
-	if (MBs[mb_num].SSIM > SSIM_target) return;
+	if (MB_SSIM[mb_num] > SSIM_target) return;
 	
-	MBs[mb_num].segment_id = segment_id;
+	MB_segment_id[mb_num] = segment_id;
 	i = SD[segment_id].y_ac_i;
 	
 	dc_q = SD[0].y_dc_idelta; dc_q += i;
 	dc_q = select((int)dc_q,0,dc_q<0); dc_q = select((int)dc_q,127,dc_q>127);
 	ac_q = vp8_ac_qlookup[i];
-	dc_q = (MBs[mb_num].parts == are16x16) ? 1 : vp8_dc_qlookup[dc_q];
+	dc_q = (MB_parts[mb_num] == are16x16) ? 1 : vp8_dc_qlookup[dc_q];
 	uv_dc_q = SD[0].uv_dc_idelta; uv_dc_q += i;
 	uv_ac_q = SD[0].uv_ac_idelta; uv_ac_q += i;
 	uv_dc_q = select(uv_dc_q,0,uv_dc_q<0); uv_dc_q = select(uv_dc_q,127,uv_dc_q>127);
@@ -1493,25 +1507,27 @@ __kernel void dct4x4(__global const short2 *const restrict residual, //0
 	L.s89AB /= ac_q;
 	L.sCDEF /= ac_q;
 	////
-		
+	
 	v.x = (pos.x%mb_size)/4;
 	v.y = (pos.y%mb_size)/4;
 	b_num = v.y*(mb_size/4) + v.x;
 	b_num += (plane == 1) ? 16 : 0;
 	b_num += (plane == 2) ? 20 : 0;
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
-	MBs[mb_num].coeffs[b_num][inv_zigzag[0]]=(short)L.s0;  MBs[mb_num].coeffs[b_num][inv_zigzag[1]]=(short)L.s1;  MBs[mb_num].coeffs[b_num][inv_zigzag[2]]=(short)L.s2;  MBs[mb_num].coeffs[b_num][inv_zigzag[3]]=(short)L.s3;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[4]]=(short)L.s4;  MBs[mb_num].coeffs[b_num][inv_zigzag[5]]=(short)L.s5;  MBs[mb_num].coeffs[b_num][inv_zigzag[6]]=(short)L.s6;  MBs[mb_num].coeffs[b_num][inv_zigzag[7]]=(short)L.s7;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[8]]=(short)L.s8;  MBs[mb_num].coeffs[b_num][inv_zigzag[9]]=(short)L.s9;  MBs[mb_num].coeffs[b_num][inv_zigzag[10]]=(short)L.sA; MBs[mb_num].coeffs[b_num][inv_zigzag[11]]=(short)L.sB;
-	MBs[mb_num].coeffs[b_num][inv_zigzag[12]]=(short)L.sC; MBs[mb_num].coeffs[b_num][inv_zigzag[13]]=(short)L.sD; MBs[mb_num].coeffs[b_num][inv_zigzag[14]]=(short)L.sE; MBs[mb_num].coeffs[b_num][inv_zigzag[15]]=(short)L.sF;
+	MB[mb_num].block[b_num].coeff[inv_zigzag[0]]=(short)L.s0;  MB[mb_num].block[b_num].coeff[inv_zigzag[1]]=(short)L.s1;  MB[mb_num].block[b_num].coeff[inv_zigzag[2]]=(short)L.s2;  MB[mb_num].block[b_num].coeff[inv_zigzag[3]]=(short)L.s3;
+	MB[mb_num].block[b_num].coeff[inv_zigzag[4]]=(short)L.s4;  MB[mb_num].block[b_num].coeff[inv_zigzag[5]]=(short)L.s5;  MB[mb_num].block[b_num].coeff[inv_zigzag[6]]=(short)L.s6;  MB[mb_num].block[b_num].coeff[inv_zigzag[7]]=(short)L.s7;
+	MB[mb_num].block[b_num].coeff[inv_zigzag[8]]=(short)L.s8;  MB[mb_num].block[b_num].coeff[inv_zigzag[9]]=(short)L.s9;  MB[mb_num].block[b_num].coeff[inv_zigzag[10]]=(short)L.sA; MB[mb_num].block[b_num].coeff[inv_zigzag[11]]=(short)L.sB;
+	MB[mb_num].block[b_num].coeff[inv_zigzag[12]]=(short)L.sC; MB[mb_num].block[b_num].coeff[inv_zigzag[13]]=(short)L.sD; MB[mb_num].block[b_num].coeff[inv_zigzag[14]]=(short)L.sE; MB[mb_num].block[b_num].coeff[inv_zigzag[15]]=(short)L.sF;
 
 	return;
 }
 
-__kernel void wht4x4_iwht4x4(__global macroblock *const restrict MBs, //0
-							__constant segment_data *const restrict SD, //1
-							const segment_ids segment_id, //2
-							const float SSIM_target) //3
+__kernel void wht4x4_iwht4x4(__global macroblock_coeffs_t *const restrict MB, //0
+							__global const float *const restrict MB_SSIM, //1
+							__global int *const restrict MB_segment_id, //2
+							__global const int *const restrict MB_parts, //3
+							__constant segment_data *const restrict SD, //4
+							const segment_ids segment_id) //5
 {
 	__private int mb_num,y2_dc_q,y2_ac_q;
 	__private int i;
@@ -1519,10 +1535,10 @@ __kernel void wht4x4_iwht4x4(__global macroblock *const restrict MBs, //0
 
 	mb_num = get_global_id(0);
 
-	if (MBs[mb_num].SSIM > SSIM_target) return;
-	if (MBs[mb_num].parts != are16x16) return;
+	if (MB_segment_id[mb_num] != segment_id) return;
+	if (MB_parts[mb_num] != are16x16) return;
 	
-	MBs[mb_num].segment_id = segment_id;
+	MB_segment_id[mb_num] = segment_id;
 	i = SD[segment_id].y_ac_i;
 	
 	y2_dc_q = SD[0].y2_dc_idelta; y2_dc_q += i;
@@ -1535,32 +1551,33 @@ __kernel void wht4x4_iwht4x4(__global macroblock *const restrict MBs, //0
 	y2_ac_q = select((int)y2_ac_q,8,y2_ac_q<8);
 
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
-	DL0.s0=(int)MBs[mb_num].coeffs[0][0];  DL0.s1=(int)MBs[mb_num].coeffs[1][0];  DL0.s2=(int)MBs[mb_num].coeffs[2][0];  DL0.s3=(int)MBs[mb_num].coeffs[3][0];
-	DL1.s0=(int)MBs[mb_num].coeffs[4][0];  DL1.s1=(int)MBs[mb_num].coeffs[5][0];  DL1.s2=(int)MBs[mb_num].coeffs[6][0];  DL1.s3=(int)MBs[mb_num].coeffs[7][0];
-	DL2.s0=(int)MBs[mb_num].coeffs[8][0];  DL2.s1=(int)MBs[mb_num].coeffs[9][0];  DL2.s2=(int)MBs[mb_num].coeffs[10][0]; DL2.s3=(int)MBs[mb_num].coeffs[11][0];
-	DL3.s0=(int)MBs[mb_num].coeffs[12][0]; DL3.s1=(int)MBs[mb_num].coeffs[13][0]; DL3.s2=(int)MBs[mb_num].coeffs[14][0]; DL3.s3=(int)MBs[mb_num].coeffs[15][0];
+	DL0.s0=(int)MB[mb_num].block[0].coeff[0];  DL0.s1=(int)MB[mb_num].block[1].coeff[0];  DL0.s2=(int)MB[mb_num].block[2].coeff[0];  DL0.s3=(int)MB[mb_num].block[3].coeff[0];
+	DL1.s0=(int)MB[mb_num].block[4].coeff[0];  DL1.s1=(int)MB[mb_num].block[5].coeff[0];  DL1.s2=(int)MB[mb_num].block[6].coeff[0];  DL1.s3=(int)MB[mb_num].block[7].coeff[0];
+	DL2.s0=(int)MB[mb_num].block[8].coeff[0];  DL2.s1=(int)MB[mb_num].block[9].coeff[0];  DL2.s2=(int)MB[mb_num].block[10].coeff[0]; DL2.s3=(int)MB[mb_num].block[11].coeff[0];
+	DL3.s0=(int)MB[mb_num].block[12].coeff[0]; DL3.s1=(int)MB[mb_num].block[13].coeff[0]; DL3.s2=(int)MB[mb_num].block[14].coeff[0]; DL3.s3=(int)MB[mb_num].block[15].coeff[0];
 	WHT_and_quant(&DL0, &DL1, &DL2, &DL3, y2_dc_q, y2_ac_q);	
-	MBs[mb_num].coeffs[24][inv_zigzag[0]]=(short)DL0.s0;  MBs[mb_num].coeffs[24][inv_zigzag[1]]=(short)DL0.s1;  MBs[mb_num].coeffs[24][inv_zigzag[2]]=(short)DL0.s2;  MBs[mb_num].coeffs[24][inv_zigzag[3]]=(short)DL0.s3;
-	MBs[mb_num].coeffs[24][inv_zigzag[4]]=(short)DL1.s0;  MBs[mb_num].coeffs[24][inv_zigzag[5]]=(short)DL1.s1;  MBs[mb_num].coeffs[24][inv_zigzag[6]]=(short)DL1.s2;  MBs[mb_num].coeffs[24][inv_zigzag[7]]=(short)DL1.s3;
-	MBs[mb_num].coeffs[24][inv_zigzag[8]]=(short)DL2.s0;  MBs[mb_num].coeffs[24][inv_zigzag[9]]=(short)DL2.s1;  MBs[mb_num].coeffs[24][inv_zigzag[10]]=(short)DL2.s2; MBs[mb_num].coeffs[24][inv_zigzag[11]]=(short)DL2.s3;
-	MBs[mb_num].coeffs[24][inv_zigzag[12]]=(short)DL3.s0; MBs[mb_num].coeffs[24][inv_zigzag[13]]=(short)DL3.s1; MBs[mb_num].coeffs[24][inv_zigzag[14]]=(short)DL3.s2; MBs[mb_num].coeffs[24][inv_zigzag[15]]=(short)DL3.s3;
+	MB[mb_num].block[24].coeff[inv_zigzag[0]]=(short)DL0.s0;  MB[mb_num].block[24].coeff[inv_zigzag[1]]=(short)DL0.s1;  MB[mb_num].block[24].coeff[inv_zigzag[2]]=(short)DL0.s2;  MB[mb_num].block[24].coeff[inv_zigzag[3]]=(short)DL0.s3;
+	MB[mb_num].block[24].coeff[inv_zigzag[4]]=(short)DL1.s0;  MB[mb_num].block[24].coeff[inv_zigzag[5]]=(short)DL1.s1;  MB[mb_num].block[24].coeff[inv_zigzag[6]]=(short)DL1.s2;  MB[mb_num].block[24].coeff[inv_zigzag[7]]=(short)DL1.s3;
+	MB[mb_num].block[24].coeff[inv_zigzag[8]]=(short)DL2.s0;  MB[mb_num].block[24].coeff[inv_zigzag[9]]=(short)DL2.s1;  MB[mb_num].block[24].coeff[inv_zigzag[10]]=(short)DL2.s2; MB[mb_num].block[24].coeff[inv_zigzag[11]]=(short)DL2.s3;
+	MB[mb_num].block[24].coeff[inv_zigzag[12]]=(short)DL3.s0; MB[mb_num].block[24].coeff[inv_zigzag[13]]=(short)DL3.s1; MB[mb_num].block[24].coeff[inv_zigzag[14]]=(short)DL3.s2; MB[mb_num].block[24].coeff[inv_zigzag[15]]=(short)DL3.s3;
 	dequant_and_iWHT(&DL0, &DL1, &DL2, &DL3, y2_dc_q, y2_ac_q);
-	MBs[mb_num].coeffs[0][0]=(short)DL0.s0;  MBs[mb_num].coeffs[1][0]=(short)DL0.s1;  MBs[mb_num].coeffs[2][0]=(short)DL0.s2;  MBs[mb_num].coeffs[3][0]=(short)DL0.s3;
-	MBs[mb_num].coeffs[4][0]=(short)DL1.s0;  MBs[mb_num].coeffs[5][0]=(short)DL1.s1;  MBs[mb_num].coeffs[6][0]=(short)DL1.s2;  MBs[mb_num].coeffs[7][0]=(short)DL1.s3;
-	MBs[mb_num].coeffs[8][0]=(short)DL2.s0;  MBs[mb_num].coeffs[9][0]=(short)DL2.s1;  MBs[mb_num].coeffs[10][0]=(short)DL2.s2; MBs[mb_num].coeffs[11][0]=(short)DL2.s3;
-	MBs[mb_num].coeffs[12][0]=(short)DL3.s0; MBs[mb_num].coeffs[13][0]=(short)DL3.s1; MBs[mb_num].coeffs[14][0]=(short)DL3.s2; MBs[mb_num].coeffs[15][0]=(short)DL3.s3;
+	MB[mb_num].block[0].coeff[0]=(short)DL0.s0;  MB[mb_num].block[1].coeff[0]=(short)DL0.s1;  MB[mb_num].block[2].coeff[0]=(short)DL0.s2;  MB[mb_num].block[3].coeff[0]=(short)DL0.s3;
+	MB[mb_num].block[4].coeff[0]=(short)DL1.s0;  MB[mb_num].block[5].coeff[0]=(short)DL1.s1;  MB[mb_num].block[6].coeff[0]=(short)DL1.s2;  MB[mb_num].block[7].coeff[0]=(short)DL1.s3;
+	MB[mb_num].block[8].coeff[0]=(short)DL2.s0;  MB[mb_num].block[9].coeff[0]=(short)DL2.s1;  MB[mb_num].block[10].coeff[0]=(short)DL2.s2; MB[mb_num].block[11].coeff[0]=(short)DL2.s3;
+	MB[mb_num].block[12].coeff[0]=(short)DL3.s0; MB[mb_num].block[13].coeff[0]=(short)DL3.s1; MB[mb_num].block[14].coeff[0]=(short)DL3.s2; MB[mb_num].block[15].coeff[0]=(short)DL3.s3;
 
 	return;
 }
 
 __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
 					__global const uchar4 *const restrict predictor, //1
-					__global macroblock *const restrict MBs, //2
-					const int width, //3
-					__constant segment_data *const restrict SD, //4
-					const segment_ids segment_id, //5
-					const float SSIM_target, //6
-					const int plane) //7
+					__global const macroblock_coeffs_t *const restrict MB, //2
+					__global const int *const restrict MB_segment_id, //3
+					__global const int *const restrict MB_parts, //4
+					const int width, //5
+					__constant segment_data *const restrict SD, //6
+					int segment_id, //7
+					const int plane) //8
 {	
 	__private int b_num,mb_num, vx,vy,x,y,ac_q,dc_q,uv_dc_q,uv_ac_q;
 	__private int i;
@@ -1572,15 +1589,15 @@ __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
 	y = (b_num / (width/4))*4;
 	mb_num = (y/mb_size)*(width/mb_size) + (x/mb_size);
 
-	if (MBs[mb_num].SSIM > SSIM_target) return;
-	
-	MBs[mb_num].segment_id = segment_id;
+	//printf((__constant char*)"m=%d x=%d y=%d sz=%d w=%d p=%d\n", mb_num, x, y, mb_size, width, plane);
+	if (MB_segment_id[mb_num] != segment_id) return;
+
 	i = SD[segment_id].y_ac_i;
 	
 	dc_q = SD[0].y_dc_idelta; dc_q += i;
 	dc_q = select((int)dc_q,0,dc_q<0); dc_q = select((int)dc_q,127,dc_q>127);
 	ac_q = vp8_ac_qlookup[i];
-	dc_q = (MBs[mb_num].parts == are16x16) ? 1 : vp8_dc_qlookup[dc_q];
+	dc_q = (MB_parts[mb_num] == are16x16) ? 1 : vp8_dc_qlookup[dc_q];
 	uv_dc_q = SD[0].uv_dc_idelta; uv_dc_q += i;
 	uv_ac_q = SD[0].uv_ac_idelta; uv_ac_q += i;
 	uv_dc_q = select(uv_dc_q,0,uv_dc_q<0); uv_dc_q = select(uv_dc_q,127,uv_dc_q>127);
@@ -1597,13 +1614,14 @@ __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
 	b_num += (plane == 1) ? 16 : 0;
 	b_num += (plane == 2) ? 20 : 0;
 	const int inv_zigzag[16] = { 0, 1, 5, 6, 2, 4, 7, 12, 3,  8, 11, 13, 9, 10, 14, 15 };
-	DL0.s0=MBs[mb_num].coeffs[b_num][inv_zigzag[0]];   DL0.s1=MBs[mb_num].coeffs[b_num][inv_zigzag[1]];   DL0.s2=MBs[mb_num].coeffs[b_num][inv_zigzag[2]];   DL0.s3=MBs[mb_num].coeffs[b_num][inv_zigzag[3]];
-	DL1.s0=MBs[mb_num].coeffs[b_num][inv_zigzag[4]];   DL1.s1=MBs[mb_num].coeffs[b_num][inv_zigzag[5]];   DL1.s2=MBs[mb_num].coeffs[b_num][inv_zigzag[6]];   DL1.s3=MBs[mb_num].coeffs[b_num][inv_zigzag[7]];
-	DL2.s0=MBs[mb_num].coeffs[b_num][inv_zigzag[8]];   DL2.s1=MBs[mb_num].coeffs[b_num][inv_zigzag[9]];   DL2.s2=MBs[mb_num].coeffs[b_num][inv_zigzag[10]];  DL2.s3=MBs[mb_num].coeffs[b_num][inv_zigzag[11]];
-	DL3.s0=MBs[mb_num].coeffs[b_num][inv_zigzag[12]];  DL3.s1=MBs[mb_num].coeffs[b_num][inv_zigzag[13]];  DL3.s2=MBs[mb_num].coeffs[b_num][inv_zigzag[14]];  DL3.s3=MBs[mb_num].coeffs[b_num][inv_zigzag[15]];
+	DL0.s0=MB[mb_num].block[b_num].coeff[inv_zigzag[0]];   DL0.s1=MB[mb_num].block[b_num].coeff[inv_zigzag[1]];   DL0.s2=MB[mb_num].block[b_num].coeff[inv_zigzag[2]];   DL0.s3=MB[mb_num].block[b_num].coeff[inv_zigzag[3]];
+	DL1.s0=MB[mb_num].block[b_num].coeff[inv_zigzag[4]];   DL1.s1=MB[mb_num].block[b_num].coeff[inv_zigzag[5]];   DL1.s2=MB[mb_num].block[b_num].coeff[inv_zigzag[6]];   DL1.s3=MB[mb_num].block[b_num].coeff[inv_zigzag[7]];
+	DL2.s0=MB[mb_num].block[b_num].coeff[inv_zigzag[8]];   DL2.s1=MB[mb_num].block[b_num].coeff[inv_zigzag[9]];   DL2.s2=MB[mb_num].block[b_num].coeff[inv_zigzag[10]];  DL2.s3=MB[mb_num].block[b_num].coeff[inv_zigzag[11]];
+	DL3.s0=MB[mb_num].block[b_num].coeff[inv_zigzag[12]];  DL3.s1=MB[mb_num].block[b_num].coeff[inv_zigzag[13]];  DL3.s2=MB[mb_num].block[b_num].coeff[inv_zigzag[14]];  DL3.s3=MB[mb_num].block[b_num].coeff[inv_zigzag[15]];
 	dequant_and_iDCT(&DL0, &DL1, &DL2, &DL3, dc_q, ac_q);
 	i = y*width + x;
 	i /= 4;
+
 	DL0 += convert_int4(predictor[i]); i+= width/4;
 	DL1 += convert_int4(predictor[i]); i+= width/4;
 	DL2 += convert_int4(predictor[i]); i+= width/4;
@@ -1618,7 +1636,7 @@ __kernel void idct4x4(__global uchar4 *const restrict recon_frame, //0
 
 __kernel void count_SSIM_luma(__global const uchar4 *const restrict frame1, //0
 								__global const uchar4 *const restrict frame2, //1
-								__global const macroblock *const restrict MBs, //2
+								__global const int *const restrict MB_segment_id, //2
 								__global float *const metric, //3
 								const int width, //4
 								const int segment_id)//5
@@ -1628,7 +1646,7 @@ __kernel void count_SSIM_luma(__global const uchar4 *const restrict frame1, //0
     __private float M1, M2, D, C;
 	__private int w;
     mb_num = get_global_id(0);
-	if (MBs[mb_num].segment_id != segment_id) return;
+	if (MB_segment_id[mb_num] != segment_id) return;
 	w = width/16;
     i = ((mb_num / (w))*16)*width + ((mb_num % (w))*16);
 	w = width/4;
@@ -1982,7 +2000,7 @@ __kernel void count_SSIM_luma(__global const uchar4 *const restrict frame1, //0
 __kernel void count_SSIM_chroma
 						(__global const uchar4 *const restrict frame1, //0
 						__global const uchar4 *const restrict frame2, //1
-						__global const macroblock *const restrict MBs, //2
+						__global const int *const restrict MB_segment_id, //2
 						__global float *const restrict metric, //3
                         const int cwidth, //4
 						const int segment_id)// 5
@@ -1993,7 +2011,7 @@ __kernel void count_SSIM_chroma
 	__private float M1, M2, D, C;
 	__private int w;
 	mb_num = get_global_id(0);
-	if (MBs[mb_num].segment_id != segment_id) return;
+	if (MB_segment_id[mb_num] != segment_id) return;
 	
 	__private float4 IL, IL1;
 	
@@ -2106,13 +2124,15 @@ __kernel void count_SSIM_chroma
 void __kernel gather_SSIM(__global const float *const restrict metric1, //0
 							__global const float *const restrict metric2, //1
 							__global const float *const restrict metric3, //2
-							__global macroblock *const restrict MBs) //3
+							__global float *const restrict MB_SSIM) //3
 {
 	__private int mb_num = get_global_id(0);
-	MBs[mb_num].SSIM = (metric1[mb_num] + metric2[mb_num] + metric3[mb_num])/3;
+	MB_SSIM[mb_num] = (metric1[mb_num] + metric2[mb_num] + metric3[mb_num])/3;
 	return;
 }
 
+// TODO:
+/*
 #ifdef LOOP_FILTER
 __kernel void prepare_filter_mask(__global macroblock *const MBs,
 								__global int *const mb_mask)
@@ -2400,8 +2420,8 @@ __kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
 									__global int *const mb_mask) //6
 {
 	int x, y, i, mb_row, mb_col, mb_num;
-	uchar4 ucP3, ucP2, ucP1, ucP0, /*edge*/ ucQ0, ucQ1, ucQ2, ucQ3;
-	int4 p3, p2, p1, p0, /*edge*/ q0, q1, q2, q3;
+	uchar4 ucP3, ucP2, ucP1, ucP0, /edge/ ucQ0, ucQ1, ucQ2, ucQ3;
+	int4 p3, p2, p1, p0, /edge/ q0, q1, q2, q3;
 	int4 a, b, w, mask, hev;
 	int interior_limit, mbedge_limit, sub_bedge_limit, hev_threshold, id, subblock_mask;
 
@@ -2698,3 +2718,6 @@ __kernel void normal_loop_filter_MBV(__global uchar * const frame, //0
 	return;	
 }
 #endif
+*/
+
+

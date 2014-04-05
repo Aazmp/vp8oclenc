@@ -4,14 +4,14 @@ static void prepare_on_gpu()
 	frames.skip_prob = 0;
 
 	// we need to grab transformed data from host memory
-	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.transformed_blocks_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+	device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.macroblock_coeffs_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_coeffs_t), frames.MB, 0, NULL, NULL);
 	device.gpu_work_items_per_dim[0] = video.mb_count;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.prepare_filter_mask, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	// need to return info about non_zero coeffs
-	device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.transformed_blocks_gpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+	device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_non_zero_coeffs_gpu ,CL_TRUE, 0, video.mb_count*sizeof(cl_int), frames.MB_non_zero_coeffs, 0, NULL, NULL);
 	
 	for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
-		if (frames.transformed_blocks[mb_num].non_zero_coeffs > 0) 
+		if (frames.MB_non_zero_coeffs[mb_num] > 0) 
 			++frames.skip_prob;
 
 	frames.skip_prob *= 256;
@@ -27,17 +27,15 @@ static void prepare_on_cpu()
 	int mb_num;
 	frames.skip_prob = 0;
 
-	// we need to grab transformed data from host memory
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.transformed_blocks_cpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
 	device.gpu_work_items_per_dim[0] = 4;
 	device.gpu_work_group_size_per_dim[0] = 1;
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterY_commandQueue_cpu, device.prepare_filter_mask, 1, NULL, device.gpu_work_items_per_dim, device.gpu_work_group_size_per_dim, 0, NULL, NULL);
 	device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
 	// need to return info about non_zero coeffs
-	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.transformed_blocks_cpu ,CL_TRUE, 0, video.mb_count*sizeof(macroblock), frames.transformed_blocks, 0, NULL, NULL);
+	device.state_cpu = clEnqueueReadBuffer(device.boolcoder_commandQueue_cpu, device.macroblock_non_zero_coeffs_cpu ,CL_TRUE, 0, video.mb_count*sizeof(cl_int), frames.MB_non_zero_coeffs, 0, NULL, NULL);
 
 	for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
-		if (frames.transformed_blocks[mb_num].non_zero_coeffs > 0) 
+		if (frames.MB_non_zero_coeffs[mb_num] > 0) 
 			++frames.skip_prob;
 
 	frames.skip_prob *= 256;
@@ -49,8 +47,10 @@ static void prepare_on_cpu()
 
 static void prepare_filter_mask_and_non_zero_coeffs()
 {
-	if (video.do_loop_filter_on_gpu) prepare_on_gpu();
-	else prepare_on_cpu();
+	if (video.do_loop_filter_on_gpu) 
+		prepare_on_gpu();
+	else 
+		prepare_on_cpu();
 	return;
 }
 
@@ -139,10 +139,6 @@ static void do_loop_filter_on_gpu()
 
 static void do_loop_filter_on_cpu()
 {
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-	device.state_cpu = clEnqueueWriteBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-	
 	// Y
 	device.cpu_work_items_per_dim[0] = 1;
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterY_commandQueue_cpu, device.loop_filter_frame_luma, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
@@ -154,7 +150,8 @@ static void do_loop_filter_on_cpu()
 		device.state_cpu = clFinish(device.loopfilterY_commandQueue_cpu);
 		frames.threads_free =video.thread_limit;
 	}
-	if (device.state_cpu != 0)  printf(">error while deblocking : %d", device.state_cpu);
+	if (device.state_cpu != 0)  
+		printf(">error while deblocking : %d", device.state_cpu);
 	// U
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterU_commandQueue_cpu, device.loop_filter_frame_chroma_U, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (frames.threads_free > 1) {
@@ -166,7 +163,8 @@ static void do_loop_filter_on_cpu()
 		device.state_cpu = clFinish(device.loopfilterU_commandQueue_cpu);
 		frames.threads_free =video.thread_limit;
 	}
-	if (device.state_cpu != 0)  printf(">error while deblocking : %d", device.state_cpu);
+	if (device.state_cpu != 0)  
+		printf(">error while deblocking : %d", device.state_cpu);
 	// V
 	device.state_cpu = clEnqueueNDRangeKernel(device.loopfilterV_commandQueue_cpu, device.loop_filter_frame_chroma_V, 1, NULL, device.cpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	if (frames.threads_free > 1) {

@@ -32,15 +32,21 @@ typedef enum {
 } ref_frame;
 
 typedef struct {
-    int16_t coeffs[25][16];
-    int32_t vector_x[4];
-    int32_t vector_y[4];
-	float SSIM;
-	int non_zero_coeffs;
-	int parts;
-	int reference_frame;
-	segment_ids segment_id;
-} macroblock;
+	short coeff[16];
+} block_t;
+
+typedef struct {
+	block_t block[25];
+} macroblock_coeffs_t;
+
+typedef struct {
+	short x;
+	short y;
+} vector_t;
+
+typedef struct {
+	vector_t vector[4];
+} macroblock_vectors_t;
 
 typedef struct {
 	int y_ac_i; 
@@ -111,7 +117,7 @@ void write_flag(vp8_bool_encoder *const restrict e, const int b)
     write_bool(e, 128, (b)?1:0);
 }
 
-void write_literal(vp8_bool_encoder *const restrict e, const int i, const int size)
+/*void write_literal(vp8_bool_encoder *const restrict e, const int i, const int size)
 {
     int mask = 1 << (size - 1);
     while (mask)
@@ -119,7 +125,7 @@ void write_literal(vp8_bool_encoder *const restrict e, const int i, const int si
         write_flag(e, !((i & mask) == 0));
         mask >>= 1;
     }
-}
+}*/
 
 void flush_bool_encoder(vp8_bool_encoder *const restrict e)
 {
@@ -254,13 +260,13 @@ void encode_block(vp8_bool_encoder *const restrict vbe, __global const uint *con
 	return;
 }
 														 
-void tokenize_block(__global const macroblock *const restrict MBs, const int mb_num, const int b_num, token tokens[16]) //IF-ELSE
+void tokenize_block(__global const macroblock_coeffs_t *const restrict MB, const int mb_num, const int b_num, token tokens[16]) //IF-ELSE
 {
 	int next = 0; // imaginary 17th element
 	int i;
 	for (i = 15; i >= 0; --i) // tokenize block
 	{
-		int coeff = (int)MBs[mb_num].coeffs[b_num][i];		
+		int coeff = (int)MB[mb_num].block[b_num].coeff[i];		
 		tokens[i].sign = (coeff < 0) ? 1 : 0;
 		coeff = (coeff < 0) ? -coeff : coeff;
 		tokens[i].extra_bits = 0;
@@ -338,15 +344,17 @@ void tokenize_block(__global const macroblock *const restrict MBs, const int mb_
 	return;
 }
 
-__kernel void encode_coefficients(	__global const macroblock *const restrict MBs, 
-									__global uchar *const restrict output, 
-									__global int *const restrict partition_sizes,
-									__global const uchar *const restrict third_context,
-									__global const uint *const restrict coeff_probs,
-									const int mb_height, 
-									const int mb_width, 
-									const int num_partitions,
-									const int partition_step)
+__kernel void encode_coefficients(	__global const macroblock_coeffs_t *const restrict MB, //0
+									__global const int *const restrict MB_non_zero_coeffs, //1
+									__global const int *const restrict MB_parts, //2
+									__global uchar *const restrict output, //3
+									__global int *const restrict partition_sizes, //4
+									__global const uchar *const restrict third_context, //5
+									__global const uint *const restrict coeff_probs, //6
+									const int mb_height, //7
+									const int mb_width, //8
+									const int num_partitions, //9
+									const int partition_step) ///10
 {
 	int part_num = get_global_id(0);
 	int mb_row, mb_num, mb_col, b_num;
@@ -362,12 +370,12 @@ __kernel void encode_coefficients(	__global const macroblock *const restrict MBs
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
 		{
 			mb_num = mb_col + mb_row * mb_width;
-			if (MBs[mb_num].non_zero_coeffs == 0) 
+			if (MB_non_zero_coeffs[mb_num] == 0) 
 				continue;
-			if (MBs[mb_num].parts == are16x16)
+			if (MB_parts[mb_num] == are16x16)
 			{
 				first_context = 1; // for Y2
-				tokenize_block(MBs, mb_num, 24, tokens); 
+				tokenize_block(MB, mb_num, 24, tokens); 
 				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + 24));
 				first_context = 0; //for Y, when Y2 exists
 			} else {
@@ -377,20 +385,20 @@ __kernel void encode_coefficients(	__global const macroblock *const restrict MBs
 			// 16 of them
 			for (b_num = 0; b_num < 16; ++b_num)
 			{
-				tokenize_block(MBs, mb_num, b_num, tokens);
+				tokenize_block(MB, mb_num, b_num, tokens);
 				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 U-blocks
 			first_context = 2; // for all chromas
 			for (b_num = 16; b_num < 20; ++b_num)
 			{
-				tokenize_block(MBs, mb_num, b_num, tokens);
+				tokenize_block(MB, mb_num, b_num, tokens);
 				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 V-blocks
 			for (b_num = 20; b_num < 24; ++b_num)
 			{
-				tokenize_block(MBs, mb_num, b_num, tokens);
+				tokenize_block(MB, mb_num, b_num, tokens);
 				encode_block(vbe, coeff_probs, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 		}
@@ -404,13 +412,13 @@ __kernel void encode_coefficients(	__global const macroblock *const restrict MBs
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-void tokenize_block_cut(__global const macroblock *const restrict MBs, const int mb_num, const int b_num, token tokens[16])
+void tokenize_block_cut(__global const macroblock_coeffs_t *const restrict MB, const int mb_num, const int b_num, token tokens[16])
 {
 	int next = 0; // imaginary 17th element
 	int i;
 	for (i = 15; i >= 0; --i) // tokenize block
 	{
-		int coeff = (int)MBs[mb_num].coeffs[b_num][i];
+		int coeff = (int)MB[mb_num].block[b_num].coeff[i];
 		coeff = (coeff < 0) ? -coeff : coeff;
 		if (coeff == 0) {
 			if (next == 0) {
@@ -530,14 +538,16 @@ void count_probs_in_block(	__global uint *const restrict  coeff_probs,
 	return;
 }
 
-__kernel void count_probs(	__global const macroblock *const restrict MBs, 
-							__global uint *const restrict coeff_probs, 
-							__global uint *const restrict coeff_probs_denom,
-							__global uchar *const restrict third_context,
-							const int mb_height, 
-							const int mb_width, 
-							const int num_partitions,
-							const int partition_step)
+__kernel void count_probs(	__global const macroblock_coeffs_t *const restrict MB, //0
+							__global const int *const restrict MB_non_zero_coeffs, //1
+							__global const int *const restrict MB_parts, //2
+							__global uint *const restrict coeff_probs, //3
+							__global uint *const restrict coeff_probs_denom, //4
+							__global uchar *const restrict third_context, //5
+							const int mb_height, //6
+							const int mb_width, //7
+							const int num_partitions, //8
+							const int partition_step) //9
 {
 	int part_num = get_global_id(0);
 	int mb_row, mb_num, mb_col, b_num;
@@ -546,7 +556,7 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 	int first_context, firstCoeff;
 	token tokens[16];
 	
-	{ 
+	{ // these arrays should be zeroed outside of kernel (races here if more than one partition)
 		// we have to work with 1-dimensional array in global memory, so
 		// coeff_probs[p][ctx1][ctx2][ctx3][ctx4] => *(coeff_probs + p*11*3*8*4 + ctx1*11*3*8 + ctx2*11*3 + ctx3*11 + ctx4)
 		// or coeff_probs[((((p<<5) + (ctx1<<3)) + ctx2)*3 + ctx3)*11 + ctx4]
@@ -565,9 +575,9 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
 		{
 			mb_num = mb_col + mb_row * mb_width;
-			if (MBs[mb_num].non_zero_coeffs == 0) 
+			if (MB_non_zero_coeffs[mb_num] == 0) 
 				continue;
-			if (MBs[mb_num].parts == are16x16)
+			if (MB_parts[mb_num] == are16x16)
 			{ 
 				first_context = 1; // for Y2
 				*(third_context + mb_num*25 + 24) = 0;
@@ -575,12 +585,12 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 					// we go up until we find MB with Y2 mode enabled
 					prev_mb = mb_num-mb_width;
 					while(prev_mb>=0) {
-						if (MBs[prev_mb].parts == are16x16) break;
+						if (MB_parts[prev_mb] == are16x16) break;
 						prev_mb-=mb_width;
 					}
 					if (prev_mb >= 0)
 						for (i = 0; i < 16; ++i) {
-							if (MBs[prev_mb].coeffs[24][i] != 0) {
+							if (MB[prev_mb].block[24].coeff[i] != 0) {
 								++(*(third_context + mb_num*25 + 24));
 								break;
 							}
@@ -589,18 +599,18 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 				if (mb_col > 0) { // check if "left" Y2 has non zero
 					prev_mb = mb_num-1;
 					while (prev_mb >= (mb_row*mb_width)) {
-						if (MBs[prev_mb].parts == are16x16) break;
+						if (MB_parts[prev_mb] == are16x16) break;
 						--prev_mb;
 					}
 					if (prev_mb >= (mb_row*mb_width))
 						for (i = 0; i < 16; ++i) { 
-							if (MBs[prev_mb].coeffs[24][i] != 0) {
+							if (MB[prev_mb].block[24].coeff[i] != 0) {
 								++(*(third_context + mb_num*25 + 24));
 								break;
 							}
 						}
 				}
-				tokenize_block_cut(MBs, mb_num, 24, tokens); 
+				tokenize_block_cut(MB, mb_num, 24, tokens); 
 				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, 24, tokens, first_context, *(third_context + mb_num*25 + 24));
 				first_context = 0; //for Y, when Y2 exists
 			} else first_context = 3; //for Y, when Y2 is absent
@@ -620,9 +630,9 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 					prev_b = b_num + 12;
 				}
 				if (prev_mb >= 0) {
-					firstCoeff = (MBs[prev_mb].parts == are16x16) ? 1 : 0;
+					firstCoeff = (MB_parts[prev_mb] == are16x16) ? 1 : 0;
 					for (i = firstCoeff; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
@@ -639,15 +649,15 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 					prev_b = b_num + 3;
 				}
 				if (prev_mb >= 0) {
-					firstCoeff = (MBs[prev_mb].parts == are16x16) ? 1 : 0;
+					firstCoeff = (MB_parts[prev_mb] == are16x16) ? 1 : 0;
 					for (i = firstCoeff; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
 					}
 				}
-				tokenize_block_cut(MBs, mb_num, b_num, tokens);
+				tokenize_block_cut(MB, mb_num, b_num, tokens);
 				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 U-blocks
@@ -667,7 +677,7 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 				}
 				if (prev_mb >= 0) {
 					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
@@ -685,13 +695,13 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 				}
 				if (prev_mb >= 0) {
 					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
 					}
 				}
-				tokenize_block_cut(MBs, mb_num, b_num, tokens);
+				tokenize_block_cut(MB, mb_num, b_num, tokens);
 				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 			//now 8 V-blocks
@@ -710,7 +720,7 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 				}
 				if (prev_mb >= 0) {
 					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
@@ -728,13 +738,13 @@ __kernel void count_probs(	__global const macroblock *const restrict MBs,
 				}
 				if (prev_mb >= 0) {
 					for (i = 0; i < 16; ++i) {
-						if (MBs[prev_mb].coeffs[prev_b][i] != 0) {
+						if (MB[prev_mb].block[prev_b].coeff[i] != 0) {
 							++(*(third_context + mb_num*25 + b_num));
 							break;
 						}
 					}
 				}
-				tokenize_block_cut(MBs, mb_num, b_num, tokens);
+				tokenize_block_cut(MB, mb_num, b_num, tokens);
 				count_probs_in_block(coeff_probs, coeff_probs_denom, part_num, mb_num, b_num, tokens, first_context, *(third_context + mb_num*25 + b_num));
 			}
 		}
@@ -769,11 +779,13 @@ __kernel void num_div_denom(__global uint *const restrict coeff_probs,
 
 
 #ifdef LOOP_FILTER
-__kernel void prepare_filter_mask(__global macroblock *const restrict  MBs, //0
-								__global int *const restrict  mb_mask, //1
-								const int width, //2
-								const int height, //3
-								const int parts) //4
+__kernel void prepare_filter_mask(__global const macroblock_coeffs_t *const restrict MB, //0
+								__global int *const restrict MB_non_zero_coeffs, //1
+								__global const int *const restrict  MB_parts, //2
+								__global int *const restrict  mb_mask, //3
+								const int width, //4
+								const int height, //5
+								const int parts) //6
 {
 	__private int mb_num, b_num, mb_row, mb_col, mb_height, mb_width, i, mask, coeffs, split_mode;
 	mb_height = height/16;
@@ -784,30 +796,29 @@ __kernel void prepare_filter_mask(__global macroblock *const restrict  MBs, //0
 		for (mb_col = 0; mb_col < mb_width; ++mb_col)
 		{
 			mb_num = mb_row * mb_width + mb_col;
-			//printf((__constant char*)"%d\n",mb_num);
-			mask = 0; coeffs = 0; split_mode = MBs[mb_num].parts;
+			mask = 0; coeffs = 0; split_mode = MB_parts[mb_num];
 			for (b_num = 0; b_num < 16; ++b_num) {
 				for (i = 1; i < 16; ++i) {
-					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][i]);
+					coeffs += (int)abs(MB[mb_num].block[b_num].coeff[i]);
 				}
 			}
 			for (b_num = 16; b_num < 24; ++b_num) {
 				for (i = 0; i < 16; ++i) {
-					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][i]);
+					coeffs += (int)abs(MB[mb_num].block[b_num].coeff[i]);
 				}
 			}
 			if (split_mode == are16x16) {
 				for (i = 0; i < 16; ++i) {
-					coeffs += (int)abs(MBs[mb_num].coeffs[24][i]);
+					coeffs += (int)abs(MB[mb_num].block[24].coeff[i]);
 				}
 			}
 			else {
 				for (b_num = 0; b_num < 16; ++b_num) {
-					coeffs += (int)abs(MBs[mb_num].coeffs[b_num][0]);
+					coeffs += (int)abs(MB[mb_num].block[b_num].coeff[0]);
 				}
 			}
 					
-			MBs[mb_num].non_zero_coeffs = coeffs;
+			MB_non_zero_coeffs[mb_num] = coeffs;
 			mask = ((split_mode != are16x16) || (coeffs > 0)) ? -1 : 0;
 			mb_mask[mb_num] = mask;
 		}
@@ -945,8 +956,8 @@ void write8p(__global uchar *const restrict frame, const int pos, const int step
 }
 
 // this is luma filtering with vectors of 8 elements
-// although there 16 pixels along macroblock edge that are trated identically
-// AMD compiler generates much slower code (2-3 times slower according to CodeXL)
+// although there 16 pixels along macroblock edge that are treated identically
+// AMD compiler generates much slower code (2-3 times slower according to CodeXL) for vector16
 // tested on Piledriver
 // could be the reason, but not: guides at http://agner.org/optimize/ mention that 
 // 256bit storing is very slow on piledriver (not bulldozer however)
@@ -957,7 +968,7 @@ void write8p(__global uchar *const restrict frame, const int pos, const int step
 // and restoring intermediate data to memory => 8 segments at a time leads to less memory operations
 // conclusion: stick to vector8 version unless CPU has 256bit and they're fast
 __kernel void loop_filter_frame_luma(__global uchar *const restrict frame, //0
-								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict MB_segment_ids, //1
 								__global const int *const restrict mb_mask, //2
 								__constant const segment_data *const restrict SD, //3
 								const int width, //4
@@ -975,7 +986,7 @@ __kernel void loop_filter_frame_luma(__global uchar *const restrict frame, //0
 	
 	for (mb_num = 0; mb_num < mb_count; ++mb_num)
 	{
-		i = MBs[mb_num].segment_id;
+		i = MB_segment_ids[mb_num];
 		if (SD[i].loop_filter_level == 0) return;
 		int_lim = (short)SD[i].interior_limit;
 		mb_lim = (short)SD[i].mbedge_limit;
@@ -1214,7 +1225,7 @@ void filter_mb_edge16(const short16 *const restrict p3, short16 *const restrict 
 }
 
 __kernel void loop_filter_frame_luma16(__global uchar *const restrict frame, //0
-								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict MB_segment_ids, //1
 								__global const int *const restrict mb_mask, //2
 								__constant const segment_data *const restrict SD, //3
 								const int width, //4
@@ -1232,7 +1243,7 @@ __kernel void loop_filter_frame_luma16(__global uchar *const restrict frame, //0
 	
 	for (mb_num = 0; mb_num < mb_count; ++mb_num)
 	{
-		i = MBs[mb_num].segment_id;
+		i = MB_segment_ids[mb_num];
 		if (SD[i].loop_filter_level == 0) return;
 		int_lim = (short)SD[i].interior_limit;
 		mb_lim = (short)SD[i].mbedge_limit;
@@ -1320,7 +1331,7 @@ __kernel void loop_filter_frame_luma16(__global uchar *const restrict frame, //0
 */
 
 __kernel void loop_filter_frame_chroma(__global uchar *const restrict frame, //0
-								__global const macroblock *const restrict MBs, //1
+								__global const int *const restrict MB_segment_ids, //1
 								__global const int *const restrict mb_mask, //2
 								__constant const segment_data *const restrict SD, //3
 								const int width, //4
@@ -1338,7 +1349,7 @@ __kernel void loop_filter_frame_chroma(__global uchar *const restrict frame, //0
 	
 	for (mb_num = 0; mb_num < mb_count; ++mb_num)
 	{
-		i = MBs[mb_num].segment_id;
+		i = MB_segment_ids[mb_num];
 		if (SD[i].loop_filter_level == 0) return;
 		int_lim = (short)SD[i].interior_limit;
 		mb_lim = (short)SD[i].mbedge_limit;

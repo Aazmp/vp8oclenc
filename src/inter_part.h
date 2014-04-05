@@ -1,22 +1,6 @@
 static void prepare_GPU_buffers()
-{
-	//if filter was done on CPU we need to extract reconstructed frames from CPU device
-	if (!video.do_loop_filter_on_gpu)
-	{
-		//device.state_gpu = clFinish(device.loopfilterY_commandQueue_cpu);
-		//device.state_gpu = clFinish(device.loopfilterU_commandQueue_cpu);
-		//device.state_gpu = clFinish(device.loopfilterV_commandQueue_cpu);
-		// cpu device --> host
-		device.state_cpu = clEnqueueReadBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_cpu = clEnqueueReadBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_cpu = clEnqueueReadBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-		// host --> gpu device
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-		device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-	}
+{	
 	frames.threads_free = video.thread_limit; // by this time boolcoder definetly already finished
-	
 	// first reset vector nets to zeros
 	device.gpu_work_items_per_dim[0] = video.mb_count*4;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.reset_vectors, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
@@ -99,12 +83,6 @@ static void inter_transform()
 	const int width = video.wrk_width;
 	const int height = video.wrk_height;
 	
-	device.state_gpu = finalFlush(device.commandQueue2_gpu);
-	device.state_gpu = finalFlush(device.commandQueue3_gpu);
-	clFinish(device.commandQueue1_gpu);
-	clFinish(device.commandQueue2_gpu);
-	clFinish(device.commandQueue3_gpu);
-
 	// if golden and altref buffers represent different from last buffer frame
 	// and altref is not the same as altref
 	const cl_int use_golden = !frames.prev_is_golden_frame; 
@@ -256,17 +234,22 @@ static void inter_transform()
 
 	// now set each MB with the best reference
 	device.gpu_work_items_per_dim[0] = video.mb_count;
-	device.state_gpu = clSetKernelArg(device.select_reference, 8, sizeof(cl_int), &use_golden);
-	device.state_gpu = clSetKernelArg(device.select_reference, 9, sizeof(cl_int), &use_altref);
+	device.state_gpu = clSetKernelArg(device.select_reference, 9, sizeof(cl_int), &use_golden);
+	device.state_gpu = clSetKernelArg(device.select_reference, 10, sizeof(cl_int), &use_altref);
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.select_reference, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
 	// set 16x16 mode for macroblocks, whose blocks have identical vectors
 	device.gpu_work_items_per_dim[0] = video.mb_count;
 	device.state_gpu = clEnqueueNDRangeKernel(device.commandQueue1_gpu, device.pack_8x8_into_16x16, 1, NULL, device.gpu_work_items_per_dim, NULL, 0, NULL, NULL);
 	device.state_gpu = ifFlush(device.commandQueue1_gpu);
-	if ((use_golden)||(use_altref))
-		device.state_gpu = clFinish(device.commandQueue1_gpu);
 	
+	device.state_gpu = clFinish(device.commandQueue1_gpu); //we need to finish packing before start preparing predictors for golden or altref and before reading buffers
+	
+	device.state_gpu = clEnqueueReadBuffer(device.dataCopy_gpu, device.macroblock_parts_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_parts, 0, NULL, NULL);
+	device.state_gpu = clEnqueueReadBuffer(device.dataCopy_gpu, device.macroblock_reference_frame_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_reference_frame, 0, NULL, NULL);
+	device.state_gpu = clEnqueueReadBuffer(device.dataCopy_gpu, device.macroblock_vectors_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_vectors_t), frames.MB_vectors, 0, NULL, NULL);
+	device.state_gpu = clFlush(device.dataCopy_gpu);
+
 	// now for each plane and reference frame fill predictors and residual buffers
 	cl_int ref;
 	cl_int cwidth = video.wrk_width/2;

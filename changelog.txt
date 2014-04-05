@@ -60,3 +60,39 @@ Some results:
 4) on E350 (HD6410) performance is veeeeery slow (again because of image usage)
 
 TODO: pure C optimization (LUT instead of IFs, etc...), asm, visual scene changeand effects detection...
+
+##################
+###  sometime  ###
+##################
+
+1) Now instead of one cl_kernel instance per kernel there are one for each argument set for each kernel.
+Init part of code become larger, but inter_transform more readable.
+Even if deleting clSetKernelArg(...) lower CPU usage, it can't be seen in CPU monitor.
+
+2) Deleted bitrate check for key frame. It's not useful.
+
+3) Forgot about changelog.
+
+##################
+### 05.04.2014 ###
+##################
+
+1) Remembered that i have changelog.
+
+2) Loop filter on GPU is broken. For now.
+Just haven't rewritten it's code to match changes.
+Loop filter on CPU is working.
+
+3) Replaced complex macroblock buffer with multiple theme buffers (vectors, coefficients, non_zero counts, parts, segment ids...).
+Now unnecessary copies are avoided (example: OpenCL CPU device needs coefficient, but doesn't need vectors). 
+Also GPU read/write has become a little bit more coalesced (coefficients are still in one uge chunk, so not everywhere).
+
+4) Coefficients and reconstructed frames are copied from/to OpenCL GPU device, but mapped for CPU device.
+Less memory operations (not a major factor, other operations dominate in time consuption).
+
+5) Little change in vector search.Now always check for (0;0) vector.
+Now hierarchical search does not trick blocks with no real movement.
+Note: only (0;0) is checked, no small areas around;
+As result: little-little bit better quality, little bit lesser size at the same time on some of test videos
+
+6) CPU host part still not optimized even a bit.
