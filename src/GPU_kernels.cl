@@ -35,10 +35,10 @@ typedef struct {
 	int hev_threshold;
 } segment_data;
 
-typedef struct {
-	int vector_x;
-	int vector_y;
-} vector_net;
+//typedef struct {
+//	int vector_x;
+//	int vector_y;
+//} vector_net;
 
 typedef struct {
 	short coeff[16];
@@ -401,29 +401,24 @@ void dequant_and_iWHT(int4 *const __Line0, int4 *const __Line1, int4 *const __Li
 }
 
 
-__kernel void reset_vectors ( __global vector_net *const restrict last_net1, //0
-								__global vector_net *const restrict last_net2, //1
-								__global vector_net *const restrict golden_net1, //2
-								__global vector_net *const restrict golden_net2, //3
-								__global vector_net *const restrict altref_net1, //4
-								__global vector_net *const restrict altref_net2, //5
+__kernel void reset_vectors ( __global vector_t *const restrict last_net1, //0
+								__global vector_t *const restrict last_net2, //1
+								__global vector_t *const restrict golden_net1, //2
+								__global vector_t *const restrict golden_net2, //3
+								__global vector_t *const restrict altref_net1, //4
+								__global vector_t *const restrict altref_net2, //5
 								__global int *const restrict last_Bdiff, //6
 								__global int *const restrict golden_Bdiff, //7
 								__global int *const restrict altref_Bdiff) //8
 {
-	int b8x8_num = get_global_id(0);
-	last_net1[b8x8_num].vector_x = 0; 
-	last_net1[b8x8_num].vector_y = 0;
-	last_net2[b8x8_num].vector_x = 0; 
-	last_net2[b8x8_num].vector_y = 0;
-	golden_net1[b8x8_num].vector_x = 0; 
-	golden_net1[b8x8_num].vector_y = 0;
-	golden_net2[b8x8_num].vector_x = 0; 
-	golden_net2[b8x8_num].vector_y = 0;
-	altref_net1[b8x8_num].vector_x = 0; 
-	altref_net1[b8x8_num].vector_y = 0;
-	altref_net2[b8x8_num].vector_x = 0; 
-	altref_net2[b8x8_num].vector_y = 0;
+	__private const int b8x8_num = get_global_id(0);
+	__private const vector_t V = {0, 0};
+	last_net1[b8x8_num] = V;
+	last_net2[b8x8_num] = V;
+	golden_net1[b8x8_num] = V;
+	golden_net2[b8x8_num] = V;
+	altref_net1[b8x8_num] = V;
+	altref_net2[b8x8_num] = V;
 	last_Bdiff[b8x8_num] = 0x7fffffff;
 	golden_Bdiff[b8x8_num] = 0x7fffffff;
 	altref_Bdiff[b8x8_num] = 0x7fffffff;
@@ -464,8 +459,8 @@ __constant int dl[4] = {0, 8, 1, 9};
 __kernel void luma_search_1step //when looking into downsampled and original frames
 						( 	__global const uchar *const restrict current_frame, //0
 							__global const uchar *const restrict prev_frame, //1
-							__global const vector_net *const restrict src_net, //2
-							__global vector_net *const restrict dst_net, //3
+							__global const vector_t *const restrict src_net, //2
+							__global vector_t *const restrict dst_net, //3
 							const signed int net_width, //4 //in 8x8 blocks
 							const signed int width, //5
 							const signed int height, //6
@@ -475,8 +470,8 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	__private int4 bufi4;
 	
 	__private unsigned short MinDiff, Diff; 
-	__private int px, py, cx, cy;
-	__private int vector_x, vector_y, vector_x0, vector_y0;   
+	__private short2 p, c;
+	__private vector_t vector, vector0;   
 	__private int i;   
 	__private int b8x8_num; 
 	__private int cut_width;
@@ -493,28 +488,21 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	__local uchar4 LDS[16*WRKGRSZ]; //16kb for WRKGRSZ == 256
 	
 	//b8x8_num == net_index
-	cx = (b8x8_num % (cut_width/8))*8;
-	cy = (b8x8_num / (cut_width/8))*8;
+	c.x = (short)((b8x8_num % (cut_width/8))*8);
+	c.y = (short)((b8x8_num / (cut_width/8))*8);
 	
-	vector_x = 0; vector_y = 0;
-
 	// we have to determine corresponding parameters of previous stage
-	px = cx/2; py = cy/2;
-	b8x8_num = (py/8)*net_width + (px/8);
+	p = c/2;
+	b8x8_num = (p.y/8)*net_width + (p.x/8);
 	// and read vectors
-	vector_x = src_net[b8x8_num].vector_x;
-	vector_y = src_net[b8x8_num].vector_y;
-	vector_x /= pixel_rate;
-	vector_y /= pixel_rate;
-	vector_x = select(vector_x,0,pixel_rate>8);
-	vector_y = select(vector_y,0,pixel_rate>8);
-	vector_x0 = vector_x; 
-	vector_y0 = vector_y;
+	vector = src_net[b8x8_num];
+	vector /= pixel_rate;
+	vector = (pixel_rate>8) ? 0 : vector;
+	vector0 = vector; 
 	
-	b8x8_num = (cy/8)*net_width + (cx/8);
+	b8x8_num = (c.y/8)*net_width + (c.x/8);
 	
-	
-	i = cy*width + cx;
+	i = c.y*width + c.x;
 	LDS[(int)lid] = vload4(0, current_frame+i);				LDS[(int)lsz + (int)lid] = vload4(0, current_frame+i+4); i += width;
 	LDS[(int)(lsz*2+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*3+lid)] = vload4(0, current_frame+i+4); i += width;
 	LDS[(int)(lsz*4+lid)] = vload4(0, current_frame+i);		LDS[(int)(lsz*5+lid)] = vload4(0, current_frame+i+4); i += width;
@@ -527,20 +515,20 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 	MinDiff = 0x7fff;
 
 	//#pragma unroll 1
-	for (__private int dxy = 0; dxy < 25; ++dxy)
+	for (__private short dxy = 0; dxy < 25; ++dxy)
 	//#pragma unroll 1
 	{
-		px = cx + vector_x0 + ((dxy % 5) - 2); //- x
-		py = cy + vector_y0 + ((dxy / 5) - 2); //- y
+		p.x = c.x + vector0.x + ((dxy % 5) - 2); //- x
+		p.y = c.y + vector0.y + ((dxy / 5) - 2); //- y
 		
 		// 1 full pixel step (fpel)
-		i = py*width + px;
+		i = p.y*width + p.x;
 		
 		Diff = 0;
 		#pragma unroll 1
 		for (__private int j = 0; j < 4; j += 1)
 		{
-			i = (py + dy1[j])*width + (px + dx1[j]);
+			i = (p.y + dy1[j])*width + (p.x + dx1[j]);
 			
 			DL.s0123 = convert_int4(LDS[mad24((int)lsz,dl[j]+0,(int)lid)]) - convert_int4(vload4(0, prev_frame + i)); i += width;
 			DL.s4567 = convert_int4(LDS[mad24((int)lsz,dl[j]+2,(int)lid)]) - convert_int4(vload4(0, prev_frame + i)); i += width;
@@ -551,22 +539,21 @@ __kernel void luma_search_1step //when looking into downsampled and original fra
 		}		
 
 		// this helps keep neighbouring vectors close
-		Diff += (int)(abs((int)abs(px-cx)-vector_x0)
-					+ abs((int)abs(py-cy)-vector_y0))*(pixel_rate<4)*vector_diff_weight/2;
+		Diff += (int)(abs((int)abs(p.x-c.x)-vector0.x)
+					+ abs((int)abs(p.y-c.y)-vector0.y))*(pixel_rate<4)*vector_diff_weight/2;
 						
 		// exclude vectors to beyond
-		Diff |= select(0,0x7fff,(px < 0));
-		Diff |= select(0,0x7fff,(px > (width - 8)));
-		Diff |= select(0,0x7fff,(py < 0));
-		Diff |= select(0,0x7fff,(py > (height - 8)));
+		Diff |= select(0,0x7fff,(p.x < 0));
+		Diff |= select(0,0x7fff,(p.x > (width - 8)));
+		Diff |= select(0,0x7fff,(p.y < 0));
+		Diff |= select(0,0x7fff,(p.y > (height - 8)));
 			
-		vector_x = (Diff < MinDiff) ? px : vector_x;
-		vector_y = (Diff < MinDiff) ? py : vector_y;
+		vector.x = (Diff < MinDiff) ? p.x : vector.x;
+		vector.y = (Diff < MinDiff) ? p.y : vector.y;
 		MinDiff = (Diff < MinDiff) ? Diff : MinDiff;
     } 
 	
-	dst_net[b8x8_num].vector_x = (vector_x-cx)*pixel_rate;
-	dst_net[b8x8_num].vector_y = (vector_y-cy)*pixel_rate;
+	dst_net[b8x8_num] = (vector-c)*pixel_rate;
 	
 	return;
 	
@@ -1083,8 +1070,8 @@ __attribute__((reqd_work_group_size(WRKGRSZ, 1, 1)))
 void luma_search_2step //searching in interpolated picture
 						( 	__global const uchar4 *const restrict current_frame, //0
 							__read_only image2d_t ref_frame, //1
-							__global const vector_net *const restrict net, //2
-							__global vector_net *const restrict ref_net, //3
+							__global const vector_t *const restrict net, //2
+							__global vector_t *const restrict ref_net, //3
 							__global int *const restrict ref_Bdiff, //4
 							const int width, //5
 							const int height) //6
@@ -1111,8 +1098,7 @@ void luma_search_2step //searching in interpolated picture
 	// the code has become unreadable, but it's better not to use defines (compiler probably go mad)
 		
 	// now b8x8_num represents absolute number of 8x8 block (net_index)
-	pdata1.s4 = net[b8x8_num].vector_x; //vector_x = ...
-	pdata1.s5 = net[b8x8_num].vector_y; //vector_y = ...
+	pdata1.s45 = net[b8x8_num]; //vector_x = ... //vector_y = ...
 	pdata1.s4 *= 4; 
 	pdata1.s5 *= 4;
 	pdata1.s6 = pdata1.s4; // vector_x0 = vector_x
@@ -1210,16 +1196,15 @@ void luma_search_2step //searching in interpolated picture
 				? ((int)abs(pdata1.s4 - pdata1.s6) + (int)abs(pdata1.s5 - pdata1.s7))*vector_diff_weight/2
 				: 0;
 	
-	ref_net[b8x8_num].vector_x = pdata1.s4;
-	ref_net[b8x8_num].vector_y = pdata1.s5;
+	ref_net[b8x8_num] = pdata1.s45;
 	ref_Bdiff[b8x8_num] = MinDiff;
 	
 	return;
 }
 
-__kernel void select_reference(__global const vector_net *const restrict last_net, //0
-								__global const vector_net *const restrict golden_net, //1
-								__global const vector_net *const restrict altref_net, //2
+__kernel void select_reference(__global const vector_t *const restrict last_net, //0
+								__global const vector_t *const restrict golden_net, //1
+								__global const vector_t *const restrict altref_net, //2
 								__global const int *const restrict last_Bdiff, //3
 								__global const int *const restrict golden_Bdiff, //4
 								__global const int *const restrict altref_Bdiff, //5
@@ -1268,36 +1253,24 @@ __kernel void select_reference(__global const vector_net *const restrict last_ne
 	
 	if (ref == LAST)
 	{
-		v0.x = last_net[b8x8_num].vector_x;
-		v0.y = last_net[b8x8_num].vector_y;
-		v1.x = last_net[b8x8_num + 1].vector_x;
-		v1.y = last_net[b8x8_num + 1].vector_y;
-		v2.x = last_net[b8x8_num + b8x8_width].vector_x;
-		v2.y = last_net[b8x8_num + b8x8_width].vector_y;
-		v3.x = last_net[b8x8_num + b8x8_width + 1].vector_x;
-		v3.y = last_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0 = last_net[b8x8_num];
+		v1 = last_net[b8x8_num + 1];
+		v2 = last_net[b8x8_num + b8x8_width];
+		v3 = last_net[b8x8_num + b8x8_width + 1];
 	}
 	if (ref == GOLDEN)
 	{
-		v0.x = golden_net[b8x8_num].vector_x;
-		v0.y = golden_net[b8x8_num].vector_y;
-		v1.x = golden_net[b8x8_num + 1].vector_x;
-		v1.y = golden_net[b8x8_num + 1].vector_y;
-		v2.x = golden_net[b8x8_num + b8x8_width].vector_x;
-		v2.y = golden_net[b8x8_num + b8x8_width].vector_y;
-		v3.x = golden_net[b8x8_num + b8x8_width + 1].vector_x;
-		v3.y = golden_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0 = golden_net[b8x8_num];
+		v1 = golden_net[b8x8_num + 1];
+		v2 = golden_net[b8x8_num + b8x8_width];
+		v3 = golden_net[b8x8_num + b8x8_width + 1];
 	}
 	if (ref == ALTREF)
 	{
-		v0.x = altref_net[b8x8_num].vector_x;
-		v0.y = altref_net[b8x8_num].vector_y;
-		v1.x = altref_net[b8x8_num + 1].vector_x;
-		v1.y = altref_net[b8x8_num + 1].vector_y;
-		v2.x = altref_net[b8x8_num + b8x8_width].vector_x;
-		v2.y = altref_net[b8x8_num + b8x8_width].vector_y;
-		v3.x = altref_net[b8x8_num + b8x8_width + 1].vector_x;
-		v3.y = altref_net[b8x8_num + b8x8_width + 1].vector_y;
+		v0 = altref_net[b8x8_num];
+		v1 = altref_net[b8x8_num + 1];
+		v2 = altref_net[b8x8_num + b8x8_width];
+		v3 = altref_net[b8x8_num + b8x8_width + 1];
 	}
 	
 	MB_reference_frame[mb_num] = ref;

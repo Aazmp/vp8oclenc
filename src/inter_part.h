@@ -54,13 +54,20 @@ static void prepare_GPU_buffers()
 	const size_t region_y[3] = {video.wrk_width, video.wrk_height, 1};
 	const size_t region_uv[3] = {video.wrk_width/2, video.wrk_height/2, 1};
 
-	device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-	device.state_gpu = clEnqueueReadBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-	device.state_gpu = clEnqueueReadBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+	device.state_gpu = finalFlush(device.commandQueue1_gpu);
+	device.state_gpu = finalFlush(device.commandQueue2_gpu);
+	clFinish(device.commandQueue3_gpu);
 
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue1_gpu, device.last_frame_Y_image, CL_FALSE, origin, region_y, 0, 0, frames.reconstructed_Y, 0, NULL, NULL);
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue2_gpu, device.last_frame_U_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_U, 0, NULL, NULL);
-	device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_V_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_V, 0, NULL, NULL);
+	if (video.do_loop_filter_on_gpu)
+	{
+		device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y ,CL_TRUE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueReadBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueReadBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V ,CL_TRUE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+
+		device.state_gpu = clEnqueueWriteImage(device.commandQueue1_gpu, device.last_frame_Y_image, CL_FALSE, origin, region_y, 0, 0, frames.reconstructed_Y, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteImage(device.commandQueue2_gpu, device.last_frame_U_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_U, 0, NULL, NULL);
+		device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_V_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_V, 0, NULL, NULL);
+	}
 
 	if (frames.prev_is_golden_frame)
 	{
@@ -74,6 +81,14 @@ static void prepare_GPU_buffers()
 		device.state_gpu = clEnqueueCopyImage(device.commandQueue2_gpu, device.last_frame_U_image, device.altref_frame_U_image, origin, origin, region_uv, 0, NULL, NULL);
 		device.state_gpu = clEnqueueCopyImage(device.commandQueue3_gpu, device.last_frame_V_image, device.altref_frame_V_image, origin, origin, region_uv, 0, NULL, NULL);
 	}
+
+	device.state_gpu = finalFlush(device.commandQueue1_gpu);
+	device.state_gpu = finalFlush(device.commandQueue2_gpu);
+	device.state_gpu = finalFlush(device.commandQueue3_gpu);
+
+	//device.state_gpu = clFinish(device.commandQueue1_gpu);
+	device.state_gpu = clFinish(device.commandQueue2_gpu);
+	//device.state_gpu = clFinish(device.commandQueue3_gpu);
 	
 	return;
 }

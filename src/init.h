@@ -434,6 +434,11 @@ static int init_all()
 		const int sz4 = (video.wrk_width / 4)*(video.wrk_height / 4);
 		const int sz2 = (video.wrk_width / 2)*(video.wrk_height / 2);
 
+		// 3 prepinned buffers 
+		//device.pinned_buffer_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY|CL_MEM_ALLOC_HOST_PTR, video.wrk_frame_size_luma, NULL , &device.state_gpu);
+		//device.pinned_buffer_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY|CL_MEM_ALLOC_HOST_PTR, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+		//device.pinned_buffer_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_ONLY|CL_MEM_ALLOC_HOST_PTR, video.wrk_frame_size_chroma, NULL , &device.state_gpu);
+
 		device.predictors_Y = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_luma, NULL , &device.state_gpu);
 		if (device.state_gpu != 0) { printf("GPU device memory problem %d with predictors_Y\n", device.state_gpu); return -1; }
 		device.predictors_U = clCreateBuffer(device.context_gpu, CL_MEM_READ_WRITE, video.wrk_frame_size_chroma, NULL , &device.state_gpu);

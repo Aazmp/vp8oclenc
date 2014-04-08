@@ -353,6 +353,13 @@ int main(int argc, char *argv[])
 		//grab buffer for host (without copy, we will write it from scratch)
 		clFinish(device.boolcoder_commandQueue_cpu);
 		frames.MB = (macroblock_coeffs_t*)clEnqueueMapBuffer(device.loopfilterY_commandQueue_cpu, device.macroblock_coeffs_cpu, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(macroblock_coeffs_t)*video.mb_count, 0, NULL, NULL, &device.state_cpu);
+		if (!video.do_loop_filter_on_gpu)
+		{
+			// we can use invalidate for key frames, but read/write will have the same speed (zero-copy) and so we can start memory transfer to GPU a little bit earlier (in case of inter frame)
+			frames.reconstructed_Y = (unsigned char*)clEnqueueMapBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_luma, 0, NULL, NULL, &device.state_cpu);
+			frames.reconstructed_U = (unsigned char*)clEnqueueMapBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
+			frames.reconstructed_V = (unsigned char*)clEnqueueMapBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
+		}
 				
 		frames.prev_is_key_frame = frames.current_is_key_frame; 
 		frames.prev_is_golden_frame = frames.current_is_golden_frame;
@@ -371,84 +378,82 @@ int main(int argc, char *argv[])
 
         if (frames.current_is_key_frame)
         {
-			if (!video.do_loop_filter_on_gpu)
-			{
-				// if new GOP started we don't need to extract reconstructed frame, but still need to grab buffer focus
-				frames.reconstructed_Y = (unsigned char*)clEnqueueMapBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_luma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_U = (unsigned char*)clEnqueueMapBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_V = (unsigned char*)clEnqueueMapBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-			}
 			prepare_segments_data();
 			intra_transform();       
 		}
-        else if (scene_change()) 
+        else 
 		{
-			if (!video.do_loop_filter_on_gpu)
-			{
-				frames.reconstructed_Y = (unsigned char*)clEnqueueMapBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_luma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_U = (unsigned char*)clEnqueueMapBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_V = (unsigned char*)clEnqueueMapBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, CL_MAP_WRITE_INVALIDATE_REGION, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-			}
-			++encStat.scene_changes_by_color;
-			frames.current_is_key_frame = 1;
-			prepare_segments_data(); // redo because loop filtering differs
-			intra_transform();
-			printf("key frame FORCED by chroma color difference!\n");
-		} 
-		else
-        {
-			if (!video.do_loop_filter_on_gpu)
-			{
-				//if filter was done on CPU we need to extract reconstructed frames from CPU device
-				frames.reconstructed_Y = (unsigned char*)clEnqueueMapBuffer(device.loopfilterY_commandQueue_cpu, device.cpu_frame_Y, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_luma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_U = (unsigned char*)clEnqueueMapBuffer(device.loopfilterU_commandQueue_cpu, device.cpu_frame_U, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-				frames.reconstructed_V = (unsigned char*)clEnqueueMapBuffer(device.loopfilterV_commandQueue_cpu, device.cpu_frame_V, CL_TRUE, CL_MAP_READ|CL_MAP_WRITE, 0, sizeof(unsigned char)*video.wrk_frame_size_chroma, 0, NULL, NULL, &device.state_cpu);
-				// host --> gpu device
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-			}
-
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.current_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
-			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.current_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue2_gpu, device.current_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.current_Y, 0, NULL, NULL);
+			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.current_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_U, 0, NULL, NULL);
 			device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.current_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.current_V, 0, NULL, NULL);
-			
-			prepare_segments_data();
-			inter_transform(); 
-			// copy transformed_blocks to host
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_coeffs_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_coeffs_t), frames.MB, 0, NULL, NULL);
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_segment_id_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_segment_id, 0, NULL, NULL);
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_SSIM_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_float), frames.MB_SSIM, 0, NULL, NULL);
-
-			// these buffers are copied inside inter_transform() as soon as they are ready
-			//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_parts_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_parts, 0, NULL, NULL);
-			//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_reference_frame_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_reference_frame, 0, NULL, NULL);
-			//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_vectors_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_vectors_t), frames.MB_vectors, 0, NULL, NULL);
-
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y ,CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_U ,CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
-			device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_V ,CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
-
-			for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
-				frames.e_data[mb_num].is_inter_mb = 1;
-
-			clFinish(device.dataCopy_gpu);
-			clFinish(device.commandQueue1_gpu);
-
-			check_SSIM();
-			if ((frames.replaced > (video.mb_count/6)) || (frames.new_SSIM < video.SSIM_target))
+			if (!video.do_loop_filter_on_gpu)
 			{
-				if (frames.new_SSIM < video.SSIM_target) ++encStat.scene_changes_by_ssim;
-				else ++encStat.scene_changes_by_replaced;
-				// redo as intra
-				frames.current_is_key_frame = 1;
-				prepare_segments_data();
-				intra_transform();
-				if (video.print_info) 
-					printf("\nkey frame FORCED by bad inter-result: replaced(%d) and SSIM(%f)!\n",frames.replaced,frames.new_SSIM);
-			}
+				const size_t origin[3] = {0, 0, 0};
+				const size_t region_y[3] = {video.wrk_width, video.wrk_height, 1};
+				const size_t region_uv[3] = {video.wrk_width/2, video.wrk_height/2, 1};
 
-        }
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y, CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_U, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteBuffer(device.commandQueue3_gpu, device.reconstructed_frame_V, CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+
+				device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_Y_image, CL_FALSE, origin, region_y, 0, 0, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_U_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueWriteImage(device.commandQueue3_gpu, device.last_frame_V_image, CL_FALSE, origin, region_uv, 0, 0, frames.reconstructed_V, 0, NULL, NULL);
+
+				clFlush(device.commandQueue2_gpu);
+			}
+			clFlush(device.commandQueue1_gpu);
+			clFlush(device.commandQueue3_gpu);
+
+			const int new_scene = scene_change();
+			if (new_scene) 
+			{
+				++encStat.scene_changes_by_color;
+				frames.current_is_key_frame = 1;
+				prepare_segments_data(); // redo because loop filtering differs
+				intra_transform();
+				printf("key frame FORCED by chroma color difference!\n");
+			} 
+			else
+			{
+				prepare_segments_data();
+				inter_transform(); 
+				// copy transformed_blocks to host
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_coeffs_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_coeffs_t), frames.MB, 0, NULL, NULL);
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_segment_id_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_segment_id, 0, NULL, NULL);
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_SSIM_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_float), frames.MB_SSIM, 0, NULL, NULL);
+
+				// these buffers are copied inside inter_transform() as soon as they are ready
+				//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_parts_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_parts, 0, NULL, NULL);
+				//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_reference_frame_gpu, CL_FALSE, 0, video.mb_count*sizeof(cl_int), frames.MB_reference_frame, 0, NULL, NULL);
+				//device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.macroblock_vectors_gpu, CL_FALSE, 0, video.mb_count*sizeof(macroblock_vectors_t), frames.MB_vectors, 0, NULL, NULL);
+
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_Y ,CL_FALSE, 0, video.wrk_frame_size_luma, frames.reconstructed_Y, 0, NULL, NULL);
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_U ,CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_U, 0, NULL, NULL);
+				device.state_gpu = clEnqueueReadBuffer(device.commandQueue1_gpu, device.reconstructed_frame_V ,CL_FALSE, 0, video.wrk_frame_size_chroma, frames.reconstructed_V, 0, NULL, NULL);
+				clFlush(device.commandQueue1_gpu);
+
+				for(mb_num = 0; mb_num < video.mb_count; ++mb_num) 
+					frames.e_data[mb_num].is_inter_mb = 1;
+
+				clFinish(device.dataCopy_gpu);
+				clFinish(device.commandQueue1_gpu);
+
+				check_SSIM();
+				if ((frames.replaced > (video.mb_count/6)) || (frames.new_SSIM < video.SSIM_target))
+				{
+					if (frames.new_SSIM < video.SSIM_target) ++encStat.scene_changes_by_ssim;
+					else ++encStat.scene_changes_by_replaced;
+					// redo as intra
+					frames.current_is_key_frame = 1;
+					prepare_segments_data();
+					intra_transform();
+					if (video.print_info) 
+						printf("\nkey frame FORCED by bad inter-result: replaced(%d) and SSIM(%f)!\n",frames.replaced,frames.new_SSIM);
+				}
+
+			}
+		}
 		// searching for MBs to be skiped 
 		// copy (unmap) coefficients back to pinned cpu device memory
 		// we will need it for loop filter(if on cpu) and for entropy encoding (always)
