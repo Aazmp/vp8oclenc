@@ -2,8 +2,8 @@ tested on AMD+AMD+Win7 only
 
 to encode YUV4MPEG2 file:
 
-BINARY_FILE -i input.y4m -o output.ivf -qmin 4 -qmax 48 -g 1000 -partitions 1 -threads 6 -ls 0 -SSIM-target 90 -altref-range 12
+this_encoder_binary -i input.y4m -o Quebec.ivf -qmin 0 -qmax 112 -g 450 -partitions 1 -threads 6 -SSIM-target 93 -altref-range 5 -print-info -gpu-preferred-platform-number 0
 
 to encode any file pipelining from FFMPEG
 
-ffmpeg -i input.mp4 -f yuv4mpegpipe -pix_fmt yuv420p - | BINARY_FILE -i @ -o demo1.ivf -qmin 4 -qmax 48 -g 1000 -partitions 2 -threads 2 -ls 0 -SSIM-target 90 -altref-range 12
+ffmpeg -i input.any -f yuv4mpegpipe -pix_fmt yuv420p - | this_encoder_binary -i @ -o Quebec.ivf -qmin 0 -qmax 112 -g 450 -partitions 1 -threads 6 -SSIM-target 93 -altref-range 5 -print-info -gpu-preferred-platform-number 0
